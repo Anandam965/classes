@@ -539,4 +539,3 @@ else:
                     st.markdown(
                         f"## 🔹 {topic['topic_name']}"
                     )
-```
