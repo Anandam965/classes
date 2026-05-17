@@ -1,40 +1,122 @@
-# =========================================================
-# app.py
-# COMPLETE LMS + EXAM SYSTEM
-# =========================================================
+# Complete LMS + Exam System (Streamlit + Supabase)
 
+## 1. requirements.txt
+
+```txt
+streamlit
+supabase
+pandas
+```
+
+---
+
+# 2. SQL Tables (Run in Supabase SQL Editor)
+
+```sql
+CREATE TABLE users (
+    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    name TEXT,
+    username TEXT UNIQUE,
+    password TEXT,
+    role TEXT,
+    status TEXT
+);
+
+CREATE TABLE modules (
+    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    module_name TEXT
+);
+
+CREATE TABLE topics (
+    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    module_id BIGINT REFERENCES modules(id),
+    topic_name TEXT
+);
+
+CREATE TABLE sessions (
+    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    topic_id BIGINT REFERENCES topics(id),
+    day TEXT,
+    intro TEXT,
+    timing TEXT,
+    meeting_link TEXT,
+    video_link TEXT,
+    notes_link TEXT
+);
+
+CREATE TABLE exams (
+    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    topic_id BIGINT REFERENCES topics(id),
+    exam_name TEXT,
+    duration INTEGER,
+    answers_enabled BOOLEAN DEFAULT FALSE,
+    solutions_enabled BOOLEAN DEFAULT FALSE
+);
+
+CREATE TABLE questions (
+    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    exam_id BIGINT REFERENCES exams(id),
+    question TEXT,
+    question_type TEXT,
+    option1 TEXT,
+    option2 TEXT,
+    option3 TEXT,
+    option4 TEXT,
+    correct_answer TEXT,
+    solution TEXT,
+    solution_image TEXT
+);
+
+CREATE TABLE exam_results (
+    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    username TEXT,
+    exam_id BIGINT,
+    total_questions INTEGER,
+    attempted INTEGER,
+    correct_answers INTEGER,
+    wrong_answers INTEGER,
+    score INTEGER
+);
+
+INSERT INTO users (
+    name,
+    username,
+    password,
+    role,
+    status
+)
+VALUES (
+    'Admin',
+    'admin',
+    'admin123',
+    'admin',
+    'approved'
+);
+```
+
+---
+
+# 3. app.py
+
+```python
 import streamlit as st
 from supabase import create_client
 
-# =========================================================
-# SUPABASE
-# =========================================================
-
-SUPABASE_URL = "https://ntmclisjmohkfpfigwjt.supabase.co"
-SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im50bWNsaXNqbW9oa2ZwZmlnd2p0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg5ODU0NzQsImV4cCI6MjA5NDU2MTQ3NH0.bcm2hEBzCsEBklLKpBVvYGxXsGWNHHOZJOXx0w3YQBc"
-
+SUPABASE_URL = "YOUR_SUPABASE_URL"
+SUPABASE_KEY = "YOUR_SUPABASE_KEY"
 
 supabase = create_client(
     SUPABASE_URL,
     SUPABASE_KEY
 )
 
-# =========================================================
-# PAGE CONFIG
-# =========================================================
-
 st.set_page_config(
-    page_title="Learning Management System",
+    page_title="LMS",
     layout="wide"
 )
 
-# =========================================================
-# CSS
-# =========================================================
-
 st.markdown("""
 <style>
-
 .main {
     background-color: #0E1117;
     color: white;
@@ -57,16 +139,9 @@ st.markdown("""
     width: 100%;
     border-radius: 10px;
     height: 45px;
-    font-size: 16px;
-    font-weight: bold;
 }
-
 </style>
 """, unsafe_allow_html=True)
-
-# =========================================================
-# SESSION STATE
-# =========================================================
 
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
@@ -77,9 +152,9 @@ if "role" not in st.session_state:
 if "name" not in st.session_state:
     st.session_state.name = ""
 
-# =========================================================
-# HOME PAGE
-# =========================================================
+# =====================================================
+# LOGIN / SIGNUP
+# =====================================================
 
 if not st.session_state.logged_in:
 
@@ -93,20 +168,12 @@ if not st.session_state.logged_in:
         ["Sign In", "Sign Up"]
     )
 
-    # =====================================================
-    # SIGN IN
-    # =====================================================
-
     if option == "Sign In":
 
         st.subheader("🔐 Sign In")
 
         username = st.text_input("Username")
-
-        password = st.text_input(
-            "Password",
-            type="password"
-        )
+        password = st.text_input("Password", type="password")
 
         if st.button("Login"):
 
@@ -125,39 +192,24 @@ if not st.session_state.logged_in:
                 user = response.data[0]
 
                 if user["status"] != "approved":
-
-                    st.error(
-                        "Admin approval pending"
-                    )
+                    st.error("Admin approval pending")
 
                 else:
-
                     st.session_state.logged_in = True
                     st.session_state.role = user["role"]
                     st.session_state.name = user["username"]
-
                     st.rerun()
 
             else:
-
                 st.error("Invalid Credentials")
 
-    # =====================================================
-    # SIGN UP
-    # =====================================================
-
-    elif option == "Sign Up":
+    else:
 
         st.subheader("📝 Sign Up")
 
         name = st.text_input("Full Name")
-
         username = st.text_input("Username")
-
-        password = st.text_input(
-            "Password",
-            type="password"
-        )
+        password = st.text_input("Password", type="password")
 
         if st.button("Create Account"):
 
@@ -169,30 +221,24 @@ if not st.session_state.logged_in:
             ).execute()
 
             if existing.data:
-
-                st.error(
-                    "Username already exists"
-                )
+                st.error("Username already exists")
 
             else:
-
                 supabase.table("users").insert({
-
                     "name": name,
                     "username": username,
                     "password": password,
                     "role": "user",
                     "status": "pending"
-
                 }).execute()
 
                 st.success(
-                    "Account Created! Wait for Admin Approval."
+                    "Account Created! Wait for Admin Approval"
                 )
 
-# =========================================================
-# MAIN SYSTEM
-# =========================================================
+# =====================================================
+# MAIN APP
+# =====================================================
 
 else:
 
@@ -208,9 +254,9 @@ else:
 
         st.rerun()
 
-    # =====================================================
+    # =================================================
     # ADMIN
-    # =====================================================
+    # =================================================
 
     if st.session_state.role == "admin":
 
@@ -220,98 +266,64 @@ else:
         )
 
         menu = st.sidebar.radio(
-
             "Menu",
-
             [
-
                 "Approve Users",
-
                 "Add Module",
-                "Edit Module",
                 "Delete Module",
-
                 "Add Topic",
-                "Edit Topic",
                 "Delete Topic",
-
                 "Add Session",
-                "Edit Session",
                 "Delete Session",
-
                 "Add Exam",
                 "Delete Exam",
-
                 "Add Question",
                 "Delete Question",
-
-                "Enable Answers",
-                "Enable Solutions",
-
-                "View Results",
-
                 "User View"
-
             ]
         )
 
-        # =================================================
+        # =============================================
         # APPROVE USERS
-        # =================================================
+        # =============================================
 
         if menu == "Approve Users":
 
-            st.subheader("✅ Approve Users")
-
-            pending_users = supabase.table(
+            pending = supabase.table(
                 "users"
             ).select("*").eq(
                 "status",
                 "pending"
             ).execute()
 
-            if pending_users.data:
+            for user in pending.data:
 
-                for user in pending_users.data:
+                st.markdown(f"""
+                <div class='card'>
+                <h3>{user['name']}</h3>
+                <p>{user['username']}</p>
+                </div>
+                """, unsafe_allow_html=True)
 
-                    st.markdown(f"""
-                    <div class="card">
+                if st.button(
+                    f"Approve {user['username']}"
+                ):
 
-                    <h3>{user['name']}</h3>
+                    supabase.table("users").update({
+                        "status": "approved"
+                    }).eq(
+                        "id",
+                        user["id"]
+                    ).execute()
 
-                    <p>{user['username']}</p>
+                    st.success("Approved")
+                    st.rerun()
 
-                    </div>
-                    """, unsafe_allow_html=True)
-
-                    if st.button(
-                        f"Approve {user['username']}"
-                    ):
-
-                        supabase.table("users").update({
-
-                            "status": "approved"
-
-                        }).eq(
-                            "id",
-                            user["id"]
-                        ).execute()
-
-                        st.success("Approved")
-
-                        st.rerun()
-
-            else:
-
-                st.info("No Pending Users")
-
-        # =================================================
+        # =============================================
         # ADD MODULE
-        # =================================================
+        # =============================================
 
         elif menu == "Add Module":
-
-            st.subheader("➕ Add Module")
 
             module_name = st.text_input(
                 "Module Name"
@@ -320,128 +332,54 @@ else:
             if st.button("Save Module"):
 
                 supabase.table("modules").insert({
-
                     "module_name": module_name
-
                 }).execute()
 
                 st.success("Module Added")
 
-        # =================================================
-        # EDIT MODULE
-        # =================================================
-
-        elif menu == "Edit Module":
-
-            st.subheader("✏️ Edit Module")
-
-            modules = supabase.table(
-                "modules"
-            ).select("*").execute()
-
-            if modules.data:
-
-                module_dict = {
-
-                    module["module_name"]: module["id"]
-
-                    for module in modules.data
-                }
-
-                selected_module = st.selectbox(
-
-                    "Select Module",
-
-                    list(module_dict.keys())
-
-                )
-
-                new_name = st.text_input(
-
-                    "New Module Name",
-
-                    value=selected_module
-
-                )
-
-                if st.button("Update Module"):
-
-                    supabase.table("modules").update({
-
-                        "module_name": new_name
-
-                    }).eq(
-
-                        "id",
-
-                        module_dict[selected_module]
-
-                    ).execute()
-
-                    st.success("Module Updated")
-
-                    st.rerun()
-
-        # =================================================
+        # =============================================
         # DELETE MODULE
-        # =================================================
+        # =============================================
 
         elif menu == "Delete Module":
-
-            st.subheader("🗑️ Delete Module")
-
-            modules = supabase.table(
-                "modules"
-            ).select("*").execute()
-
-            if modules.data:
-
-                module_dict = {
-
-                    module["module_name"]: module["id"]
-
-                    for module in modules.data
-                }
-
-                selected_module = st.selectbox(
-
-                    "Select Module",
-
-                    list(module_dict.keys())
-
-                )
-
-                if st.button("Delete Module"):
-
-                    supabase.table("modules").delete().eq(
-
-                        "id",
-
-                        module_dict[selected_module]
-
-                    ).execute()
-
-                    st.success("Module Deleted")
-
-                    st.rerun()
-
-        # =================================================
-        # ADD TOPIC
-        # =================================================
-
-        elif menu == "Add Topic":
-
-            st.subheader("➕ Add Topic")
 
             modules = supabase.table(
                 "modules"
             ).select("*").execute()
 
             module_dict = {
+                m["module_name"]: m["id"]
+                for m in modules.data
+            }
 
-                module["module_name"]: module["id"]
+            selected = st.selectbox(
+                "Select Module",
+                list(module_dict.keys())
+            )
 
-                for module in modules.data
+            if st.button("Delete Module"):
+
+                supabase.table("modules").delete().eq(
+                    "id",
+                    module_dict[selected]
+                ).execute()
+
+                st.success("Deleted")
+                st.rerun()
+
+        # =============================================
+        # ADD TOPIC
+        # =============================================
+
+        elif menu == "Add Topic":
+
+            modules = supabase.table(
+                "modules"
+            ).select("*").execute()
+
+            module_dict = {
+                m["module_name"]: m["id"]
+                for m in modules.data
             }
 
             selected_module = st.selectbox(
@@ -456,84 +394,28 @@ else:
             if st.button("Save Topic"):
 
                 supabase.table("topics").insert({
-
-                    "module_id":
-                    module_dict[selected_module],
-
-                    "topic_name":
-                    topic_name
-
+                    "module_id": module_dict[selected_module],
+                    "topic_name": topic_name
                 }).execute()
 
                 st.success("Topic Added")
 
-        # =================================================
-        # EDIT TOPIC
-        # =================================================
-
-        elif menu == "Edit Topic":
-
-            st.subheader("✏️ Edit Topic")
-
-            topics = supabase.table(
-                "topics"
-            ).select("*").execute()
-
-            topic_dict = {
-
-                topic["topic_name"]: topic["id"]
-
-                for topic in topics.data
-            }
-
-            selected_topic = st.selectbox(
-                "Select Topic",
-                list(topic_dict.keys())
-            )
-
-            new_topic = st.text_input(
-                "New Topic",
-                value=selected_topic
-            )
-
-            if st.button("Update Topic"):
-
-                supabase.table("topics").update({
-
-                    "topic_name": new_topic
-
-                }).eq(
-
-                    "id",
-
-                    topic_dict[selected_topic]
-
-                ).execute()
-
-                st.success("Topic Updated")
-
-                st.rerun()
-
-        # =================================================
+        # =============================================
         # DELETE TOPIC
-        # =================================================
+        # =============================================
 
         elif menu == "Delete Topic":
 
-            st.subheader("🗑️ Delete Topic")
-
             topics = supabase.table(
                 "topics"
             ).select("*").execute()
 
             topic_dict = {
-
-                topic["topic_name"]: topic["id"]
-
-                for topic in topics.data
+                t["topic_name"]: t["id"]
+                for t in topics.data
             }
 
-            selected_topic = st.selectbox(
+            selected = st.selectbox(
                 "Select Topic",
                 list(topic_dict.keys())
             )
@@ -541,34 +423,26 @@ else:
             if st.button("Delete Topic"):
 
                 supabase.table("topics").delete().eq(
-
                     "id",
-
-                    topic_dict[selected_topic]
-
+                    topic_dict[selected]
                 ).execute()
 
-                st.success("Topic Deleted")
-
+                st.success("Deleted")
                 st.rerun()
 
-        # =================================================
+        # =============================================
         # ADD SESSION
-        # =================================================
+        # =============================================
 
         elif menu == "Add Session":
-
-            st.subheader("➕ Add Session")
 
             topics = supabase.table(
                 "topics"
             ).select("*").execute()
 
             topic_dict = {
-
-                topic["topic_name"]: topic["id"]
-
-                for topic in topics.data
+                t["topic_name"]: t["id"]
+                for t in topics.data
             }
 
             selected_topic = st.selectbox(
@@ -577,101 +451,134 @@ else:
             )
 
             day = st.text_input("Day")
-
             intro = st.text_area("Introduction")
-
             timing = st.text_input("Timing")
-
-            meeting_link = st.text_input(
-                "Meeting Link"
-            )
-
-            video_link = st.text_input(
-                "Video Link"
-            )
-
-            notes_link = st.text_input(
-                "Notes Link"
-            )
+            meeting_link = st.text_input("Meeting Link")
+            video_link = st.text_input("Video Link")
+            notes_link = st.text_input("Notes Link")
 
             if st.button("Save Session"):
 
                 supabase.table("sessions").insert({
-
-                    "topic_id":
-                    topic_dict[selected_topic],
-
-                    "day":
-                    day,
-
-                    "intro":
-                    intro,
-
-                    "timing":
-                    timing,
-
-                    "meeting_link":
-                    meeting_link,
-
-                    "video_link":
-                    video_link,
-
-                    "notes_link":
-                    notes_link
-
+                    "topic_id": topic_dict[selected_topic],
+                    "day": day,
+                    "intro": intro,
+                    "timing": timing,
+                    "meeting_link": meeting_link,
+                    "video_link": video_link,
+                    "notes_link": notes_link
                 }).execute()
 
                 st.success("Session Added")
 
-        # =================================================
-        # DELETE SESSION
-        # =================================================
+        # =============================================
+        # ADD EXAM
+        # =============================================
 
-        elif menu == "Delete Session":
+        elif menu == "Add Exam":
 
-            st.subheader("🗑️ Delete Session")
-
-            sessions = supabase.table(
-                "sessions"
+            topics = supabase.table(
+                "topics"
             ).select("*").execute()
 
-            session_dict = {
-
-                f"{session['day']} - {session['intro']}":
-                session["id"]
-
-                for session in sessions.data
+            topic_dict = {
+                t["topic_name"]: t["id"]
+                for t in topics.data
             }
 
-            selected_session = st.selectbox(
-
-                "Select Session",
-
-                list(session_dict.keys())
-
+            selected_topic = st.selectbox(
+                "Select Topic",
+                list(topic_dict.keys())
             )
 
-            if st.button("Delete Session"):
+            exam_name = st.text_input(
+                "Exam Name"
+            )
 
-                supabase.table("sessions").delete().eq(
+            duration = st.number_input(
+                "Duration",
+                value=30
+            )
 
-                    "id",
+            if st.button("Create Exam"):
 
-                    session_dict[selected_session]
+                supabase.table("exams").insert({
+                    "topic_id": topic_dict[selected_topic],
+                    "exam_name": exam_name,
+                    "duration": duration,
+                    "answers_enabled": False,
+                    "solutions_enabled": False
+                }).execute()
 
-                ).execute()
+                st.success("Exam Added")
 
-                st.success("Session Deleted")
+        # =============================================
+        # ADD QUESTION
+        # =============================================
 
-                st.rerun()
+        elif menu == "Add Question":
 
-        # =================================================
+            exams = supabase.table(
+                "exams"
+            ).select("*").execute()
+
+            exam_dict = {
+                e["exam_name"]: e["id"]
+                for e in exams.data
+            }
+
+            selected_exam = st.selectbox(
+                "Select Exam",
+                list(exam_dict.keys())
+            )
+
+            question = st.text_area(
+                "Question"
+            )
+
+            question_type = st.selectbox(
+                "Question Type",
+                ["MCQ", "TEXT"]
+            )
+
+            option1 = ""
+            option2 = ""
+            option3 = ""
+            option4 = ""
+
+            if question_type == "MCQ":
+
+                option1 = st.text_input("Option 1")
+                option2 = st.text_input("Option 2")
+                option3 = st.text_input("Option 3")
+                option4 = st.text_input("Option 4")
+
+            correct_answer = st.text_input(
+                "Correct Answer"
+            )
+
+            if st.button("Save Question"):
+
+                supabase.table("questions").insert({
+                    "exam_id": exam_dict[selected_exam],
+                    "question": question,
+                    "question_type": question_type,
+                    "option1": option1,
+                    "option2": option2,
+                    "option3": option3,
+                    "option4": option4,
+                    "correct_answer": correct_answer
+                }).execute()
+
+                st.success("Question Added")
+
+        # =============================================
         # USER VIEW
-        # =================================================
+        # =============================================
 
         elif menu == "User View":
 
-            st.subheader("📘 User View Preview")
+            st.subheader("📘 User View")
 
             modules = supabase.table(
                 "modules"
@@ -696,9 +603,9 @@ else:
                             f"## 🔹 {topic['topic_name']}"
                         )
 
-    # =====================================================
+    # =================================================
     # USER DASHBOARD
-    # =====================================================
+    # =================================================
 
     elif st.session_state.role == "user":
 
@@ -729,3 +636,4 @@ else:
                     st.markdown(
                         f"## 🔹 {topic['topic_name']}"
                     )
+```
