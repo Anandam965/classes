@@ -676,10 +676,126 @@ else:
                                     </div>
                                     """, unsafe_allow_html=True)
 
-                                    st.button(
+                                    if st.button(
                                         f"Start {exam['exam_name']}",
                                         key=f"exam_{exam['id']}"
-                                    )
+                                    ):
+                                    
+                                        questions = supabase.table(
+                                            "questions"
+                                        ).select("*").eq(
+                                            "exam_id",
+                                            exam["id"]
+                                        ).execute()
+                                    
+                                        if questions.data:
+                                    
+                                            score = 0
+                                            total = len(questions.data)
+                                    
+                                            st.subheader("📝 Exam Started")
+                                    
+                                            with st.form(
+                                                f"exam_form_{exam['id']}"
+                                            ):
+                                    
+                                                answers = {}
+                                    
+                                                for q in questions.data:
+                                    
+                                                    st.markdown(
+                                                        f"### {q['question']}"
+                                                    )
+                                    
+                                                    if q["question_type"] == "MCQ":
+                                    
+                                                        options = [
+                                    
+                                                            q["option1"],
+                                                            q["option2"],
+                                                            q["option3"],
+                                                            q["option4"]
+                                    
+                                                        ]
+                                    
+                                                        ans = st.radio(
+                                    
+                                                            "Select Answer",
+                                    
+                                                            options,
+                                    
+                                                            key=f"q_{q['id']}",
+                                    
+                                                            index=None
+                                    
+                                                        )
+                                    
+                                                    else:
+                                    
+                                                        ans = st.text_input(
+                                                            "Your Answer",
+                                                            key=f"text_{q['id']}"
+                                                        )
+                                    
+                                                    answers[q["id"]] = ans
+                                    
+                                                submitted = st.form_submit_button(
+                                                    "Submit Exam"
+                                                )
+                                    
+                                            if submitted:
+                                    
+                                                correct = 0
+                                                wrong = 0
+                                                attempted = 0
+                                    
+                                                for q in questions.data:
+                                    
+                                                    user_ans = answers[q["id"]]
+                                    
+                                                    if user_ans:
+                                    
+                                                        attempted += 1
+                                    
+                                                        if str(user_ans).strip().lower() == str(q["correct_answer"]).strip().lower():
+                                    
+                                                            score += 1
+                                                            correct += 1
+                                    
+                                                        else:
+                                    
+                                                            wrong += 1
+                                    
+                                                supabase.table(
+                                                    "exam_results"
+                                                ).insert({
+                                    
+                                                    "username":
+                                                    st.session_state.name,
+                                    
+                                                    "exam_id":
+                                                    exam["id"],
+                                    
+                                                    "total_questions":
+                                                    total,
+                                    
+                                                    "attempted":
+                                                    attempted,
+                                    
+                                                    "correct_answers":
+                                                    correct,
+                                    
+                                                    "wrong_answers":
+                                                    wrong,
+                                    
+                                                    "score":
+                                                    score
+                                    
+                                                }).execute()
+                                    
+                                                st.success(
+                                                    f"Score: {score}/{total}"
+                                                )
 
                             else:
 
