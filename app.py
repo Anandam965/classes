@@ -512,14 +512,16 @@ else:
 
     elif st.session_state.role == "user":
 
-        st.markdown(
-            '<p class="title">📘 User Dashboard</p>',
-            unsafe_allow_html=True
-        )
+    st.markdown(
+        '<p class="title">📘 User Dashboard</p>',
+        unsafe_allow_html=True
+    )
 
-        modules = supabase.table(
-            "modules"
-        ).select("*").execute()
+    modules = supabase.table(
+        "modules"
+    ).select("*").execute()
+
+    if modules.data:
 
         for module in modules.data:
 
@@ -534,8 +536,93 @@ else:
                     module["id"]
                 ).execute()
 
-                for topic in topics.data:
+                if topics.data:
 
-                    st.markdown(
-                        f"## 🔹 {topic['topic_name']}"
-                    )
+                    for topic in topics.data:
+
+                        st.markdown(
+                            f"## 🔹 {topic['topic_name']}"
+                        )
+
+                        # =================================
+                        # SESSIONS
+                        # =================================
+
+                        sessions = supabase.table(
+                            "sessions"
+                        ).select("*").eq(
+                            "topic_id",
+                            topic["id"]
+                        ).execute()
+
+                        if sessions.data:
+
+                            for session in sessions.data:
+
+                                st.markdown(f"""
+                                <div class="card">
+
+                                <h3>{session['day']}</h3>
+
+                                <p>{session['intro']}</p>
+
+                                <p>⏰ {session['timing']}</p>
+
+                                </div>
+                                """, unsafe_allow_html=True)
+
+                                col1, col2, col3 = st.columns(3)
+
+                                with col1:
+
+                                    st.link_button(
+                                        "🎥 Join Class",
+                                        session["meeting_link"]
+                                    )
+
+                                with col2:
+
+                                    st.link_button(
+                                        "▶️ Recording",
+                                        session["video_link"]
+                                    )
+
+                                with col3:
+
+                                    st.link_button(
+                                        "📄 Notes",
+                                        session["notes_link"]
+                                    )
+
+                        # =================================
+                        # EXAMS
+                        # =================================
+
+                        exams = supabase.table(
+                            "exams"
+                        ).select("*").eq(
+                            "topic_id",
+                            topic["id"]
+                        ).execute()
+
+                        if exams.data:
+
+                            st.subheader("📝 Exams")
+
+                            for exam in exams.data:
+
+                                st.markdown(f"""
+                                <div class="card">
+
+                                <h3>{exam['exam_name']}</h3>
+
+                                <p>Duration:
+                                {exam['duration']} Minutes</p>
+
+                                </div>
+                                """, unsafe_allow_html=True)
+
+                                st.button(
+                                    f"Start {exam['exam_name']}",
+                                    key=f"exam_{exam['id']}"
+                                )
