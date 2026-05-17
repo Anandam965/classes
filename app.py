@@ -1,109 +1,12 @@
-# Complete LMS + Exam System (Streamlit + Supabase)
 
-## 1. requirements.txt
 
-```txt
-streamlit
-supabase
-pandas
-```
-
----
-
-# 2. SQL Tables (Run in Supabase SQL Editor)
-
-```sql
-CREATE TABLE users (
-    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    name TEXT,
-    username TEXT UNIQUE,
-    password TEXT,
-    role TEXT,
-    status TEXT
-);
-
-CREATE TABLE modules (
-    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    module_name TEXT
-);
-
-CREATE TABLE topics (
-    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    module_id BIGINT REFERENCES modules(id),
-    topic_name TEXT
-);
-
-CREATE TABLE sessions (
-    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    topic_id BIGINT REFERENCES topics(id),
-    day TEXT,
-    intro TEXT,
-    timing TEXT,
-    meeting_link TEXT,
-    video_link TEXT,
-    notes_link TEXT
-);
-
-CREATE TABLE exams (
-    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    topic_id BIGINT REFERENCES topics(id),
-    exam_name TEXT,
-    duration INTEGER,
-    answers_enabled BOOLEAN DEFAULT FALSE,
-    solutions_enabled BOOLEAN DEFAULT FALSE
-);
-
-CREATE TABLE questions (
-    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    exam_id BIGINT REFERENCES exams(id),
-    question TEXT,
-    question_type TEXT,
-    option1 TEXT,
-    option2 TEXT,
-    option3 TEXT,
-    option4 TEXT,
-    correct_answer TEXT,
-    solution TEXT,
-    solution_image TEXT
-);
-
-CREATE TABLE exam_results (
-    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    username TEXT,
-    exam_id BIGINT,
-    total_questions INTEGER,
-    attempted INTEGER,
-    correct_answers INTEGER,
-    wrong_answers INTEGER,
-    score INTEGER
-);
-
-INSERT INTO users (
-    name,
-    username,
-    password,
-    role,
-    status
-)
-VALUES (
-    'Admin',
-    'admin',
-    'admin123',
-    'admin',
-    'approved'
-);
-```
-
----
-
-# 3. app.py
-
-```python
 import streamlit as st
 from supabase import create_client
 
-SUPABASE_URL = "YOUR_SUPABASE_URL"
-SUPABASE_KEY = "YOUR_SUPABASE_KEY"
+
+SUPABASE_URL = "https://ntmclisjmohkfpfigwjt.supabase.co"
+SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im50bWNsaXNqbW9oa2ZwZmlnd2p0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg5ODU0NzQsImV4cCI6MjA5NDU2MTQ3NH0.bcm2hEBzCsEBklLKpBVvYGxXsGWNHHOZJOXx0w3YQBc"
+
 
 supabase = create_client(
     SUPABASE_URL,
