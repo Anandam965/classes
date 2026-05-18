@@ -449,20 +449,88 @@ if st.session_state.start_exam:
     if current == total_questions - 1:
 
         if st.button("Submit Exam"):
-
+    
             score = 0
-
+    
             for q in questions:
-
+    
                 user_ans = st.session_state.answers.get(q["id"], "")
-
+    
                 if user_ans:
-
+    
                     if user_ans.strip().lower() == q["correct_answer"].strip().lower():
                         score += 1
-
+    
+            # SAVE ATTEMPT
+    
+            supabase.table("exam_attempts").insert({
+                "user_id": st.session_state.user_id,
+                "exam_id": st.session_state.exam_id,
+                "score": score,
+                "submitted": True
+            }).execute()
+    
+            # SHOW SCORE
+    
             st.success(
                 f"Your Score: {score}/{total_questions}"
             )
-
+    
+            # GET EXAM DETAILS
+    
+            exam_data = supabase.table("exams").select("*").eq(
+                "id",
+                st.session_state.exam_id
+            ).execute().data
+    
+            if len(exam_data) > 0:
+    
+                exam = exam_data[0]
+    
+                # =========================
+                # SHOW ANSWERS IF ENABLED
+                # =========================
+    
+                if exam["show_answers"]:
+    
+                    st.divider()
+    
+                    st.subheader("Correct Answers")
+    
+                    for i, q in enumerate(questions):
+    
+                        st.markdown(
+                            f"### Question {i+1}"
+                        )
+    
+                        st.write(q["question"])
+    
+                        user_ans = st.session_state.answers.get(
+                            q["id"],
+                            "No Answer"
+                        )
+    
+                        st.info(
+                            f"Your Answer: {user_ans}"
+                        )
+    
+                        st.success(
+                            f"Correct Answer: {q['correct_answer']}"
+                        )
+    
+                        if q["type"] == "blank":
+    
+                            st.warning(
+                                f"Hint: {q['hint']}"
+                            )
+    
+                        st.divider()
+    
+                else:
+    
+                    st.warning(
+                        "Answers are disabled by admin."
+                    )
+    
             st.session_state.start_exam = False
+
