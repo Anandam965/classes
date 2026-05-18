@@ -356,7 +356,7 @@ def user_dashboard():
                                 st.session_state.exam_id = exam["id"]
                                 st.session_state.exam_title = exam["title"]
 
-                                st.switch_page("pages/exam.py")
+                                st.switch_page("pages/exam")
 
 # =========================
 # MAIN
