@@ -352,11 +352,14 @@ def user_dashboard():
                                 f"Start Exam - {exam['title']}",
                                 key=exam["id"]
                             ):
-
+                            
                                 st.session_state.exam_id = exam["id"]
                                 st.session_state.exam_title = exam["title"]
-
-                                st.switch_page("pages/exam")
+                            
+                                st.session_state.start_exam = True
+                            
+                                st.rerun()
+                            
 
 # =========================
 # MAIN
@@ -372,3 +375,94 @@ else:
 
     else:
         user_dashboard()
+# =========================
+# OPEN EXAM PAGE
+# =========================
+
+if "start_exam" not in st.session_state:
+    st.session_state.start_exam = False
+
+if st.session_state.start_exam:
+
+    questions = supabase.table("questions").select("*").eq(
+        "exam_id",
+        st.session_state.exam_id
+    ).execute().data
+
+    st.title(st.session_state.exam_title)
+
+    total_questions = len(questions)
+
+    if "question_index" not in st.session_state:
+        st.session_state.question_index = 0
+
+    current = st.session_state.question_index
+
+    question = questions[current]
+
+    st.subheader(
+        f"Question {current+1}/{total_questions}"
+    )
+
+    st.write(question["question"])
+
+    if question["type"] == "mcq":
+
+        answer = st.radio(
+            "Choose Answer",
+            [
+                question["option_a"],
+                question["option_b"],
+                question["option_c"],
+                question["option_d"]
+            ],
+            key=question["id"]
+        )
+
+    else:
+
+        answer = st.text_input(
+            "Your Answer",
+            key=question["id"]
+        )
+
+    st.session_state.answers[question["id"]] = answer
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+
+        if st.button("Previous"):
+
+            if current > 0:
+                st.session_state.question_index -= 1
+                st.rerun()
+
+    with col2:
+
+        if st.button("Next"):
+
+            if current < total_questions - 1:
+                st.session_state.question_index += 1
+                st.rerun()
+
+    if current == total_questions - 1:
+
+        if st.button("Submit Exam"):
+
+            score = 0
+
+            for q in questions:
+
+                user_ans = st.session_state.answers.get(q["id"], "")
+
+                if user_ans:
+
+                    if user_ans.strip().lower() == q["correct_answer"].strip().lower():
+                        score += 1
+
+            st.success(
+                f"Your Score: {score}/{total_questions}"
+            )
+
+            st.session_state.start_exam = False
