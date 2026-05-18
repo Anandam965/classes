@@ -104,6 +104,7 @@ def admin_dashboard():
             "Add Class",
             "Create Exam",
             "Add Questions"
+            "View Results"
         ]
     )
 
@@ -159,7 +160,130 @@ def admin_dashboard():
     # =========================
     # ADD CLASS
     # =========================
-
+    # =========================
+    # VIEW RESULTS
+    # =========================
+    
+    elif menu == "View Results":
+    
+        st.title("Student Exam Results")
+    
+        attempts = supabase.table(
+            "exam_attempts"
+        ).select("*").execute().data
+    
+        if len(attempts) == 0:
+    
+            st.warning("No attempts found")
+    
+        else:
+    
+            for attempt in attempts:
+    
+                user_data = supabase.table(
+                    "users"
+                ).select("*").eq(
+                    "id",
+                    attempt["user_id"]
+                ).execute().data
+    
+                exam_data = supabase.table(
+                    "exams"
+                ).select("*").eq(
+                    "id",
+                    attempt["exam_id"]
+                ).execute().data
+    
+                if len(user_data) == 0 or len(exam_data) == 0:
+                    continue
+    
+                user = user_data[0]
+                exam = exam_data[0]
+    
+                st.divider()
+    
+                st.subheader(
+                    f"{user['name']} - {exam['title']}"
+                )
+    
+                st.success(
+                    f"Score : {attempt['score']}"
+                )
+    
+                user_answers = supabase.table(
+                    "user_answers"
+                ).select("*").eq(
+                    "attempt_id",
+                    attempt["id"]
+                ).execute().data
+    
+                for ua in user_answers:
+    
+                    question_data = supabase.table(
+                        "questions"
+                    ).select("*").eq(
+                        "id",
+                        ua["question_id"]
+                    ).execute().data
+    
+                    if len(question_data) == 0:
+                        continue
+    
+                    q = question_data[0]
+    
+                    st.markdown(
+                        f"### {q['question']}"
+                    )
+    
+                    st.info(
+                        f"User Answer : {ua['answer']}"
+                    )
+    
+                    correct_answer = q["correct_answer"]
+    
+                    if ua["answer"].strip().lower() == correct_answer.strip().lower():
+    
+                        st.success("✅ Correct")
+    
+                    else:
+    
+                        st.error("❌ Wrong")
+    
+                        st.warning(
+                            f"Correct Answer : {correct_answer}"
+                        )
+    
+                    # SHOW OPTIONS FOR MCQ
+    
+                    if q["type"] == "mcq":
+    
+                        st.write("Options:")
+    
+                        st.write(
+                            f"A. {q['option_a']}"
+                        )
+    
+                        st.write(
+                            f"B. {q['option_b']}"
+                        )
+    
+                        st.write(
+                            f"C. {q['option_c']}"
+                        )
+    
+                        st.write(
+                            f"D. {q['option_d']}"
+                        )
+    
+                    # SHOW HINT FOR BLANKS
+    
+                    if q["type"] == "blank":
+    
+                        st.info(
+                            f"Hint : {q['hint']}"
+                        )
+    
+                    st.divider()
     elif menu == "Add Class":
 
         st.title("Add Class")
