@@ -103,7 +103,7 @@ def admin_dashboard():
             "Add Submodule",
             "Add Class",
             "Create Exam",
-            "Add Questions"
+            "Add Questions",
             "View Results"
         ]
     )
