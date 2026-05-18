@@ -472,44 +472,10 @@ def user_dashboard():
 
                         if exam["enabled"]:
 
-                            # CHECK PREVIOUS ATTEMPT
-
-                            attempt_data = supabase.table(
-                                "exam_attempts"
-                            ).select("*").eq(
-                                "user_id",
-                                st.session_state.user_id
-                            ).eq(
-                                "exam_id",
-                                exam["id"]
-                            ).execute().data
-                            
-                            # IF ALREADY SUBMITTED
-                            
-                            if len(attempt_data) > 0:
-                            
-                                st.error(
-                                    "You already completed this exam."
-                                )
-                            
-                            else:
-                            
-                                if st.button(
-                                    f"Start Exam - {exam['title']}",
-                                    key=exam["id"]
-                                ):
-                            
-                                    st.session_state.exam_id = exam["id"]
-                            
-                                    st.session_state.exam_title = exam["title"]
-                            
-                                    st.session_state.start_exam = True
-                            
-                                    st.session_state.question_index = 0
-                            
-                                    st.session_state.answers = {}
-                            
-                                    st.rerun()
+                            if st.button(
+                                f"Start Exam - {exam['title']}",
+                                key=exam["id"]
+                            ):
                             
                                 st.session_state.exam_id = exam["id"]
                                 st.session_state.exam_title = exam["title"]
@@ -691,4 +657,3 @@ if st.session_state.start_exam:
                     )
     
             st.session_state.start_exam = False
-
