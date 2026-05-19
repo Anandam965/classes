@@ -645,44 +645,85 @@ if st.session_state.start_exam:
                 # =========================
     
                 if exam["show_answers"]:
-    
+                if exam["show_answers"]:
+
                     st.divider()
-    
-                    st.subheader("Correct Answers")
-    
-                    for i, q in enumerate(questions):
-    
-                        st.markdown(
-                            f"### Question {i+1}"
-                        )
-    
-                        st.write(q["question"])
-    
-                        user_ans = st.session_state.answers.get(
-                            q["id"],
-                            "No Answer"
-                        )
-    
-                        st.info(
-                            f"Your Answer: {user_ans}"
-                        )
-    
-                        st.success(
-                            f"Correct Answer: {q['correct_answer']}"
-                        )
-    
-                        if q["type"] == "blank":
-    
-                            st.warning(
-                                f"Hint: {q['hint']}"
+                
+                    # BUTTON
+                
+                    if st.button("Show Answers"):
+                
+                        st.subheader("Correct Answers")
+                
+                        for i, q in enumerate(questions):
+                
+                            st.markdown(
+                                f"### Question {i+1}"
                             )
-    
-                        st.divider()
-    
+                
+                            st.write(q["question"])
+                
+                            user_ans = st.session_state.answers.get(
+                                q["id"],
+                                "No Answer"
+                            )
+                
+                            st.info(
+                                f"Your Answer: {user_ans}"
+                            )
+                
+                            correct_answer = q["correct_answer"]
+                
+                            # CORRECT / WRONG
+                
+                            if str(user_ans).strip().lower() == str(correct_answer).strip().lower():
+                
+                                st.success("✅ Correct")
+                
+                            else:
+                
+                                st.error("❌ Wrong")
+                
+                            st.success(
+                                f"Correct Answer: {correct_answer}"
+                            )
+                
+                            # MCQ OPTIONS
+                
+                            if q["type"] == "mcq":
+                
+                                st.write("Options:")
+                
+                                st.write(
+                                    f"A. {q['option_a']}"
+                                )
+                
+                                st.write(
+                                    f"B. {q['option_b']}"
+                                )
+                
+                                st.write(
+                                    f"C. {q['option_c']}"
+                                )
+                
+                                st.write(
+                                    f"D. {q['option_d']}"
+                                )
+                
+                            # BLANK HINT
+                
+                            if q["type"] == "blank":
+                
+                                st.warning(
+                                    f"Hint: {q['hint']}"
+                                )
+                
+                            st.divider()
+                
                 else:
-    
+                
                     st.warning(
                         "Answers are disabled by admin."
                     )
-    
+                    
             st.session_state.start_exam = False
