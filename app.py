@@ -644,7 +644,7 @@ if st.session_state.start_exam:
                 # SHOW ANSWERS IF ENABLED
                 # =========================
     
-                if exam["show_answers"]:
+            
                 if exam["show_answers"]:
 
                     st.divider()
