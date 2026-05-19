@@ -586,13 +586,42 @@ if st.session_state.start_exam:
                         score += 1
     
             # SAVE ATTEMPT
-    
-            supabase.table("exam_attempts").insert({
+            # =========================
+            # SAVE ATTEMPT
+            # =========================
+            
+            attempt_response = supabase.table(
+                "exam_attempts"
+            ).insert({
                 "user_id": st.session_state.user_id,
                 "exam_id": st.session_state.exam_id,
                 "score": score,
                 "submitted": True
             }).execute()
+            
+            # GET ATTEMPT ID
+            
+            attempt_id = attempt_response.data[0]["id"]
+            
+            # =========================
+            # SAVE USER ANSWERS
+            # =========================
+            
+            for q in questions:
+            
+                user_answer = st.session_state.answers.get(
+                    q["id"],
+                    ""
+                )
+            
+                supabase.table(
+                    "user_answers"
+                ).insert({
+                    "attempt_id": attempt_id,
+                    "question_id": q["id"],
+                    "answer": user_answer
+                }).execute()
+           
     
             # SHOW SCORE
     
