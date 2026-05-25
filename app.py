@@ -6,8 +6,8 @@ import os
 # 1. DATABASE CONNECTION (SUPABASE SETUP)
 # ==========================================
 # గమనిక: మీ Supabase Credentials ని ఇక్కడ సెట్ చేసుకోండి లేదా Environment Variables ఉపయోగించండి
-SUPABASE_URL = os.environ.get("SUPABASE_URL", "https://your-supabase-url.supabase.co")
-SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "your-supabase-anon-key")
+SUPABASE_URL = "https://lybhhtorasnwwaehqvnc.supabase.co"
+SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx5YmhodG9yYXNud3dhZWhxdm5jIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxMDk0NTksImV4cCI6MjA5NDY4NTQ1OX0.8LO08tXBNBD83TIrR8oiuCIo97CtvvaupSIahTBAAuo"
 
 @st.cache_resource
 def init_supabase():
