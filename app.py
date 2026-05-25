@@ -34,8 +34,6 @@ if "answers" not in st.session_state:
     st.session_state.answers = {}
 if "start_exam" not in st.session_state:
     st.session_state.start_exam = False
-if "show_instructions" not in st.session_state:
-    st.session_state.show_instructions = False
 if "exam_submitted" not in st.session_state:
     st.session_state.exam_submitted = False
 if "exam_id" not in st.session_state:
@@ -46,8 +44,6 @@ if "exam_end_time" not in st.session_state:
     st.session_state.exam_end_time = 0.0
 if "current_questions" not in st.session_state:
     st.session_state.current_questions = []
-if "temp_duration" not in st.session_state:
-    st.session_state.temp_duration = 30
 
 # =========================
 # LOGIN FUNCTION
@@ -501,7 +497,6 @@ def user_dashboard():
                                         st.session_state.exam_id = exam["id"]
                                         st.session_state.exam_title = exam["title"]
                                         st.session_state.start_exam = True
-                                        st.session_state.show_instructions = False
                                         st.session_state.exam_submitted = True 
                                         st.session_state.current_questions = supabase.table("questions").select("*").eq("exam_id", exam["id"]).execute().data
                                         st.rerun()
@@ -514,61 +509,23 @@ def user_dashboard():
                                         if has_password and entered_pwd.strip() != str(exam["password"]).strip():
                                             st.error("Wrong Exam Password!")
                                         else:
+                                            # 'Start Exam' నొక్కగానే నేరుగా ఎగ్జామ్ మరియు టైమర్ స్టార్ట్ అవుతాయి
                                             q_data = supabase.table("questions").select("*").eq("exam_id", exam["id"]).execute().data
                                             st.session_state.exam_id = exam["id"]
                                             st.session_state.exam_title = exam["title"]
-                                            st.session_state.start_exam = False
-                                            st.session_state.show_instructions = True 
+                                            st.session_state.start_exam = True
                                             st.session_state.exam_submitted = False
                                             st.session_state.answers = {}
                                             st.session_state.question_index = 0
-                                            st.session_state.temp_duration = exam.get("duration_mins", 30)
                                             st.session_state.current_questions = q_data
+                                            st.session_state.exam_end_time = time.time() + (int(exam_dur) * 60)
                                             st.rerun()
                     st.divider()
-
-# =========================
-# ENGLISH INSTRUCTIONS SCREEN VIEW
-# =========================
-def show_instructions_view():
-    st.title("📝 Online Examination Instructions")
-    st.subheader(f"Exam: {st.session_state.exam_title}")
-    
-    total_q = len(st.session_state.current_questions)
-    duration_m = st.session_state.temp_duration
-
-    with st.container(border=True):
-        st.markdown("### ⚠️ Please read the following instructions carefully before starting the exam:")
-        st.write("")
-        st.markdown(f"1. **Total Questions:** This exam contains **{total_q}** questions.")
-        st.markdown(f"2. **Time Duration:** You have exactly **{duration_m} minutes** to complete the exam.")
-        st.markdown("3. **Auto-Submit Rule:** The timer will run continuously. Once the time is up (**00:00**), your exam will be **automatically saved and submitted** immediately.")
-        
-        st.markdown("4. **Question Status Indicators (Color Codes):**")
-        st.markdown("   * 🔴 **Red Number:** Indicates an **Unanswered** question.")
-        st.markdown("   * 🔵 **Blue Number:** Indicates the **Current Active** question you are viewing.")
-        st.markdown("   * 🟢 **Green Number:** Indicates an **Answered** question.")
-        
-        st.markdown("5. **Navigation:** You can move between questions using the **Previous** and **Next** buttons or by clicking directly on the question numbers panel on the right side.")
-        st.markdown("6. **Stable Connection:** Do not refresh or close the browser window during the live exam, or progress might be affected.")
-        st.write("")
-        
-        agree = st.checkbox("I have read and understood all the instructions. I am ready to begin the examination.")
-        
-        col_space, col_start = st.columns([4, 1])
-        with col_start:
-            if st.button("🚀 Start Exam & Timer", type="primary", disabled=not agree, use_container_width=True):
-                st.session_state.show_instructions = False
-                st.session_state.start_exam = True
-                st.session_state.exam_end_time = time.time() + (duration_m * 60)
-                st.rerun()
 
 # =========================
 # LIVE ACTIVE EXAM WORKSPACE VIEW
 # =========================
 def exam_workspace_view():
-    st.session_state.show_instructions = False
-    
     questions = st.session_state.current_questions
     total_questions = len(questions)
 
@@ -642,7 +599,6 @@ def exam_workspace_view():
 
         if st.button("Return to Dashboard", type="primary"):
             st.session_state.start_exam = False
-            st.session_state.show_instructions = False
             st.session_state.exam_submitted = False
             st.session_state.answers = {}
             st.session_state.question_index = 0
@@ -745,7 +701,5 @@ else:
         admin_dashboard()
     elif st.session_state.start_exam:
         exam_workspace_view()
-    elif st.session_state.show_instructions:
-        show_instructions_view()
     else:
         user_dashboard()
