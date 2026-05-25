@@ -34,6 +34,8 @@ if "answers" not in st.session_state:
     st.session_state.answers = {}
 if "start_exam" not in st.session_state:
     st.session_state.start_exam = False
+if "show_instructions" not in st.session_state:
+    st.session_state.show_instructions = False
 if "exam_submitted" not in st.session_state:
     st.session_state.exam_submitted = False
 if "exam_id" not in st.session_state:
@@ -44,6 +46,8 @@ if "exam_end_time" not in st.session_state:
     st.session_state.exam_end_time = 0.0
 if "current_questions" not in st.session_state:
     st.session_state.current_questions = []
+if "temp_duration" not in st.session_state:
+    st.session_state.temp_duration = 30
 
 # =========================
 # LOGIN FUNCTION
@@ -227,7 +231,7 @@ def admin_dashboard():
                             st.rerun()
 
     elif menu == "📝 Manage Exams & Questions":
-        ex_tab1, ex_tab2, ex_tab3 = st.tabs(["📝 Exams Setup & Instant Control", "❓ Add Questions", "🔍 Review & Edit Existing Papers"])
+        ex_tab1, ex_tab2, ex_tab3 = st.tabs(["📝 Exams Setup & Password Control", "❓ Add Questions", "🔍 Review & Edit Existing Papers"])
         
         with ex_tab1:
             st.subheader("Setup Dynamic Exams")
@@ -250,50 +254,46 @@ def admin_dashboard():
                         "enabled": c_en, 
                         "show_answers": c_ans
                     }).execute()
-                    st.success("Exam Created with Timer Control!")
+                    st.success("Exam Created with Password Control!")
                     st.rerun()
 
             st.divider()
-            st.write("### ⚙️ Live Exam Master Controls & Timer Editing")
+            st.write("### ⚙️ Live Exam Controls & Password Viewer")
             exams_all = supabase.table("exams").select("*").execute().data
             
             for ex in exams_all:
-                # ప్రతి ఎగ్జామ్ ఒక అందమైన బాక్స్ లో కనిపిస్తుంది
                 with st.container(border=True):
-                    st.markdown(f"#### 📄 Exam: **{ex['title']}**")
+                    st.markdown(f"#### 📄 Exam Sheet: **{ex['title']}**")
                     
-                    # UI లోనే అడ్మిన్ నేరుగా టైమ్ మార్చుకోవడానికి ఇన్పుట్ బాక్స్ (డైనమిక్)
-                    col_edit1, col_edit2, col_edit3, col_edit4, col_edit5 = st.columns([2, 2, 2, 1, 1])
-                    
-                    with col_edit1:
-                        # UI నుండి టైమ్ మార్చుకునే ఆప్షన్
-                        current_duration = ex.get("duration_mins", 30)
-                        updated_duration = st.number_input(
-                            "Edit Duration (Mins)", 
-                            min_value=1, max_value=180, 
-                            value=int(current_duration), 
-                            key=f"dur_{ex['id']}"
-                        )
-                    with col_edit2:
-                        t_active = st.toggle("Exam Active", value=ex["enabled"], key=f"tog_en_{ex['id']}")
-                    with col_edit3:
+                    col_e1, col_e2, col_e3 = st.columns([2, 2, 2])
+                    with col_e1:
+                        # UI లోనే నేరుగా డ్యూరేషన్ ఎడిట్ చేయడం
+                        current_dur = ex.get("duration_mins", 30)
+                        updated_dur = st.number_input("Edit Duration (Mins)", min_value=1, max_value=180, value=int(current_dur), key=f"dur_{ex['id']}")
+                    with col_e2:
+                        # UI లో పాస్‌వర్డ్ చూసుకోవడం & మార్చుకోవడం
+                        current_pwd = ex.get("password", "")
+                        current_pwd_str = str(current_pwd) if current_pwd else ""
+                        updated_pwd = st.text_input("Exam Password (View/Edit)", value=current_pwd_str, key=f"pwd_ed_{ex['id']}")
+                    with col_e3:
+                        st.write("") # స్పేసింగ్ కోసం
+                        t_active = st.toggle("Active (Visible)", value=ex["enabled"], key=f"tog_en_{ex['id']}")
                         t_ans = st.toggle("Show Answer Key", value=ex["show_answers"], key=f"tog_ans_{ex['id']}")
                     
-                    with col_edit4:
-                        st.write("") # స్పేస్ కోసం
-                        if st.button("💾 Save Changes", key=f"up_ex_{ex['id']}", type="primary", use_container_width=True):
-                            # డేటాబేస్ టేబుల్ లో అప్‌డేట్ అవుతుంది
+                    col_btn1, col_btn2 = st.columns([1, 1])
+                    with col_btn1:
+                        if st.button("💾 Save Settings & Password", key=f"up_ex_{ex['id']}", type="primary", use_container_width=True):
+                            pwd_final = updated_pwd.strip() if updated_pwd.strip() != "" else None
                             supabase.table("exams").update({
-                                "duration_mins": int(updated_duration),
+                                "duration_mins": int(updated_dur),
+                                "password": pwd_final,
                                 "enabled": t_active, 
                                 "show_answers": t_ans
                             }).eq("id", ex["id"]).execute()
-                            st.success("Changes Saved Successfully!")
+                            st.success("Exam Records and Password Updated!")
                             st.rerun()
-                            
-                    with col_edit5:
-                        st.write("") 
-                        if st.button("🗑️ Wipe Exam", key=f"del_ex_{ex['id']}", type="secondary", use_container_width=True):
+                    with col_btn2:
+                        if st.button("🗑️ Wipe Exam Paper", key=f"del_ex_{ex['id']}", type="secondary", use_container_width=True):
                             supabase.table("exams").delete().eq("id", ex["id"]).execute()
                             st.warning("Exam Purged!")
                             st.rerun()
@@ -327,7 +327,7 @@ def admin_dashboard():
                     st.rerun()
 
         with ex_tab3:
-            st.subheader("🔍 Review & Edit Existing Exam Papers")
+            st.subheader("🔍 Review and Edit Existing Exam Papers")
             exams_all_edit = supabase.table("exams").select("*").execute().data
             
             if not exams_all_edit:
@@ -479,7 +479,6 @@ def user_dashboard():
                     exams = supabase.table("exams").select("*").eq("class_id", cls["id"]).execute().data
                     for exam in exams:
                         if exam["enabled"]:
-                            # స్టూడెంట్‌కి ఇక్కడ డైనమిక్ టైమ్ కనిపిస్తుంది
                             exam_dur = exam.get("duration_mins", 30)
                             st.write(f"📝 **Exam: {exam['title']}** ({exam_dur} Mins)")
                             btn_col, lb_col = st.columns([2, 2])
@@ -504,6 +503,7 @@ def user_dashboard():
                                         st.session_state.exam_id = exam["id"]
                                         st.session_state.exam_title = exam["title"]
                                         st.session_state.start_exam = True
+                                        st.session_state.show_instructions = False
                                         st.session_state.exam_submitted = True 
                                         st.session_state.current_questions = supabase.table("questions").select("*").eq("exam_id", exam["id"]).execute().data
                                         st.rerun()
@@ -516,21 +516,57 @@ def user_dashboard():
                                         if has_password and entered_pwd.strip() != str(exam["password"]).strip():
                                             st.error("Wrong Exam Password!")
                                         else:
+                                            # ఇక్కడ ముందుగా ఇన్స్ట్రక్షన్స్ పేజీ కి పంపిస్తున్నాము
                                             q_data = supabase.table("questions").select("*").eq("exam_id", exam["id"]).execute().data
-                                            
-                                            # అడ్మిన్ మార్చిన కొత్త టైమ్ ఇక్కడ లోడ్ అవుతుంది
-                                            duration = exam.get("duration_mins", 30)
-                                            
                                             st.session_state.exam_id = exam["id"]
                                             st.session_state.exam_title = exam["title"]
-                                            st.session_state.start_exam = True
+                                            st.session_state.start_exam = False
+                                            st.session_state.show_instructions = True # Instructions On
                                             st.session_state.exam_submitted = False
                                             st.session_state.answers = {}
                                             st.session_state.question_index = 0
-                                            st.session_state.exam_end_time = time.time() + (duration * 60)
+                                            st.session_state.temp_duration = exam.get("duration_mins", 30)
                                             st.session_state.current_questions = q_data
                                             st.rerun()
                     st.divider()
+
+# =========================
+# ENGLISH INSTRUCTIONS SCREEN VIEW
+# =========================
+def show_instructions_view():
+    st.title("📝 Online Examination Instructions")
+    st.subheader(f"Exam: {st.session_state.exam_title}")
+    
+    total_q = len(st.session_state.current_questions)
+    duration_m = st.session_state.temp_duration
+
+    with st.container(border=True):
+        st.markdown("### ⚠️ Please read the following instructions carefully before starting the exam:")
+        st.write("")
+        st.markdown(f"1. **Total Questions:** This exam contains **{total_q}** questions.")
+        st.markdown(f"2. **Time Duration:** You have exactly **{duration_m} minutes** to complete the exam.")
+        st.markdown("3. **Auto-Submit Rule:** The timer will run continuously. Once the time is up (**00:00**), your exam will be **automatically saved and submitted** immediately.")
+        
+        st.markdown("4. **Question Status Indicators (Color Codes):**")
+        st.markdown("   * 🔴 **Red Number:** Indicates an **Unanswered** question.")
+        st.markdown("   * 🔵 **Blue Number:** Indicates the **Current Active** question you are viewing.")
+        st.markdown("   * 🟢 **Green Number:** Indicates an **Answered** question.")
+        
+        st.markdown("5. **Navigation:** You can move between questions using the **Previous** and **Next** buttons or by clicking directly on the question numbers panel on the right side.")
+        st.markdown("6. **Stable Connection:** Do not refresh or close the browser window during the live exam, or progress might be affected.")
+        st.write("")
+        
+        # చెక్ బాక్స్ టిక్ చేశాకే ఎగ్జామ్ స్టార్ట్ అవుతుంది
+        agree = st.checkbox("I have read and understood all the instructions. I am ready to begin the examination.")
+        
+        col_space, col_start = st.columns([4, 1])
+        with col_start:
+            if st.button("🚀 Start Exam & Timer", type="primary", disabled=not agree, use_container_width=True):
+                st.session_state.show_instructions = False
+                st.session_state.start_exam = True
+                # ఎగ్జామ్ అసలైన టైమర్ ఇక్కడ ట్రిగ్గర్ అవుతుంది
+                st.session_state.exam_end_time = time.time() + (duration_m * 60)
+                st.rerun()
 
 # =========================
 # LIVE ACTIVE EXAM WORKSPACE VIEW
@@ -546,7 +582,6 @@ def exam_workspace_view():
             st.rerun()
         return
 
-    # ⏱️ లైవ్ టైమర్ కౌంట్‌డౌన్ & ఆటో-సబ్మిట్ లాజిక్
     remaining_time = 0
     if not st.session_state.exam_submitted:
         remaining_time = int(st.session_state.exam_end_time - time.time())
@@ -577,7 +612,6 @@ def exam_workspace_view():
             st.session_state.exam_submitted = True
             st.rerun()
 
-    # ఎగ్జామ్ సబ్మిట్ అయిపోయాక కనిపించే రిజల్ట్స్ స్క్రీన్
     if st.session_state.exam_submitted:
         st.title(f"📊 Results: {st.session_state.exam_title}")
         db_attempt = supabase.table("exam_attempts").select("*")\
@@ -611,13 +645,13 @@ def exam_workspace_view():
 
         if st.button("Return to Dashboard", type="primary"):
             st.session_state.start_exam = False
+            st.session_state.show_instructions = False
             st.session_state.exam_submitted = False
             st.session_state.answers = {}
             st.session_state.question_index = 0
             st.session_state.current_questions = []
             st.rerun()
     
-    # ఎగ్జామ్ యాక్టివ్‌గా రాస్తున్నప్పుడు కనిపించే స్క్రీన్
     else:
         st.title(st.session_state.exam_title)
         current = st.session_state.question_index
@@ -630,16 +664,16 @@ def exam_workspace_view():
             st.metric(label="⏱️ Time Remaining", value=f"{mins:02d}:{secs:02d}")
             st.divider()
             
-            st.subheader("Questions")
+            st.subheader("Questions Panel")
             cols = st.columns(3)
             for i in range(total_questions):
                 with cols[i % 3]:
                     q_id = questions[i]["id"]
-                    label = f"🔴 {i+1}"
+                    label = f"🔴 {i+1}" # Unanswered
                     if q_id in st.session_state.answers and st.session_state.answers[q_id]:
-                        label = f"🟢 {i+1}"
+                        label = f"🟢 {i+1}" # Answered
                     if i == current:
-                        label = f"🔵 {i+1}"
+                        label = f"🔵 {i+1}" # Active Current
 
                     if st.button(label, key=f"qnav_{i}", use_container_width=True):
                         st.session_state.question_index = i
@@ -701,7 +735,6 @@ def exam_workspace_view():
                     st.session_state.exam_submitted = True
                     st.rerun()
         
-        # ప్రతి సెకనుకి స్మూత్ రిఫ్రెష్
         time.sleep(1)
         st.rerun()
 
@@ -713,6 +746,8 @@ if not st.session_state.logged_in:
 else:
     if st.session_state.role == "admin":
         admin_dashboard()
+    elif st.session_state.show_instructions:
+        show_instructions_view() # ఇన్‌స్ట్రక్షన్స్ రూటింగ్
     elif st.session_state.start_exam:
         exam_workspace_view()
     else:
