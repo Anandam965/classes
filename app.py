@@ -6,6 +6,7 @@ import uuid
 # SUPABASE CONFIG
 # =========================
 SUPABASE_URL = "https://lybhhtorasnwwaehqvnc.supabase.co"
+# Note: In production, store this securely using st.secrets
 SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx5YmhodG9yYXNud3dhZWhxdm5jIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxMDk0NTksImV4cCI6MjA5NDY4NTQ1OX0.8LO08tXBNBD83TIrR8oiuCIo97CtvvaupSIahTBAAuo"
 
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
@@ -35,6 +36,10 @@ if "start_exam" not in st.session_state:
     st.session_state.start_exam = False
 if "exam_submitted" not in st.session_state:
     st.session_state.exam_submitted = False
+if "exam_id" not in st.session_state:
+    st.session_state.exam_id = ""
+if "exam_title" not in st.session_state:
+    st.session_state.exam_title = ""
 
 # =========================
 # LOGIN FUNCTION
@@ -105,9 +110,6 @@ def admin_dashboard():
         ["🗂️ Manage Course Content", "📝 Manage Exams & Questions", "📊 Student Results & Ranks"]
     )
 
-    # ----------------------------------------------------
-    # TAB 1: MANAGE COURSE CONTENT
-    # ----------------------------------------------------
     if menu == "🗂️ Manage Course Content":
         tab1, tab2, tab3 = st.tabs(["📁 Modules Setup", "📂 Submodules Setup", "🖥️ Live/Recorded Classes"])
         
@@ -220,9 +222,6 @@ def admin_dashboard():
                             st.warning("Class Data Purged!")
                             st.rerun()
 
-    # ----------------------------------------------------
-    # TAB 2: MANAGE EXAMS AND QUESTIONS
-    # ----------------------------------------------------
     elif menu == "📝 Manage Exams & Questions":
         ex_tab1, ex_tab2, ex_tab3 = st.tabs(["📝 Exams Setup & Instant Control", "❓ Add Questions", "🔍 Review & Edit Existing Papers"])
         
@@ -359,9 +358,6 @@ def admin_dashboard():
                         else:
                             st.error("Question text cannot be empty!")
 
-    # ----------------------------------------------------
-    # TAB 3: RESULTS AND LEADERBOARDS
-    # ----------------------------------------------------
     elif menu == "📊 Student Results & Ranks":
         r_tab1, r_tab2, r_tab3 = st.tabs(["🏆 Live Dynamic Leaderboards", "📝 Manual Evaluation (Code/Text)", "📜 Individual Score Summary"])
         
@@ -497,20 +493,9 @@ def user_dashboard():
                     st.divider()
 
 # =========================
-# MAIN APP FLOW ROUTING
+# LIVE ACTIVE EXAM PAGE INTERFACE
 # =========================
-if not st.session_state.logged_in:
-    login()
-else:
-    if st.session_state.role == "admin":
-        admin_dashboard()
-    elif not st.session_state.start_exam:
-        user_dashboard()
-
-# =========================
-# OPEN EXAM PAGE / RESULT PAGE
-# =========================
-if st.session_state.logged_in and st.session_state.start_exam:
+def exam_workspace_view():
     questions = supabase.table("questions").select("*").eq("exam_id", st.session_state.exam_id).execute().data
     total_questions = len(questions)
 
@@ -519,140 +504,147 @@ if st.session_state.logged_in and st.session_state.start_exam:
         if st.button("Go Back"):
             st.session_state.start_exam = False
             st.rerun()
-    else:
-        if st.session_state.exam_submitted:
-            st.title(f"📊 Results: {st.session_state.exam_title}")
-            db_attempt = supabase.table("exam_attempts").select("*")\
-                .eq("user_id", st.session_state.user_id)\
-                .eq("exam_id", st.session_state.exam_id).execute().data
-                
-            if len(db_attempt) > 0:
-                score = db_attempt[0]["score"]
-                st.success(f"🎉 Exam Already Submitted! Your Score: {score}/{total_questions}")
+        return
+
+    if st.session_state.exam_submitted:
+        st.title(f"📊 Results: {st.session_state.exam_title}")
+        db_attempt = supabase.table("exam_attempts").select("*")\
+            .eq("user_id", st.session_state.user_id)\
+            .eq("exam_id", st.session_state.exam_id).execute().data
             
-            db_answers = supabase.table("user_answers").select("*").eq("attempt_id", db_attempt[0]["id"]).execute().data if len(db_attempt) > 0 else []
-            ans_map = {a["question_id"]: a["answer"] for a in db_answers}
-
-            exam_data = supabase.table("exams").select("*").eq("id", st.session_state.exam_id).execute().data
-            if len(exam_data) > 0 and exam_data[0]["show_answers"]:
-                st.subheader("📚 Review Sheet")
-                for i, q in enumerate(questions):
-                    st.markdown(f"**Question {i+1}:** {q['question']}")
-                    u_ans = ans_map.get(q["id"], 'Not Answered')
-                    c_ans = q["correct_answer"]
-                    
-                    if q["type"] != "programming":
-                        if str(u_ans).strip().lower() == str(c_ans).strip().lower():
-                            st.success(f"Your Answer: {u_ans} (Correct)")
-                        else:
-                            st.error(f"Your Answer: {u_ans}")
-                            st.warning(f"Correct Answer: {c_ans}")
-                    else:
-                        st.info(f"Your Code/Answer: {u_ans} (Manual Review Item)")
-                    st.divider()
-            else:
-                st.info("Answers are disabled by admin.")
-
-            if st.button("Return to Dashboard", type="primary"):
-                st.session_state.start_exam = False
-                st.session_state.exam_submitted = False
-                st.session_state.answers = {}
-                st.session_state.question_index = 0
-                st.rerun()
+        if len(db_attempt) > 0:
+            score = db_attempt[0]["score"]
+            st.success(f"🎉 Exam Already Submitted! Your Score: {score}/{total_questions}")
         
-        else:
-            st.title(st.session_state.exam_title)
-            current = st.session_state.question_index
-            question = questions[current]
+        db_answers = supabase.table("user_answers").select("*").eq("attempt_id", db_attempt[0]["id"]).execute().data if len(db_attempt) > 0 else []
+        ans_map = {a["question_id"]: a["answer"] for a in db_answers}
 
-            left, right = st.columns([4, 1])
-
-            with right:
-                st.subheader("Questions")
-                cols = st.columns(3)
-                for i in range(total_questions):
-                    with cols[i % 3]:
-                        q_id = questions[i]["id"]
-                        label = f"🔴 {i+1}"
-                        if q_id in st.session_state.answers and st.session_state.answers[q_id]:
-                            label = f"🟢 {i+1}"
-                        if i == current:
-                            label = f"🔵 {i+1}"
-
-                        if st.button(label, key=f"qnav_{i}", use_container_width=True):
-                            st.session_state.question_index = i
-                            st.rerun()
-
-            with left:
-                st.subheader(f"Question {current+1}/{total_questions}")
-                st.write(question["question"])
-
-                stored_ans = st.session_state.answers.get(question["id"], "")
+        exam_data = supabase.table("exams").select("*").eq("id", st.session_state.exam_id).execute().data
+        if len(exam_data) > 0 and exam_data[0]["show_answers"]:
+            st.subheader("📚 Review Sheet")
+            for i, q in enumerate(questions):
+                st.markdown(f"**Question {i+1}:** {q['question']}")
+                u_ans = ans_map.get(q["id"], 'Not Answered')
+                c_ans = q["correct_answer"]
                 
-                # Render inputs based on type
-                if question["type"] == "mcq":
-                    opts = [question["option_a"], question["option_b"], question["option_c"], question["option_d"]]
-                    try:
-                        default_idx = opts.index(stored_ans) if stored_ans in opts else None
-                    except ValueError:
-                        default_idx = None
-
-                    answer = st.radio("Choose Answer", opts, index=default_idx, key=f"radio_{question['id']}")
-                elif question["type"] == "blank":
-                    answer = st.text_input("Your Answer", value=stored_ans, key=f"text_{question['id']}")
+                if q["type"] != "programming":
+                    if str(u_ans).strip().lower() == str(c_ans).strip().lower():
+                        st.success(f"Your Answer: {u_ans} (Correct)")
+                    else:
+                        st.error(f"Your Answer: {u_ans}")
+                        st.warning(f"Correct Answer: {c_ans}")
                 else:
-                    answer = st.text_area("Write your Code/Answer here:", value=stored_ans, key=f"code_{question['id']}", height=250)
+                    st.info(f"Your Code/Answer: {u_ans} (Manual Review Item)")
+                st.divider()
+        else:
+            st.info("Answers are disabled by admin.")
 
-                # Update running session states whenever user types/changes answers
-                if answer:
-                    st.session_state.answers[question["id"]] = answer
+        if st.button("Return to Dashboard", type="primary"):
+            st.session_state.start_exam = False
+            st.session_state.exam_submitted = False
+            st.session_state.answers = {}
+            st.session_state.question_index = 0
+            st.rerun()
+    
+    else:
+        st.title(st.session_state.exam_title)
+        current = st.session_state.question_index
+        question = questions[current]
 
-                # Question Navigation Buttons Below Question Canvas
-                st.write("")
-                nav1, nav2, nav3 = st.columns([1, 1, 2])
-                with nav1:
-                    if current > 0:
-                        if st.button("⬅️ Previous", use_container_width=True):
-                            st.session_state.question_index -= 1
-                            st.rerun()
-                with nav2:
-                    if current < total_questions - 1:
-                        if st.button("Next ➡️", use_container_width=True):
-                            st.session_state.question_index += 1
-                            st.rerun()
-                with nav3:
-                    if st.button("🚀 Final Submit Exam Paper", type="primary", use_container_width=True):
-                        # Calculate final score (filtering out programming updates for auto grading)
-                        final_score = 0
-                        for q_item in questions:
-                            q_id_check = q_item["id"]
-                            u_res = st.session_state.answers.get(q_id_check, "")
-                            c_res = q_item["correct_answer"]
-                            if q_item["type"] != "programming":
-                                if str(u_res).strip().lower() == str(c_res).strip().lower():
-                                    final_score += 1
+        left, right = st.columns([4, 1])
+
+        with right:
+            st.subheader("Questions")
+            cols = st.columns(3)
+            for i in range(total_questions):
+                with cols[i % 3]:
+                    q_id = questions[i]["id"]
+                    label = f"🔴 {i+1}"
+                    if q_id in st.session_state.answers and st.session_state.answers[q_id]:
+                        label = f"🟢 {i+1}"
+                    if i == current:
+                        label = f"🔵 {i+1}"
+
+                    if st.button(label, key=f"qnav_{i}", use_container_width=True):
+                        st.session_state.question_index = i
+                        st.rerun()
+
+        with left:
+            st.subheader(f"Question {current+1}/{total_questions}")
+            st.write(question["question"])
+
+            stored_ans = st.session_state.answers.get(question["id"], "")
+            
+            # Render inputs dynamically based on context question type
+            if question["type"] == "mcq":
+                opts = [question["option_a"], question["option_b"], question["option_c"], question["option_d"]]
+                try:
+                    default_idx = opts.index(stored_ans) if stored_ans in opts else None
+                except ValueError:
+                    default_idx = None
+
+                answer = st.radio("Choose Answer", opts, index=default_idx, key=f"radio_{question['id']}")
+            elif question["type"] == "blank":
+                answer = st.text_input("Your Answer", value=stored_ans, key=f"text_{question['id']}")
+            else:
+                answer = st.text_area("Write your Code/Answer here:", value=stored_ans, key=f"code_{question['id']}", height=250)
+
+            # Update working state cache memory asynchronously
+            if answer != stored_ans:
+                st.session_state.answers[question["id"]] = answer
+
+            # Form handling navigation control buttons layout row
+            st.write("")
+            nav_col1, nav_col2, submit_col = st.columns([1, 1, 2])
+            with nav_col1:
+                if st.button("⬅️ Previous", disabled=(current == 0), use_container_width=True):
+                    st.session_state.question_index -= 1
+                    st.rerun()
+            with nav_col2:
+                if st.button("Next ➡️", disabled=(current == total_questions - 1), use_container_width=True):
+                    st.session_state.question_index += 1
+                    st.rerun()
+            with submit_col:
+                if st.button("🚀 Finalize & Submit Exam", type="primary", use_container_width=True):
+                    # Calculate baseline score for non-programming variables
+                    final_score = 0
+                    attempt_uuid = str(uuid.uuid4())
+                    
+                    for q in questions:
+                        user_val = st.session_state.answers.get(q["id"], "")
+                        if q["type"] != "programming":
+                            if str(user_val).strip().lower() == str(q["correct_answer"]).strip().lower():
+                                final_score += 1
+                    
+                    # Log baseline master record
+                    supabase.table("exam_attempts").insert({
+                        "id": attempt_uuid,
+                        "user_id": st.session_state.user_id,
+                        "exam_id": st.session_state.exam_id,
+                        "score": final_score
+                    }).execute()
+                    
+                    # Batch records logic for answers
+                    for q in questions:
+                        user_val = st.session_state.answers.get(q["id"], "")
+                        supabase.table("user_answers").insert({
+                            "attempt_id": attempt_uuid,
+                            "question_id": q["id"],
+                            "answer": user_val
+                        }).execute()
                         
-                        try:
-                            # 1. Insert global attempt record summary logs
-                            attempt_id = str(uuid.uuid4())
-                            supabase.table("exam_attempts").insert({
-                                "id": attempt_id,
-                                "user_id": st.session_state.user_id,
-                                "exam_id": st.session_state.exam_id,
-                                "score": final_score,
-                                "submitted_answers": str(st.session_state.answers)
-                            }).execute()
+                    st.session_state.exam_submitted = True
+                    st.rerun()
 
-                            # 2. Map detailed answers breakdowns
-                            for q_item in questions:
-                                supabase.table("user_answers").insert({
-                                    "attempt_id": attempt_id,
-                                    "question_id": q_item["id"],
-                                    "answer": st.session_state.answers.get(q_item["id"], "")
-                                }).execute()
-
-                            st.session_state.exam_submitted = True
-                            st.success("Exam results submitted successfully!")
-                            st.rerun()
-                        except Exception as submit_error:
-                            st.error(f"Error submitting exam data: {str(submit_error)}")
+# =========================
+# MAIN ROUTING ENGINE CONTROL
+# =========================
+if not st.session_state.logged_in:
+    login()
+else:
+    if st.session_state.role == "admin":
+        admin_dashboard()
+    elif st.session_state.start_exam:
+        exam_workspace_view()
+    else:
+        user_dashboard()
