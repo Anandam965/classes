@@ -1,12 +1,12 @@
 import streamlit as st
 from supabase import create_client
 import uuid
+import time
 
 # =========================
 # SUPABASE CONFIG
 # =========================
 SUPABASE_URL = "https://lybhhtorasnwwaehqvnc.supabase.co"
-# Note: In production, store this securely using st.secrets
 SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx5YmhodG9yYXNud3dhZWhxdm5jIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxMDk0NTksImV4cCI6MjA5NDY4NTQ1OX0.8LO08tXBNBD83TIrR8oiuCIo97CtvvaupSIahTBAAuo"
 
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
@@ -40,6 +40,10 @@ if "exam_id" not in st.session_state:
     st.session_state.exam_id = ""
 if "exam_title" not in st.session_state:
     st.session_state.exam_title = ""
+if "exam_end_time" not in st.session_state:
+    st.session_state.exam_end_time = 0.0
+if "current_questions" not in st.session_state:
+    st.session_state.current_questions = []
 
 # =========================
 # LOGIN FUNCTION
@@ -233,15 +237,20 @@ def admin_dashboard():
             with st.form("create_exam_form", clear_on_submit=True):
                 sel_cls = st.selectbox("Link with Lesson Class", list(cls_options.keys()))
                 e_title = st.text_input("Exam Sheet Name")
+                e_duration = st.number_input("Exam Duration (Minutes)", min_value=1, max_value=180, value=30)
                 e_pwd = st.text_input("Exam Password Entry (Optional)", type="password")
                 c_en = st.checkbox("Turn On Exam (Visible to Students immediately)", value=True)
                 c_ans = st.checkbox("Enable Answers Visibility Sheet")
                 if st.form_submit_button("📋 Generate Exam Layout"):
                     supabase.table("exams").insert({
-                        "class_id": cls_options[sel_cls], "title": e_title, "password": e_pwd if e_pwd.strip() != "" else None,
-                        "enabled": c_en, "show_answers": c_ans
+                        "class_id": cls_options[sel_cls], 
+                        "title": e_title, 
+                        "duration_mins": int(e_duration),
+                        "password": e_pwd if e_pwd.strip() != "" else None,
+                        "enabled": c_en, 
+                        "show_answers": c_ans
                     }).execute()
-                    st.success("Exam Created!")
+                    st.success("Exam Created with Timer Control!")
                     st.rerun()
 
             st.divider()
@@ -249,7 +258,7 @@ def admin_dashboard():
             exams_all = supabase.table("exams").select("*").execute().data
             
             for ex in exams_all:
-                st.markdown(f"#### 📄 Exam Sheet: **{ex['title']}**")
+                st.markdown(f"#### 📄 Exam Sheet: **{ex['title']}** ({ex.get('duration_mins', 30)} Mins)")
                 col_e1, col_e2, col_e3, col_e4 = st.columns([2, 2, 1, 1])
                 
                 with col_e1:
@@ -449,7 +458,7 @@ def user_dashboard():
                     exams = supabase.table("exams").select("*").eq("class_id", cls["id"]).execute().data
                     for exam in exams:
                         if exam["enabled"]:
-                            st.write(f"📝 **Exam: {exam['title']}**")
+                            st.write(f"📝 **Exam: {exam['title']}** ({exam.get('duration_mins', 30)} Mins)")
                             btn_col, lb_col = st.columns([2, 2])
                             
                             with lb_col:
@@ -473,6 +482,7 @@ def user_dashboard():
                                         st.session_state.exam_title = exam["title"]
                                         st.session_state.start_exam = True
                                         st.session_state.exam_submitted = True 
+                                        st.session_state.current_questions = supabase.table("questions").select("*").eq("exam_id", exam["id"]).execute().data
                                         st.rerun()
                                 else:
                                     has_password = exam.get("password") is not None and str(exam["password"]).strip() != ""
@@ -483,20 +493,25 @@ def user_dashboard():
                                         if has_password and entered_pwd.strip() != str(exam["password"]).strip():
                                             st.error("Wrong Exam Password!")
                                         else:
+                                            q_data = supabase.table("questions").select("*").eq("exam_id", exam["id"]).execute().data
+                                            duration = exam.get("duration_mins", 30)
+                                            
                                             st.session_state.exam_id = exam["id"]
                                             st.session_state.exam_title = exam["title"]
                                             st.session_state.start_exam = True
                                             st.session_state.exam_submitted = False
                                             st.session_state.answers = {}
                                             st.session_state.question_index = 0
+                                            st.session_state.exam_end_time = time.time() + (duration * 60)
+                                            st.session_state.current_questions = q_data
                                             st.rerun()
                     st.divider()
 
 # =========================
-# LIVE ACTIVE EXAM PAGE INTERFACE
+# LIVE ACTIVE EXAM WORKSPACE VIEW
 # =========================
 def exam_workspace_view():
-    questions = supabase.table("questions").select("*").eq("exam_id", st.session_state.exam_id).execute().data
+    questions = st.session_state.current_questions
     total_questions = len(questions)
 
     if total_questions == 0:
@@ -506,6 +521,38 @@ def exam_workspace_view():
             st.rerun()
         return
 
+    # ⏱️ లైవ్ టైమర్ కౌంట్‌డౌన్ & ఆటో-సబ్మిట్ లాజిక్
+    remaining_time = 0
+    if not st.session_state.exam_submitted:
+        remaining_time = int(st.session_state.exam_end_time - time.time())
+        
+        if remaining_time <= 0:
+            st.error("⏰ Time Out! Saving your progress and submitting the exam...")
+            time.sleep(2)
+            
+            final_score = 0
+            attempt_uuid = str(uuid.uuid4())
+            for q in questions:
+                user_val = st.session_state.answers.get(q["id"], "")
+                if q["type"] != "programming":
+                    if str(user_val).strip().lower() == str(q["correct_answer"]).strip().lower():
+                        final_score += 1
+            
+            supabase.table("exam_attempts").insert({
+                "id": attempt_uuid, "user_id": st.session_state.user_id,
+                "exam_id": st.session_state.exam_id, "score": final_score
+            }).execute()
+            
+            for q in questions:
+                user_val = st.session_state.answers.get(q["id"], "")
+                supabase.table("user_answers").insert({
+                    "attempt_id": attempt_uuid, "question_id": q["id"], "answer": user_val
+                }).execute()
+                
+            st.session_state.exam_submitted = True
+            st.rerun()
+
+    # ఎగ్జామ్ సబ్మిట్ అయిపోయాక కనిపించే రిజల్ట్స్ స్క్రీన్
     if st.session_state.exam_submitted:
         st.title(f"📊 Results: {st.session_state.exam_title}")
         db_attempt = supabase.table("exam_attempts").select("*")\
@@ -514,7 +561,7 @@ def exam_workspace_view():
             
         if len(db_attempt) > 0:
             score = db_attempt[0]["score"]
-            st.success(f"🎉 Exam Already Submitted! Your Score: {score}/{total_questions}")
+            st.success(f"🎉 Exam Submitted! Your Score: {score}/{total_questions}")
         
         db_answers = supabase.table("user_answers").select("*").eq("attempt_id", db_attempt[0]["id"]).execute().data if len(db_attempt) > 0 else []
         ans_map = {a["question_id"]: a["answer"] for a in db_answers}
@@ -536,16 +583,16 @@ def exam_workspace_view():
                 else:
                     st.info(f"Your Code/Answer: {u_ans} (Manual Review Item)")
                 st.divider()
-        else:
-            st.info("Answers are disabled by admin.")
 
         if st.button("Return to Dashboard", type="primary"):
             st.session_state.start_exam = False
             st.session_state.exam_submitted = False
             st.session_state.answers = {}
             st.session_state.question_index = 0
+            st.session_state.current_questions = []
             st.rerun()
     
+    # ఎగ్జామ్ యాക്టివ్‌గా రాస్తున్నప్పుడు కనిపించే స్క్రీన్
     else:
         st.title(st.session_state.exam_title)
         current = st.session_state.question_index
@@ -554,6 +601,10 @@ def exam_workspace_view():
         left, right = st.columns([4, 1])
 
         with right:
+            mins, secs = divmod(remaining_time, 60)
+            st.metric(label="⏱️ Time Remaining", value=f"{mins:02d}:{secs:02d}")
+            st.divider()
+            
             st.subheader("Questions")
             cols = st.columns(3)
             for i in range(total_questions):
@@ -575,25 +626,21 @@ def exam_workspace_view():
 
             stored_ans = st.session_state.answers.get(question["id"], "")
             
-            # Render inputs dynamically based on context question type
             if question["type"] == "mcq":
                 opts = [question["option_a"], question["option_b"], question["option_c"], question["option_d"]]
                 try:
                     default_idx = opts.index(stored_ans) if stored_ans in opts else None
                 except ValueError:
                     default_idx = None
-
                 answer = st.radio("Choose Answer", opts, index=default_idx, key=f"radio_{question['id']}")
             elif question["type"] == "blank":
                 answer = st.text_input("Your Answer", value=stored_ans, key=f"text_{question['id']}")
             else:
                 answer = st.text_area("Write your Code/Answer here:", value=stored_ans, key=f"code_{question['id']}", height=250)
 
-            # Update working state cache memory asynchronously
             if answer != stored_ans:
                 st.session_state.answers[question["id"]] = answer
 
-            # Form handling navigation control buttons layout row
             st.write("")
             nav_col1, nav_col2, submit_col = st.columns([1, 1, 2])
             with nav_col1:
@@ -606,7 +653,6 @@ def exam_workspace_view():
                     st.rerun()
             with submit_col:
                 if st.button("🚀 Finalize & Submit Exam", type="primary", use_container_width=True):
-                    # Calculate baseline score for non-programming variables
                     final_score = 0
                     attempt_uuid = str(uuid.uuid4())
                     
@@ -616,25 +662,23 @@ def exam_workspace_view():
                             if str(user_val).strip().lower() == str(q["correct_answer"]).strip().lower():
                                 final_score += 1
                     
-                    # Log baseline master record
                     supabase.table("exam_attempts").insert({
-                        "id": attempt_uuid,
-                        "user_id": st.session_state.user_id,
-                        "exam_id": st.session_state.exam_id,
-                        "score": final_score
+                        "id": attempt_uuid, "user_id": st.session_state.user_id,
+                        "exam_id": st.session_state.exam_id, "score": final_score
                     }).execute()
                     
-                    # Batch records logic for answers
                     for q in questions:
                         user_val = st.session_state.answers.get(q["id"], "")
                         supabase.table("user_answers").insert({
-                            "attempt_id": attempt_uuid,
-                            "question_id": q["id"],
-                            "answer": user_val
+                            "attempt_id": attempt_uuid, "question_id": q["id"], "answer": user_val
                         }).execute()
                         
                     st.session_state.exam_submitted = True
                     st.rerun()
+        
+        # 🌟 ప్రతి 1 సెకనుకి స్మూత్ రిఫ్రెష్ చేయడానికి (యాప్ అస్సలు హ్యాంగ్ అవ్వదు)
+        time.sleep(1)
+        st.rerun()
 
 # =========================
 # MAIN ROUTING ENGINE CONTROL
