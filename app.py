@@ -535,51 +535,32 @@ if st.session_state.start_exam:
     
         for i in range(total_questions):
     
-            col = cols[i % 3]
-    
-            with col:
+            with cols[i % 3]:
     
                 q_id = questions[i]["id"]
     
                 # DEFAULT RED
+                label = f"🔴 {i+1}"
     
-                bg_color = "#ff4b4b"
-    
-                # ANSWERED GREEN
-    
+                # ANSWERED -> GREEN
                 if (
                     q_id in st.session_state.answers
                     and st.session_state.answers[q_id]
                 ):
-                    bg_color = "#28a745"
+                    label = f"🟢 {i+1}"
     
-                # CURRENT QUESTION BLUE
-    
+                # CURRENT -> BLUE
                 if i == current:
-                    bg_color = "#1f77ff"
-    
-                st.markdown(
-                    f"""
-                    <style>
-                    div[data-testid="stButton"] button {{
-                        background-color: {bg_color};
-                        color: white;
-                        border-radius: 10px;
-                        font-weight: bold;
-                    }}
-                    </style>
-                    """,
-                    unsafe_allow_html=True
-                )
+                    label = f"🔵 {i+1}"
     
                 if st.button(
-                    str(i + 1),
-                    key=f"nav_btn_{i}_{current}",
+                    label,
+                    key=f"qnav_{i}",
                     use_container_width=True
                 ):
-    
                     st.session_state.question_index = i
                     st.rerun()
+       
 
         
     
