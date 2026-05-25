@@ -14,7 +14,7 @@ supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 # PAGE CONFIG
 # =========================
 st.set_page_config(
-    page_title="LMS Application with Leaderboard",
+    page_title="Advanced LMS Admin Portal",
     layout="wide"
 )
 
@@ -66,11 +66,8 @@ def login():
 # HELPER: FETCH LEADERBOARD DATA
 # =========================
 def get_exam_leaderboard(exam_id):
-    """Fetches and sorts attempts for a specific exam to build a leaderboard"""
     attempts = supabase.table("exam_attempts").select("*").eq("exam_id", exam_id).execute().data
     leaderboard = []
-    
-    # Track unique users to show only their best attempt score
     user_best_scores = {}
     for att in attempts:
         uid = att["user_id"]
@@ -86,155 +83,255 @@ def get_exam_leaderboard(exam_id):
                 "Email": user_info[0]["email"],
                 "Score": max_score
             })
-            
-    # Sort by Score descending
-    leaderboard = sorted(leaderboard, key=lambda x: x["Score"], reverse=True)
-    return leaderboard
+    return sorted(leaderboard, key=lambda x: x["Score"], reverse=True)
 
 # =========================
-# ADMIN DASHBOARD
+# ADMIN DASHBOARD (UPDATED LUXURY GUI)
 # =========================
 def admin_dashboard():
-    st.sidebar.title("Admin Panel")
+    st.sidebar.title("🛡️ Admin Workspace")
+    
+    # Simple Clean Categorization Sidebar Menu
     menu = st.sidebar.selectbox(
-        "Menu",
-        ["Add Module", "Add Submodule", "Add Class", "Create Exam", "Add Questions", "View Results", "Global Leaderboard"]
+        "Navigation Control",
+        ["🗂️ Manage Course Content", "📝 Manage Exams & Questions", "📊 Student Results & Ranks"]
     )
 
-    if menu == "Add Module":
-        st.title("Add Module")
-        module_name = st.text_input("Module Name")
-        if st.button("Add Module"):
-            supabase.table("modules").insert({"title": module_name}).execute()
-            st.success("Module Added")
+    # ----------------------------------------------------
+    # TAB 1: MANAGE COURSE CONTENT (MODULES, SUBMODULES, CLASSES)
+    # ----------------------------------------------------
+    if menu == "🗂️ Manage Course Content":
+        tab1, tab2, tab3 = st.tabs(["📁 Modules Setup", "📂 Submodules Setup", "🖥️ Live/Recorded Classes"])
+        
+        # --- MODULES SETUP ---
+        with tab1:
+            st.subheader("Manage Core Modules")
+            with st.form("add_module_form", clear_on_submit=True):
+                module_name = st.text_input("New Module Title")
+                if st.form_submit_button("✨ Save Module"):
+                    if module_name.strip():
+                        supabase.table("modules").insert({"title": module_name}).execute()
+                        st.success("Module Added Successfully!")
+                        st.rerun()
 
-    elif menu == "Add Submodule":
-        st.title("Add Submodule")
-        modules = supabase.table("modules").select("*").execute().data
-        module_names = [m["title"] for m in modules]
-        selected_module = st.selectbox("Select Module", module_names)
-        submodule_name = st.text_input("Submodule Name")
+            st.divider()
+            st.write("### Existing Modules (Edit / Delete Panel)")
+            modules = supabase.table("modules").select("*").execute().data
+            for m in modules:
+                col1, col2, col3 = st.columns([4, 1, 1])
+                with col1:
+                    new_m_title = st.text_input("Module Name", value=m["title"], key=f"mod_t_{m['id']}")
+                with col2:
+                    if st.button("💾 Update", key=f"mod_u_{m['id']}", use_container_width=True):
+                        supabase.table("modules").update({"title": new_m_title}).eq("id", m["id"]).execute()
+                        st.success("Updated!")
+                        st.rerun()
+                with col3:
+                    if st.button("🗑️ Delete", key=f"mod_d_{m['id']}", type="secondary", use_container_width=True):
+                        supabase.table("modules").delete().eq("id", m["id"]).execute()
+                        st.warning("Module Deleted!")
+                        st.rerun()
 
-        if st.button("Add Submodule"):
-            module_id = next((m["id"] for m in modules if m["title"] == selected_module), None)
-            supabase.table("submodules").insert({"module_id": module_id, "title": submodule_name}).execute()
-            st.success("Submodule Added")
-
-    elif menu == "View Results":
-        st.title("Student Exam Results")
-        attempts = supabase.table("exam_attempts").select("*").execute().data
-
-        if len(attempts) == 0:
-            st.warning("No attempts found")
-        else:
-            for attempt in attempts:
-                user_data = supabase.table("users").select("*").eq("id", attempt["user_id"]).execute().data
-                exam_data = supabase.table("exams").select("*").eq("id", attempt["exam_id"]).execute().data
-
-                if len(user_data) == 0 or len(exam_data) == 0:
-                    continue
-
-                user = user_data[0]
-                exam = exam_data[0]
-
-                st.divider()
-                st.subheader(f"{user['name']} - {exam['title']}")
-                st.success(f"Score : {attempt['score']}")
-
-    elif menu == "Global Leaderboard":
-        st.title("🏆 Admin Leaderboard Viewer")
-        exams = supabase.table("exams").select("*").execute().data
-        if exams:
-            exam_titles = [e["title"] for e in exams]
-            selected_exam_title = st.selectbox("Select Exam to View Leaderboard", exam_titles)
-            selected_exam = next((e for e in exams if e["title"] == selected_exam_title), None)
+        # --- SUBMODULES SETUP ---
+        with tab2:
+            st.subheader("Manage Submodules")
+            modules_list = supabase.table("modules").select("*").execute().data
+            mod_options = {m["title"]: m["id"] for m in modules_list} if modules_list else {}
             
-            if selected_exam:
-                board = get_exam_leaderboard(selected_exam["id"])
-                if board:
-                    st.subheader(f"Rankings for {selected_exam['title']}")
-                    for idx, student in enumerate(board):
-                        medal = "🥇" if idx == 0 else "🥈" if idx == 1 else "🥉" if idx == 2 else f" {idx+1}."
-                        st.write(f"{medal} **{student['Name']}** ({student['Email']}) — Score: **{student['Score']}**")
-                else:
-                    st.info("No students have attempted this exam yet.")
-        else:
-            st.warning("No exams available.")
+            with st.form("add_sub_form", clear_on_submit=True):
+                sel_mod = st.selectbox("Select Parent Module", list(mod_options.keys()))
+                sub_name = st.text_input("Submodule Title")
+                if st.form_submit_button("✨ Save Submodule"):
+                    if sub_name.strip() and sel_mod:
+                        supabase.table("submodules").insert({"module_id": mod_options[sel_mod], "title": sub_name}).execute()
+                        st.success("Submodule Linked!")
+                        st.rerun()
 
-    elif menu == "Add Class":
-        st.title("Add Class")
-        submodules = supabase.table("submodules").select("*").execute().data
-        sub_names = [s["title"] for s in submodules]
-        selected_sub = st.selectbox("Select Submodule", sub_names)
-        class_title = st.text_input("Class Title")
-        class_link = st.text_input("Class Link")
-        video_link = st.text_input("Recorded Video Link")
-        notes_pdf = st.text_input("Notes PDF URL")
+            st.divider()
+            st.write("### Existing Submodules (Edit / Delete Panel)")
+            submodules = supabase.table("submodules").select("*").execute().data
+            for s in submodules:
+                p_module = supabase.table("modules").select("title").eq("id", s["module_id"]).execute().data
+                p_title = p_module[0]["title"] if p_module else "Unknown Module"
+                
+                col1, col2, col3, col4 = st.columns([2, 3, 1, 1])
+                with col1:
+                    st.caption(f"Parent: {p_title}")
+                with col2:
+                    new_s_title = st.text_input("Edit Title", value=s["title"], key=f"sub_t_{s['id']}", label_visibility="collapsed")
+                with col3:
+                    if st.button("💾 Update", key=f"sub_u_{s['id']}", use_container_width=True):
+                        supabase.table("submodules").update({"title": new_s_title}).eq("id", s["id"]).execute()
+                        st.success("Updated!")
+                        st.rerun()
+                with col4:
+                    if st.button("🗑️ Delete", key=f"sub_d_{s['id']}", type="secondary", use_container_width=True):
+                        supabase.table("submodules").delete().eq("id", s["id"]).execute()
+                        st.warning("Deleted!")
+                        st.rerun()
 
-        if st.button("Add Class"):
-            submodule_id = next((s["id"] for s in submodules if s["title"] == selected_sub), None)
-            supabase.table("classes").insert({
-                "submodule_id": submodule_id, "title": class_title, "class_link": class_link,
-                "recorded_video": video_link, "notes_pdf": notes_pdf
-            }).execute()
-            st.success("Class Added")
+        # --- CLASSES SETUP ---
+        with tab3:
+            st.subheader("Manage Stream/Video Classes")
+            sub_list = supabase.table("submodules").select("*").execute().data
+            sub_options = {s["title"]: s["id"] for s in sub_list} if sub_list else {}
+            
+            with st.expander("➕ Add New Class Room"):
+                with st.form("add_class_form", clear_on_submit=True):
+                    sel_sub = st.selectbox("Link to Submodule", list(sub_options.keys()))
+                    c_title = st.text_input("Class Title")
+                    c_link = st.text_input("Live Stream Link")
+                    v_link = st.text_input("Recorded Video URL")
+                    p_link = st.text_input("Notes PDF URL")
+                    if st.form_submit_button("🚀 Deploy Class"):
+                        supabase.table("classes").insert({
+                            "submodule_id": sub_options[sel_sub], "title": c_title,
+                            "class_link": c_link, "recorded_video": v_link, "notes_pdf": p_link
+                        }).execute()
+                        st.success("Class Data Broadcasted!")
+                        st.rerun()
 
-    elif menu == "Create Exam":
-        st.title("Create Exam")
-        classes = supabase.table("classes").select("*").execute().data
-        class_titles = [c["title"] for c in classes]
-        selected_class = st.selectbox("Select Class", class_titles)
-        exam_title = st.text_input("Exam Title")
+            st.divider()
+            st.write("### Active Classes Directory")
+            classes = supabase.table("classes").select("*").execute().data
+            for cls in classes:
+                with st.expander(f"🖥️ {cls['title']} Settings"):
+                    ec_title = st.text_input("Title", value=cls["title"], key=f"ct_{cls['id']}")
+                    ec_link = st.text_input("Live Link", value=cls["class_link"], key=f"cl_{cls['id']}")
+                    ev_link = st.text_input("Video Link", value=cls["recorded_video"], key=f"cv_{cls['id']}")
+                    ep_link = st.text_input("PDF Link", value=cls["notes_pdf"], key=f"cp_{cls['id']}")
+                    
+                    b1, b2 = st.columns(2)
+                    with b1:
+                        if st.button("💾 Save Changes", key=f"cu_{cls['id']}", type="primary", use_container_width=True):
+                            supabase.table("classes").update({
+                                "title": ec_title, "class_link": ec_link, "recorded_video": ev_link, "notes_pdf": ep_link
+                            }).eq("id", cls["id"]).execute()
+                            st.success("Class Record Saved!")
+                            st.rerun()
+                    with b2:
+                        if st.button("🗑️ Remove Class", key=f"cd_{cls['id']}", use_container_width=True):
+                            supabase.table("classes").delete().eq("id", cls["id"]).execute()
+                            st.warning("Class Data Purged!")
+                            st.rerun()
+
+    # ----------------------------------------------------
+    # TAB 2: MANAGE EXAMS AND QUESTIONS
+    # ----------------------------------------------------
+    elif menu == "📝 Manage Exams & Questions":
+        ex_tab1, ex_tab2 = st.tabs(["📝 Exams Setup & Instant Control", "❓ Add/Manage Test Bank"])
         
-        # database Column update fixed to 'password'
-        exam_password = st.text_input("Exam Password (Optional)", type="password")
+        with ex_tab1:
+            st.subheader("Setup Dynamic Exams")
+            classes_list = supabase.table("classes").select("*").execute().data
+            cls_options = {c["title"]: c["id"] for c in classes_list} if classes_list else {}
+            
+            with st.form("create_exam_form", clear_on_submit=True):
+                sel_cls = st.selectbox("Link with Lesson Class", list(cls_options.keys()))
+                e_title = st.text_input("Exam Sheet Name")
+                e_pwd = st.text_input("Exam Password Entry (Optional)", type="password")
+                c_en = st.checkbox("Turn On Exam (Visible to Students immediately)", value=True)
+                c_ans = st.checkbox("Enable Answers Visibility Sheet")
+                if st.form_submit_button("📋 Generate Exam Layout"):
+                    supabase.table("exams").insert({
+                        "class_id": cls_options[sel_cls], "title": e_title, "password": e_pwd if e_pwd.strip() != "" else None,
+                        "enabled": c_en, "show_answers": c_ans
+                    }).execute()
+                    st.success("Exam Created!")
+                    st.rerun()
+
+            st.divider()
+            st.write("### ⚙️ Live Exam Master Controls (Toggles inside Table GUI)")
+            exams_all = supabase.table("exams").select("*").execute().data
+            
+            for ex in exams_all:
+                st.markdown(f"#### 📄 Exam Sheet: **{ex['title']}**")
+                col_e1, col_e2, col_e3, col_e4 = st.columns([2, 2, 1, 1])
+                
+                with col_e1:
+                    # Instant Interactive Dashboard Toggles
+                    t_active = st.toggle("Exam State (Active/Disabled)", value=ex["enabled"], key=f"tog_en_{ex['id']}")
+                with col_e2:
+                    t_ans = st.toggle("Show Answer Key Sheet to User", value=ex["show_answers"], key=f"tog_ans_{ex['id']}")
+                with col_e3:
+                    if st.button("⚡ Update Status", key=f"up_ex_{ex['id']}", use_container_width=True):
+                        supabase.table("exams").update({"enabled": t_active, "show_answers": t_ans}).eq("id", ex["id"]).execute()
+                        st.success("Toggles Applied!")
+                        st.rerun()
+                with col_e4:
+                    if st.button("🗑️ Wipe Exam", key=f"del_ex_{ex['id']}", type="secondary", use_container_width=True):
+                        supabase.table("exams").delete().eq("id", ex["id"]).execute()
+                        st.warning("Exam Purged!")
+                        st.rerun()
+                st.divider()
+
+        with ex_tab2:
+            st.subheader("Add Questions to Active Test Bank")
+            exams_q = supabase.table("exams").select("*").execute().data
+            ex_options = {e["title"]: e["id"] for e in exams_q} if exams_q else {}
+            
+            with st.form("add_question_form", clear_on_submit=True):
+                sel_ex = st.selectbox("Select Target Exam Sheet", list(ex_options.keys()))
+                q_type = st.selectbox("Choose Response Type", ["mcq", "blank"])
+                q_text = st.text_area("Question/Task Input Paragraph")
+                
+                a = st.text_input("Choice A (Leave blank if Fill Blanks)")
+                b = st.text_input("Choice B")
+                c = st.text_input("Choice C")
+                d = st.text_input("Choice D")
+                
+                h_text = st.text_input("Hint Description")
+                c_ans_text = st.text_input("Literal Correct Answer String Matching Key")
+                
+                if st.form_submit_button("➕ Add Question Row"):
+                    supabase.table("questions").insert({
+                        "exam_id": ex_options[sel_ex], "question": q_text, "type": q_type,
+                        "option_a": a, "option_b": b, "option_c": c, "option_d": d,
+                        "correct_answer": c_ans_text, "hint": h_text
+                    }).execute()
+                    st.success("Question Added to Database Queue!")
+
+    # ----------------------------------------------------
+    # TAB 3: RESULTS AND LEADERBOARDS
+    # ----------------------------------------------------
+    elif menu == "📊 Student Results & Ranks":
+        r_tab1, r_tab2 = st.tabs(["🏆 Live Dynamic Leaderboards", "📜 Individual Score Summary"])
         
-        enable_exam = st.checkbox("Enable Exam")
-        show_answers = st.checkbox("Enable Answers")
-
-        if st.button("Create Exam"):
-            class_id = next((c["id"] for c in classes if c["title"] == selected_class), None)
-            supabase.table("exams").insert({
-                "class_id": class_id, 
-                "title": exam_title, 
-                "password": exam_password if exam_password.strip() != "" else None,
-                "enabled": enable_exam, 
-                "show_answers": show_answers
-            }).execute()
-            st.success("Exam Created")
-
-    elif menu == "Add Questions":
-        st.title("Add Questions")
-        exams = supabase.table("exams").select("*").execute().data
-        exam_titles = [e["title"] for e in exams]
-        selected_exam = st.selectbox("Select Exam", exam_titles)
-        q_type = st.selectbox("Question Type", ["mcq", "blank"])
-        question = st.text_area("Question")
-
-        option_a, option_b, option_c, option_d = "", "", "", ""
-        if q_type == "mcq":
-            option_a = st.text_input("Option A")
-            option_b = st.text_input("Option B")
-            option_c = st.text_input("Option C")
-            option_d = st.text_input("Option D")
-
-        hint = st.text_input("Hint")
-        correct_answer = st.text_input("Correct Answer")
-
-        if st.button("Add Question"):
-            exam_id = next((e["id"] for e in exams if e["title"] == selected_exam), None)
-            supabase.table("questions").insert({
-                "exam_id": exam_id, "question": question, "type": q_type,
-                "option_a": option_a, "option_b": option_b, "option_c": option_c, "option_d": option_d,
-                "correct_answer": correct_answer, "hint": hint
-            }).execute()
-            st.success("Question Added")
+        with r_tab1:
+            st.title("🏆 Leaderboard Sorting Panel")
+            exams = supabase.table("exams").select("*").execute().data
+            if exams:
+                exam_titles = [e["title"] for e in exams]
+                sel_ex_lb = st.selectbox("Select Target Exam to Sort Rankings", exam_titles)
+                target_ex = next((e for e in exams if e["title"] == sel_ex_lb), None)
+                
+                if target_ex:
+                    board = get_exam_leaderboard(target_ex["id"])
+                    if board:
+                        for rank, st_row in enumerate(board):
+                            medal = "🥇" if rank == 0 else "🥈" if rank == 1 else "🥉" if rank == 2 else f" {rank+1}."
+                            st.write(f"{medal} **{st_row['Name']}** ({st_row['Email']}) — Score Result: **{st_row['Score']}**")
+                    else:
+                        st.info("No attempts recorded for this layout test sheet.")
+                        
+        with r_tab2:
+            st.title("Raw Student Attempts Review Logger")
+            attempts = supabase.table("exam_attempts").select("*").execute().data
+            if len(attempts) == 0:
+                st.warning("Zero user submissions reported.")
+            else:
+                for att in attempts:
+                    u_prof = supabase.table("users").select("*").eq("id", att["user_id"]).execute().data
+                    e_prof = supabase.table("exams").select("*").eq("id", att["exam_id"]).execute().data
+                    if u_prof and e_prof:
+                        st.markdown(f"👤 **{u_prof[0]['name']}** completed **{e_prof[0]['title']}** | Earned Score: **{att['score']}**")
+                        st.divider()
 
 # =========================
 # USER DASHBOARD
 # =========================
 def user_dashboard():
-    st.sidebar.title("User Panel")
+    st.sidebar.title("User Workspace Panel")
     modules = supabase.table("modules").select("*").execute().data
 
     for module in modules:
@@ -257,16 +354,13 @@ def user_dashboard():
                     for exam in exams:
                         if exam["enabled"]:
                             st.write(f"📝 **Exam: {exam['title']}**")
-                            
-                            # Layout dividing for Leaderboard vs Action Buttons
                             btn_col, lb_col = st.columns([2, 2])
                             
                             with lb_col:
-                                # Mini Leaderboard showing Top 3 for students
                                 board = get_exam_leaderboard(exam["id"])
                                 if board:
                                     st.markdown("🏆 **Top Performers:**")
-                                    for idx, student in enumerate(board[:3]): # Top 3 only
+                                    for idx, student in enumerate(board[:3]):
                                         medal = "🥇" if idx == 0 else "🥈" if idx == 1 else "🥉"
                                         st.caption(f"{medal} {student['Name']} — Score: {student['Score']}")
                                 else:
@@ -328,7 +422,6 @@ if st.session_state.logged_in and st.session_state.start_exam:
     else:
         if st.session_state.exam_submitted:
             st.title(f"📊 Results: {st.session_state.exam_title}")
-            
             db_attempt = supabase.table("exam_attempts").select("*")\
                 .eq("user_id", st.session_state.user_id)\
                 .eq("exam_id", st.session_state.exam_id).execute().data
