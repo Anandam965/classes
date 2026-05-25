@@ -527,8 +527,65 @@ if st.session_state.start_exam:
     
     left, right = st.columns([4,1])
 
-    with right:
     
+    with right:
+
+        st.subheader("Questions")
+    
+        cols = st.columns(3)
+    
+        for i in range(total_questions):
+    
+            col = cols[i % 3]
+    
+            with col:
+    
+                # COLOR CONDITIONS
+    
+                q_id = questions[i]["id"]
+    
+                bg_color = "#ff4b4b"  # RED default
+    
+                if q_id in st.session_state.answers and st.session_state.answers[q_id]:
+    
+                    bg_color = "#28a745"  # GREEN answered
+    
+                if i == current:
+    
+                    bg_color = "#1f77ff"  # BLUE current
+    
+                st.markdown(
+                    f"""
+                    <style>
+                    div.stButton > button[kind="secondary"][data-testid="baseButton-secondary"] {{
+                        border-radius: 10px;
+                    }}
+                    </style>
+                    """,
+                    unsafe_allow_html=True
+                )
+    
+                if st.button(
+                    str(i + 1),
+                    key=f"nav_{i}",
+                    use_container_width=True
+                ):
+    
+                    st.session_state.question_index = i
+                    st.rerun()
+    
+                st.markdown(
+                    f"""
+                    <style>
+                    div[data-testid="stButton"] button {{
+                        background-color:{bg_color};
+                        color:white;
+                        font-weight:bold;
+                    }}
+                    </style>
+                    """,
+                    unsafe_allow_html=True
+                )
         st.subheader("Questions")
     
         cols = st.columns(3)
@@ -555,7 +612,7 @@ if st.session_state.start_exam:
     
         st.write(question["question"])
 
-    st.write(question["question"])
+    
 
     if question["type"] == "mcq":
         answer = st.radio(
