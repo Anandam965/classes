@@ -44,7 +44,7 @@ def login():
     email = st.text_input("Email")
     password = st.text_input("Password", type="password")
 
-    if st.button("Login"):
+    if st.button("Login", type="primary", use_container_width=True):
         try:
             response = supabase.auth.sign_in_with_password({
                 "email": email,
@@ -66,44 +66,51 @@ def login():
 # HELPER: FETCH LEADERBOARD DATA
 # =========================
 def get_exam_leaderboard(exam_id):
-    attempts = supabase.table("exam_attempts").select("*").eq("exam_id", exam_id).execute().data
-    leaderboard = []
-    user_best_scores = {}
-    for att in attempts:
-        uid = att["user_id"]
-        score = att["score"]
-        if uid not in user_best_scores or score > user_best_scores[uid]:
-            user_best_scores[uid] = score
+    try:
+        attempts = supabase.table("exam_attempts").select("*").eq("exam_id", exam_id).execute().data
+        leaderboard = []
+        user_best_scores = {}
+        for att in attempts:
+            uid = att["user_id"]
+            score = att["score"]
+            if uid not in user_best_scores or score > user_best_scores[uid]:
+                user_best_scores[uid] = score
 
-    for uid, max_score in user_best_scores.items():
-        user_info = supabase.table("users").select("name, email").eq("id", uid).execute().data
-        if user_info:
-            leaderboard.append({
-                "Name": user_info[0]["name"],
-                "Email": user_info[0]["email"],
-                "Score": max_score
-            })
-    return sorted(leaderboard, key=lambda x: x["Score"], reverse=True)
+        for uid, max_score in user_best_scores.items():
+            user_info = supabase.table("users").select("name, email").eq("id", uid).execute().data
+            if user_info:
+                leaderboard.append({
+                    "Name": user_info[0]["name"],
+                    "Email": user_info[0]["email"],
+                    "Score": max_score
+                })
+        return sorted(leaderboard, key=lambda x: x["Score"], reverse=True)
+    except Exception:
+        return []
 
 # =========================
-# ADMIN DASHBOARD (UPDATED LUXURY GUI)
+# ADMIN DASHBOARD
 # =========================
 def admin_dashboard():
     st.sidebar.title("🛡️ Admin Workspace")
     
-    # Simple Clean Categorization Sidebar Menu
+    if st.sidebar.button("🚪 Logout", use_container_width=True):
+        st.session_state.logged_in = False
+        st.session_state.role = ""
+        st.session_state.user_id = ""
+        st.rerun()
+        
     menu = st.sidebar.selectbox(
         "Navigation Control",
         ["🗂️ Manage Course Content", "📝 Manage Exams & Questions", "📊 Student Results & Ranks"]
     )
 
     # ----------------------------------------------------
-    # TAB 1: MANAGE COURSE CONTENT (MODULES, SUBMODULES, CLASSES)
+    # TAB 1: MANAGE COURSE CONTENT
     # ----------------------------------------------------
     if menu == "🗂️ Manage Course Content":
         tab1, tab2, tab3 = st.tabs(["📁 Modules Setup", "📂 Submodules Setup", "🖥️ Live/Recorded Classes"])
         
-        # --- MODULES SETUP ---
         with tab1:
             st.subheader("Manage Core Modules")
             with st.form("add_module_form", clear_on_submit=True):
@@ -132,7 +139,6 @@ def admin_dashboard():
                         st.warning("Module Deleted!")
                         st.rerun()
 
-        # --- SUBMODULES SETUP ---
         with tab2:
             st.subheader("Manage Submodules")
             modules_list = supabase.table("modules").select("*").execute().data
@@ -170,7 +176,6 @@ def admin_dashboard():
                         st.warning("Deleted!")
                         st.rerun()
 
-        # --- CLASSES SETUP ---
         with tab3:
             st.subheader("Manage Stream/Video Classes")
             sub_list = supabase.table("submodules").select("*").execute().data
@@ -219,7 +224,7 @@ def admin_dashboard():
     # TAB 2: MANAGE EXAMS AND QUESTIONS
     # ----------------------------------------------------
     elif menu == "📝 Manage Exams & Questions":
-        ex_tab1, ex_tab2 = st.tabs(["📝 Exams Setup & Instant Control", "❓ Add/Manage Test Bank"])
+        ex_tab1, ex_tab2, ex_tab3 = st.tabs(["📝 Exams Setup & Instant Control", "❓ Add Questions", "🔍 Review & Edit Existing Papers"])
         
         with ex_tab1:
             st.subheader("Setup Dynamic Exams")
@@ -241,7 +246,7 @@ def admin_dashboard():
                     st.rerun()
 
             st.divider()
-            st.write("### ⚙️ Live Exam Master Controls (Toggles inside Table GUI)")
+            st.write("### ⚙️ Live Exam Master Controls")
             exams_all = supabase.table("exams").select("*").execute().data
             
             for ex in exams_all:
@@ -249,7 +254,6 @@ def admin_dashboard():
                 col_e1, col_e2, col_e3, col_e4 = st.columns([2, 2, 1, 1])
                 
                 with col_e1:
-                    # Instant Interactive Dashboard Toggles
                     t_active = st.toggle("Exam State (Active/Disabled)", value=ex["enabled"], key=f"tog_en_{ex['id']}")
                 with col_e2:
                     t_ans = st.toggle("Show Answer Key Sheet to User", value=ex["show_answers"], key=f"tog_ans_{ex['id']}")
@@ -272,30 +276,96 @@ def admin_dashboard():
             
             with st.form("add_question_form", clear_on_submit=True):
                 sel_ex = st.selectbox("Select Target Exam Sheet", list(ex_options.keys()))
-                q_type = st.selectbox("Choose Response Type", ["mcq", "blank"])
+                q_type = st.selectbox("Choose Response Type", ["mcq", "blank", "programming"])
                 q_text = st.text_area("Question/Task Input Paragraph")
                 
-                a = st.text_input("Choice A (Leave blank if Fill Blanks)")
+                a = st.text_input("Choice A (Leave blank if Blank or Programming)")
                 b = st.text_input("Choice B")
                 c = st.text_input("Choice C")
                 d = st.text_input("Choice D")
                 
                 h_text = st.text_input("Hint Description")
-                c_ans_text = st.text_input("Literal Correct Answer String Matching Key")
+                c_ans_text = st.text_input("Literal Correct Answer String Matching Key (For MCQ/Blank)")
                 
                 if st.form_submit_button("➕ Add Question Row"):
                     supabase.table("questions").insert({
                         "exam_id": ex_options[sel_ex], "question": q_text, "type": q_type,
                         "option_a": a, "option_b": b, "option_c": c, "option_d": d,
-                        "correct_answer": c_ans_text, "hint": h_text
+                        "correct_answer": c_ans_text if q_type != "programming" else "Manual Review Required", 
+                        "hint": h_text
                     }).execute()
                     st.success("Question Added to Database Queue!")
+                    st.rerun()
+
+        # NEW TAB: REVIEW, DELETE & ADD QUESTIONS DYNAMICALLY
+        with ex_tab3:
+            st.subheader("🔍 Review and Edit Existing Exam Papers")
+            exams_all_edit = supabase.table("exams").select("*").execute().data
+            
+            if not exams_all_edit:
+                st.info("No exams created yet.")
+            else:
+                exam_edit_options = {ex["title"]: ex["id"] for ex in exams_all_edit}
+                selected_exam_title = st.selectbox("Choose Exam Paper to Review", list(exam_edit_options.keys()))
+                selected_exam_id = exam_edit_options[selected_exam_title]
+                
+                # Fetch existing questions for the selected exam
+                current_questions = supabase.table("questions").select("*").eq("exam_id", selected_exam_id).execute().data
+                
+                st.write(f"### Questions in **{selected_exam_title}** ({len(current_questions)} total)")
+                
+                if not current_questions:
+                    st.warning("This exam paper currently has no questions.")
+                else:
+                    for idx, q in enumerate(current_questions):
+                        with st.container(border=True):
+                            col_q1, col_q2 = st.columns([5, 1])
+                            with col_q1:
+                                st.markdown(f"**Q{idx+1}. {q['question']}** `({str(q['type']).upper()})`")
+                                if q["type"] == "mcq":
+                                    st.caption(f"A: {q['option_a']} | B: {q['option_b']} | C: {q['option_c']} | D: {q['option_d']}")
+                                st.caption(f"🎯 **Correct Answer:** {q['correct_answer']} | 💡 **Hint:** {q['hint']}")
+                            with col_q2:
+                                if st.button("🗑️ Delete", key=f"del_q_{q['id']}", type="secondary", use_container_width=True):
+                                    supabase.table("questions").delete().eq("id", q["id"]).execute()
+                                    st.success(f"Question {idx+1} Deleted!")
+                                    st.rerun()
+                
+                st.divider()
+                st.markdown("#### ➕ Add a Missing Question to this Paper")
+                with st.form("quick_add_question_form", clear_on_submit=True):
+                    q_type_new = st.selectbox("Type", ["mcq", "blank", "programming"], key="new_q_type")
+                    q_text_new = st.text_area("Question Text", key="new_q_text")
+                    
+                    col_opts1, col_opts2 = st.columns(2)
+                    with col_opts1:
+                        a_new = st.text_input("Option A", key="new_a")
+                        b_new = st.text_input("Option B", key="new_b")
+                    with col_opts2:
+                        c_new = st.text_input("Option C", key="new_c")
+                        d_new = st.text_input("Option D", key="new_d")
+                        
+                    h_text_new = st.text_input("Hint", key="new_hint")
+                    c_ans_new = st.text_input("Correct Answer Key", key="new_ans")
+                    
+                    if st.form_submit_button("🚀 Add Question Instantly"):
+                        if q_text_new.strip():
+                            supabase.table("questions").insert({
+                                "exam_id": selected_exam_id, "question": q_text_new, "type": q_type_new,
+                                "option_a": a_new, "option_b": b_new, "option_c": c_new, "option_d": d_new,
+                                "correct_answer": c_ans_new if q_type_new != "programming" else "Manual Review Required", 
+                                "hint": h_text_new
+                            }).execute()
+                            st.success("New question injected into this paper!")
+                            st.rerun()
+                        else:
+                            st.error("Question text cannot be empty!")
 
     # ----------------------------------------------------
     # TAB 3: RESULTS AND LEADERBOARDS
     # ----------------------------------------------------
     elif menu == "📊 Student Results & Ranks":
-        r_tab1, r_tab2 = st.tabs(["🏆 Live Dynamic Leaderboards", "📜 Individual Score Summary"])
+        r_tab1, r_tab2, r_tab3 = st.tabs(["🏆 Live Dynamic Leaderboards", "📝 Manual Evaluation (Code/Text)", "📜 Individual Score Summary"])
         
         with r_tab1:
             st.title("🏆 Leaderboard Sorting Panel")
@@ -315,6 +385,32 @@ def admin_dashboard():
                         st.info("No attempts recorded for this layout test sheet.")
                         
         with r_tab2:
+            st.title("📝 Manual Code & Essay Evaluator")
+            attempts_to_eval = supabase.table("exam_attempts").select("*").execute().data
+            
+            if not attempts_to_eval:
+                st.info("No student submissions available for code review.")
+            else:
+                for att in attempts_to_eval:
+                    u_data = supabase.table("users").select("*").eq("id", att["user_id"]).execute().data
+                    e_data = supabase.table("exams").select("*").eq("id", att["exam_id"]).execute().data
+                    
+                    if u_data and e_data:
+                        with st.container(border=True):
+                            col_s1, col_s2 = st.columns([3, 1])
+                            with col_s1:
+                                st.markdown(f"👤 **Student:** {u_data[0]['name']} | 🎯 **Exam:** {e_data[0]['title']}")
+                                st.caption("💻 Submitted Answer / Programming Code:")
+                                st.code(att.get("submitted_answers", "# No code answer text submitted."), language="python")
+                            with col_s2:
+                                st.markdown("##### 🔢 Score Panel")
+                                new_score = st.number_input("Set Score", min_value=0, max_value=100, value=int(att["score"]), key=f"score_in_{att['id']}")
+                                if st.button("💾 Save Score", key=f"btn_score_{att['id']}", type="primary", use_container_width=True):
+                                    supabase.table("exam_attempts").update({"score": new_score}).eq("id", att["id"]).execute()
+                                    st.success("Score Saved!")
+                                    st.rerun()
+
+        with r_tab3:
             st.title("Raw Student Attempts Review Logger")
             attempts = supabase.table("exam_attempts").select("*").execute().data
             if len(attempts) == 0:
@@ -332,6 +428,12 @@ def admin_dashboard():
 # =========================
 def user_dashboard():
     st.sidebar.title("User Workspace Panel")
+    if st.sidebar.button("🚪 Logout", use_container_width=True):
+        st.session_state.logged_in = False
+        st.session_state.role = ""
+        st.session_state.user_id = ""
+        st.rerun()
+
     modules = supabase.table("modules").select("*").execute().data
 
     for module in modules:
@@ -441,11 +543,14 @@ if st.session_state.logged_in and st.session_state.start_exam:
                     u_ans = ans_map.get(q["id"], 'Not Answered')
                     c_ans = q["correct_answer"]
                     
-                    if str(u_ans).strip().lower() == str(c_ans).strip().lower():
-                        st.success(f"Your Answer: {u_ans} (Correct)")
+                    if q["type"] != "programming":
+                        if str(u_ans).strip().lower() == str(c_ans).strip().lower():
+                            st.success(f"Your Answer: {u_ans} (Correct)")
+                        else:
+                            st.error(f"Your Answer: {u_ans}")
+                            st.warning(f"Correct Answer: {c_ans}")
                     else:
-                        st.error(f"Your Answer: {u_ans}")
-                        st.warning(f"Correct Answer: {c_ans}")
+                        st.info(f"Your Code/Answer: {u_ans} (Manual Review Item)")
                     st.divider()
             else:
                 st.info("Answers are disabled by admin.")
@@ -494,8 +599,10 @@ if st.session_state.logged_in and st.session_state.start_exam:
                         default_idx = None
 
                     answer = st.radio("Choose Answer", opts, index=default_idx, key=f"radio_{question['id']}")
-                else:
+                elif question["type"] == "blank":
                     answer = st.text_input("Your Answer", value=stored_ans, key=f"text_{question['id']}")
+                else:
+                    answer = st.text_area("Write your Code/Answer here", value=stored_ans, key=f"code_{question['id']}", height=200)
 
                 if answer:
                     st.session_state.answers[question["id"]] = answer
@@ -513,18 +620,28 @@ if st.session_state.logged_in and st.session_state.start_exam:
 
             if current == total_questions - 1:
                 st.divider()
-                if st.button("Submit Exam", type="primary"):
+                if st.button("Submit Exam", type="primary", use_container_width=True):
                     score = 0
+                    # Auto scoring for non-programming tasks
                     for q in questions:
                         user_ans = st.session_state.answers.get(q["id"], "")
-                        if str(user_ans).strip().lower() == str(q["correct_answer"]).strip().lower():
-                            score += 1
+                        if q["type"] != "programming":
+                            if str(user_ans).strip().lower() == str(q["correct_answer"]).strip().lower():
+                                score += 1
                     
+                    # Compile text/code answers for admin review panel
+                    compiled_answers_text = ""
+                    for idx, q in enumerate(questions):
+                        if q["type"] == "programming":
+                            ans_txt = st.session_state.answers.get(q["id"], "No Answer")
+                            compiled_answers_text += f"--- Q{idx+1} Code Submission ---\n{ans_txt}\n\n"
+
                     attempt_response = supabase.table("exam_attempts").insert({
                         "user_id": st.session_state.user_id,
                         "exam_id": st.session_state.exam_id,
                         "score": score,
-                        "submitted": True
+                        "submitted": True,
+                        "submitted_answers": compiled_answers_text if compiled_answers_text != "" else "Objective Test Only"
                     }).execute()
 
                     if attempt_response.data:
