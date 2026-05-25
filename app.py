@@ -629,7 +629,7 @@ if st.session_state.start_exam:
     
                     if user_ans.strip().lower() == q["correct_answer"].strip().lower():
                         score += 1
-    
+                    st.session_state.exam_submitted = True    
             # SAVE ATTEMPT
             # =========================
             # SAVE ATTEMPT
@@ -690,85 +690,92 @@ if st.session_state.start_exam:
                 # =========================
     
             
-                if exam["show_answers"]:
-
-                    st.divider()
                 
-                    # BUTTON
+                if (
+                    exam["show_answers"]
+                    and st.session_state.exam_submitted
+                ):
                 
                     if st.button("Show Answers"):
-                
-                        st.subheader("Correct Answers")
-                
-                        for i, q in enumerate(questions):
-                
-                            st.markdown(
-                                f"### Question {i+1}"
-                            )
-                
-                            st.write(q["question"])
-                
-                            user_ans = st.session_state.answers.get(
-                                q["id"],
-                                "No Answer"
-                            )
-                
-                            st.info(
-                                f"Your Answer: {user_ans}"
-                            )
-                
-                            correct_answer = q["correct_answer"]
-                
-                            # CORRECT / WRONG
-                
-                            if str(user_ans).strip().lower() == str(correct_answer).strip().lower():
-                
-                                st.success("✅ Correct")
-                
-                            else:
-                
-                                st.error("❌ Wrong")
-                
-                            st.success(
-                                f"Correct Answer: {correct_answer}"
-                            )
-                
-                            # MCQ OPTIONS
-                
-                            if q["type"] == "mcq":
-                
-                                st.write("Options:")
-                
-                                st.write(
-                                    f"A. {q['option_a']}"
-                                )
-                
-                                st.write(
-                                    f"B. {q['option_b']}"
-                                )
-                
-                                st.write(
-                                    f"C. {q['option_c']}"
-                                )
-                
-                                st.write(
-                                    f"D. {q['option_d']}"
-                                )
-                
-                            # BLANK HINT
-                
-                            if q["type"] == "blank":
-                
-                                st.warning(
-                                    f"Hint: {q['hint']}"
-                                )
-                
-                            st.divider()
-                
-                else:
-                
-                    st.warning(
-                        "Answers are disabled by admin."
-                    )
+                        st.divider()
                     
-            st.session_state.start_exam = False
+                        # BUTTON
+                    
+                        if st.button("Show Answers"):
+                    
+                            st.subheader("Correct Answers")
+                    
+                            for i, q in enumerate(questions):
+                    
+                                st.markdown(
+                                    f"### Question {i+1}"
+                                )
+                    
+                                st.write(q["question"])
+                    
+                                user_ans = st.session_state.answers.get(
+                                    q["id"],
+                                    "No Answer"
+                                )
+                    
+                                st.info(
+                                    f"Your Answer: {user_ans}"
+                                )
+                    
+                                correct_answer = q["correct_answer"]
+                    
+                                # CORRECT / WRONG
+                    
+                                if str(user_ans).strip().lower() == str(correct_answer).strip().lower():
+                    
+                                    st.success("✅ Correct")
+                    
+                                else:
+                    
+                                    st.error("❌ Wrong")
+                    
+                                st.success(
+                                    f"Correct Answer: {correct_answer}"
+                                )
+                    
+                                # MCQ OPTIONS
+                    
+                                if q["type"] == "mcq":
+                    
+                                    st.write("Options:")
+                    
+                                    st.write(
+                                        f"A. {q['option_a']}"
+                                    )
+                    
+                                    st.write(
+                                        f"B. {q['option_b']}"
+                                    )
+                    
+                                    st.write(
+                                        f"C. {q['option_c']}"
+                                    )
+                    
+                                    st.write(
+                                        f"D. {q['option_d']}"
+                                    )
+                    
+                                # BLANK HINT
+                    
+                                if q["type"] == "blank":
+                    
+                                    st.warning(
+                                        f"Hint: {q['hint']}"
+                                    )
+                    
+                                st.divider()
+                    
+                    else:
+                    
+                        st.warning(
+                            "Answers are disabled by admin."
+                        )
+                        
+                
+                if "exam_submitted" not in st.session_state:
+                    st.session_state.exam_submitted = False
