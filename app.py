@@ -297,7 +297,6 @@ def admin_dashboard():
                     st.success("Question Added to Database Queue!")
                     st.rerun()
 
-        # NEW TAB: REVIEW, DELETE & ADD QUESTIONS DYNAMICALLY
         with ex_tab3:
             st.subheader("🔍 Review and Edit Existing Exam Papers")
             exams_all_edit = supabase.table("exams").select("*").execute().data
@@ -309,7 +308,6 @@ def admin_dashboard():
                 selected_exam_title = st.selectbox("Choose Exam Paper to Review", list(exam_edit_options.keys()))
                 selected_exam_id = exam_edit_options[selected_exam_title]
                 
-                # Fetch existing questions for the selected exam
                 current_questions = supabase.table("questions").select("*").eq("exam_id", selected_exam_id).execute().data
                 
                 st.write(f"### Questions in **{selected_exam_title}** ({len(current_questions)} total)")
@@ -399,7 +397,7 @@ def admin_dashboard():
                         with st.container(border=True):
                             col_s1, col_s2 = st.columns([3, 1])
                             with col_s1:
-                                st.markdown(f"👤 **Student:** {u_data[0]['name']} | 🎯 **Exam:** {e_data[0]['title']}")
+                                st.markdown(f"##### 👤 **Student:** {u_data[0]['name']} | 🎯 **Exam:** {e_data[0]['title']}")
                                 st.caption("💻 Submitted Answer / Programming Code:")
                                 st.code(att.get("submitted_answers", "# No code answer text submitted."), language="python")
                             with col_s2:
@@ -591,6 +589,7 @@ if st.session_state.logged_in and st.session_state.start_exam:
 
                 stored_ans = st.session_state.answers.get(question["id"], "")
                 
+                # Render inputs based on type
                 if question["type"] == "mcq":
                     opts = [question["option_a"], question["option_b"], question["option_c"], question["option_d"]]
                     try:
@@ -602,57 +601,58 @@ if st.session_state.logged_in and st.session_state.start_exam:
                 elif question["type"] == "blank":
                     answer = st.text_input("Your Answer", value=stored_ans, key=f"text_{question['id']}")
                 else:
-                    answer = st.text_area("Write your Code/Answer here", value=stored_ans, key=f"code_{question['id']}", height=200)
+                    answer = st.text_area("Write your Code/Answer here:", value=stored_ans, key=f"code_{question['id']}", height=250)
 
+                # Update running session states whenever user types/changes answers
                 if answer:
                     st.session_state.answers[question["id"]] = answer
 
-                col1, col2 = st.columns(2)
-                with col1:
-                    if st.button("Previous") and current > 0:
-                        st.session_state.question_index -= 1
-                        st.rerun()
-                with col2:
+                # Question Navigation Buttons Below Question Canvas
+                st.write("")
+                nav1, nav2, nav3 = st.columns([1, 1, 2])
+                with nav1:
+                    if current > 0:
+                        if st.button("⬅️ Previous", use_container_width=True):
+                            st.session_state.question_index -= 1
+                            st.rerun()
+                with nav2:
                     if current < total_questions - 1:
-                        if st.button("Next"):
+                        if st.button("Next ➡️", use_container_width=True):
                             st.session_state.question_index += 1
                             st.rerun()
-
-            if current == total_questions - 1:
-                st.divider()
-                if st.button("Submit Exam", type="primary", use_container_width=True):
-                    score = 0
-                    # Auto scoring for non-programming tasks
-                    for q in questions:
-                        user_ans = st.session_state.answers.get(q["id"], "")
-                        if q["type"] != "programming":
-                            if str(user_ans).strip().lower() == str(q["correct_answer"]).strip().lower():
-                                score += 1
-                    
-                    # Compile text/code answers for admin review panel
-                    compiled_answers_text = ""
-                    for idx, q in enumerate(questions):
-                        if q["type"] == "programming":
-                            ans_txt = st.session_state.answers.get(q["id"], "No Answer")
-                            compiled_answers_text += f"--- Q{idx+1} Code Submission ---\n{ans_txt}\n\n"
-
-                    attempt_response = supabase.table("exam_attempts").insert({
-                        "user_id": st.session_state.user_id,
-                        "exam_id": st.session_state.exam_id,
-                        "score": score,
-                        "submitted": True,
-                        "submitted_answers": compiled_answers_text if compiled_answers_text != "" else "Objective Test Only"
-                    }).execute()
-
-                    if attempt_response.data:
-                        attempt_id = attempt_response.data[0]["id"]
-                        for q in questions:
-                            user_answer = st.session_state.answers.get(q["id"], "")
-                            supabase.table("user_answers").insert({
-                                "attempt_id": attempt_id,
-                                "question_id": q["id"],
-                                "answer": user_answer
+                with nav3:
+                    if st.button("🚀 Final Submit Exam Paper", type="primary", use_container_width=True):
+                        # Calculate final score (filtering out programming updates for auto grading)
+                        final_score = 0
+                        for q_item in questions:
+                            q_id_check = q_item["id"]
+                            u_res = st.session_state.answers.get(q_id_check, "")
+                            c_res = q_item["correct_answer"]
+                            if q_item["type"] != "programming":
+                                if str(u_res).strip().lower() == str(c_res).strip().lower():
+                                    final_score += 1
+                        
+                        try:
+                            # 1. Insert global attempt record summary logs
+                            attempt_id = str(uuid.uuid4())
+                            supabase.table("exam_attempts").insert({
+                                "id": attempt_id,
+                                "user_id": st.session_state.user_id,
+                                "exam_id": st.session_state.exam_id,
+                                "score": final_score,
+                                "submitted_answers": str(st.session_state.answers)
                             }).execute()
 
-                    st.session_state.exam_submitted = True
-                    st.rerun()
+                            # 2. Map detailed answers breakdowns
+                            for q_item in questions:
+                                supabase.table("user_answers").insert({
+                                    "attempt_id": attempt_id,
+                                    "question_id": q_item["id"],
+                                    "answer": st.session_state.answers.get(q_item["id"], "")
+                                }).execute()
+
+                            st.session_state.exam_submitted = True
+                            st.success("Exam results submitted successfully!")
+                            st.rerun()
+                        except Exception as submit_error:
+                            st.error(f"Error submitting exam data: {str(submit_error)}")
