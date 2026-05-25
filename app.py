@@ -254,28 +254,49 @@ def admin_dashboard():
                     st.rerun()
 
             st.divider()
-            st.write("### ⚙️ Live Exam Master Controls")
+            st.write("### ⚙️ Live Exam Master Controls & Timer Editing")
             exams_all = supabase.table("exams").select("*").execute().data
             
             for ex in exams_all:
-                st.markdown(f"#### 📄 Exam Sheet: **{ex['title']}** ({ex.get('duration_mins', 30)} Mins)")
-                col_e1, col_e2, col_e3, col_e4 = st.columns([2, 2, 1, 1])
-                
-                with col_e1:
-                    t_active = st.toggle("Exam State (Active/Disabled)", value=ex["enabled"], key=f"tog_en_{ex['id']}")
-                with col_e2:
-                    t_ans = st.toggle("Show Answer Key Sheet to User", value=ex["show_answers"], key=f"tog_ans_{ex['id']}")
-                with col_e3:
-                    if st.button("⚡ Update Status", key=f"up_ex_{ex['id']}", use_container_width=True):
-                        supabase.table("exams").update({"enabled": t_active, "show_answers": t_ans}).eq("id", ex["id"]).execute()
-                        st.success("Toggles Applied!")
-                        st.rerun()
-                with col_e4:
-                    if st.button("🗑️ Wipe Exam", key=f"del_ex_{ex['id']}", type="secondary", use_container_width=True):
-                        supabase.table("exams").delete().eq("id", ex["id"]).execute()
-                        st.warning("Exam Purged!")
-                        st.rerun()
-                st.divider()
+                # ప్రతి ఎగ్జామ్ ఒక అందమైన బాక్స్ లో కనిపిస్తుంది
+                with st.container(border=True):
+                    st.markdown(f"#### 📄 Exam: **{ex['title']}**")
+                    
+                    # UI లోనే అడ్మిన్ నేరుగా టైమ్ మార్చుకోవడానికి ఇన్పుట్ బాక్స్ (డైనమిక్)
+                    col_edit1, col_edit2, col_edit3, col_edit4, col_edit5 = st.columns([2, 2, 2, 1, 1])
+                    
+                    with col_edit1:
+                        # UI నుండి టైమ్ మార్చుకునే ఆప్షన్
+                        current_duration = ex.get("duration_mins", 30)
+                        updated_duration = st.number_input(
+                            "Edit Duration (Mins)", 
+                            min_value=1, max_value=180, 
+                            value=int(current_duration), 
+                            key=f"dur_{ex['id']}"
+                        )
+                    with col_edit2:
+                        t_active = st.toggle("Exam Active", value=ex["enabled"], key=f"tog_en_{ex['id']}")
+                    with col_edit3:
+                        t_ans = st.toggle("Show Answer Key", value=ex["show_answers"], key=f"tog_ans_{ex['id']}")
+                    
+                    with col_edit4:
+                        st.write("") # స్పేస్ కోసం
+                        if st.button("💾 Save Changes", key=f"up_ex_{ex['id']}", type="primary", use_container_width=True):
+                            # డేటాబేస్ టేబుల్ లో అప్‌డేట్ అవుతుంది
+                            supabase.table("exams").update({
+                                "duration_mins": int(updated_duration),
+                                "enabled": t_active, 
+                                "show_answers": t_ans
+                            }).eq("id", ex["id"]).execute()
+                            st.success("Changes Saved Successfully!")
+                            st.rerun()
+                            
+                    with col_edit5:
+                        st.write("") 
+                        if st.button("🗑️ Wipe Exam", key=f"del_ex_{ex['id']}", type="secondary", use_container_width=True):
+                            supabase.table("exams").delete().eq("id", ex["id"]).execute()
+                            st.warning("Exam Purged!")
+                            st.rerun()
 
         with ex_tab2:
             st.subheader("Add Questions to Active Test Bank")
@@ -306,7 +327,7 @@ def admin_dashboard():
                     st.rerun()
 
         with ex_tab3:
-            st.subheader("🔍 Review and Edit Existing Exam Papers")
+            st.subheader("🔍 Review & Edit Existing Exam Papers")
             exams_all_edit = supabase.table("exams").select("*").execute().data
             
             if not exams_all_edit:
@@ -458,7 +479,9 @@ def user_dashboard():
                     exams = supabase.table("exams").select("*").eq("class_id", cls["id"]).execute().data
                     for exam in exams:
                         if exam["enabled"]:
-                            st.write(f"📝 **Exam: {exam['title']}** ({exam.get('duration_mins', 30)} Mins)")
+                            # స్టూడెంట్‌కి ఇక్కడ డైనమిక్ టైమ్ కనిపిస్తుంది
+                            exam_dur = exam.get("duration_mins", 30)
+                            st.write(f"📝 **Exam: {exam['title']}** ({exam_dur} Mins)")
                             btn_col, lb_col = st.columns([2, 2])
                             
                             with lb_col:
@@ -494,6 +517,8 @@ def user_dashboard():
                                             st.error("Wrong Exam Password!")
                                         else:
                                             q_data = supabase.table("questions").select("*").eq("exam_id", exam["id"]).execute().data
+                                            
+                                            # అడ్మిన్ మార్చిన కొత్త టైమ్ ఇక్కడ లోడ్ అవుతుంది
                                             duration = exam.get("duration_mins", 30)
                                             
                                             st.session_state.exam_id = exam["id"]
@@ -592,7 +617,7 @@ def exam_workspace_view():
             st.session_state.current_questions = []
             st.rerun()
     
-    # ఎగ్జామ్ యాക്టివ్‌గా రాస్తున్నప్పుడు కనిపించే స్క్రీన్
+    # ఎగ్జామ్ యాక్టివ్‌గా రాస్తున్నప్పుడు కనిపించే స్క్రీన్
     else:
         st.title(st.session_state.exam_title)
         current = st.session_state.question_index
@@ -676,7 +701,7 @@ def exam_workspace_view():
                     st.session_state.exam_submitted = True
                     st.rerun()
         
-        # 🌟 ప్రతి 1 సెకనుకి స్మూత్ రిఫ్రెష్ చేయడానికి (యాప్ అస్సలు హ్యాంగ్ అవ్వదు)
+        # ప్రతి సెకనుకి స్మూత్ రిఫ్రెష్
         time.sleep(1)
         st.rerun()
 
