@@ -529,7 +529,6 @@ if st.session_state.start_exam:
 
     
     with right:
-
         st.subheader("Questions")
     
         cols = st.columns(3)
@@ -540,69 +539,49 @@ if st.session_state.start_exam:
     
             with col:
     
-                # COLOR CONDITIONS
-    
                 q_id = questions[i]["id"]
     
-                bg_color = "#ff4b4b"  # RED default
+                # DEFAULT RED
     
-                if q_id in st.session_state.answers and st.session_state.answers[q_id]:
+                bg_color = "#ff4b4b"
     
-                    bg_color = "#28a745"  # GREEN answered
+                # ANSWERED GREEN
+    
+                if (
+                    q_id in st.session_state.answers
+                    and st.session_state.answers[q_id]
+                ):
+                    bg_color = "#28a745"
+    
+                # CURRENT QUESTION BLUE
     
                 if i == current:
-    
-                    bg_color = "#1f77ff"  # BLUE current
-    
-                st.markdown(
-                    f"""
-                    <style>
-                    div.stButton > button[kind="secondary"][data-testid="baseButton-secondary"] {{
-                        border-radius: 10px;
-                    }}
-                    </style>
-                    """,
-                    unsafe_allow_html=True
-                )
-    
-                if st.button(
-                    str(i + 1),
-                    key=f"nav_{i}",
-                    use_container_width=True
-                ):
-    
-                    st.session_state.question_index = i
-                    st.rerun()
+                    bg_color = "#1f77ff"
     
                 st.markdown(
                     f"""
                     <style>
                     div[data-testid="stButton"] button {{
-                        background-color:{bg_color};
-                        color:white;
-                        font-weight:bold;
+                        background-color: {bg_color};
+                        color: white;
+                        border-radius: 10px;
+                        font-weight: bold;
                     }}
                     </style>
                     """,
                     unsafe_allow_html=True
                 )
-        st.subheader("Questions")
-    
-        cols = st.columns(3)
-    
-        for i in range(total_questions):
-    
-            col = cols[i % 3]
-    
-            with col:
     
                 if st.button(
                     str(i + 1),
-                    key=f"nav_{i}"
+                    key=f"nav_btn_{i}_{current}",
+                    use_container_width=True
                 ):
     
                     st.session_state.question_index = i
                     st.rerun()
+
+        
     
     with left:
     
