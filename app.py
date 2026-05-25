@@ -267,16 +267,14 @@ def admin_dashboard():
                     
                     col_e1, col_e2, col_e3 = st.columns([2, 2, 2])
                     with col_e1:
-                        # UI లోనే నేరుగా డ్యూరేషన్ ఎడిట్ చేయడం
                         current_dur = ex.get("duration_mins", 30)
                         updated_dur = st.number_input("Edit Duration (Mins)", min_value=1, max_value=180, value=int(current_dur), key=f"dur_{ex['id']}")
                     with col_e2:
-                        # UI లో పాస్‌వర్డ్ చూసుకోవడం & మార్చుకోవడం
                         current_pwd = ex.get("password", "")
                         current_pwd_str = str(current_pwd) if current_pwd else ""
                         updated_pwd = st.text_input("Exam Password (View/Edit)", value=current_pwd_str, key=f"pwd_ed_{ex['id']}")
                     with col_e3:
-                        st.write("") # స్పేసింగ్ కోసం
+                        st.write("") 
                         t_active = st.toggle("Active (Visible)", value=ex["enabled"], key=f"tog_en_{ex['id']}")
                         t_ans = st.toggle("Show Answer Key", value=ex["show_answers"], key=f"tog_ans_{ex['id']}")
                     
@@ -516,12 +514,11 @@ def user_dashboard():
                                         if has_password and entered_pwd.strip() != str(exam["password"]).strip():
                                             st.error("Wrong Exam Password!")
                                         else:
-                                            # ఇక్కడ ముందుగా ఇన్స్ట్రక్షన్స్ పేజీ కి పంపిస్తున్నాము
                                             q_data = supabase.table("questions").select("*").eq("exam_id", exam["id"]).execute().data
                                             st.session_state.exam_id = exam["id"]
                                             st.session_state.exam_title = exam["title"]
                                             st.session_state.start_exam = False
-                                            st.session_state.show_instructions = True # Instructions On
+                                            st.session_state.show_instructions = True 
                                             st.session_state.exam_submitted = False
                                             st.session_state.answers = {}
                                             st.session_state.question_index = 0
@@ -556,7 +553,6 @@ def show_instructions_view():
         st.markdown("6. **Stable Connection:** Do not refresh or close the browser window during the live exam, or progress might be affected.")
         st.write("")
         
-        # చెక్ బాక్స్ టిక్ చేశాకే ఎగ్జామ్ స్టార్ట్ అవుతుంది
         agree = st.checkbox("I have read and understood all the instructions. I am ready to begin the examination.")
         
         col_space, col_start = st.columns([4, 1])
@@ -564,7 +560,6 @@ def show_instructions_view():
             if st.button("🚀 Start Exam & Timer", type="primary", disabled=not agree, use_container_width=True):
                 st.session_state.show_instructions = False
                 st.session_state.start_exam = True
-                # ఎగ్జామ్ అసలైన టైమర్ ఇక్కడ ట్రిగ్గర్ అవుతుంది
                 st.session_state.exam_end_time = time.time() + (duration_m * 60)
                 st.rerun()
 
@@ -572,6 +567,8 @@ def show_instructions_view():
 # LIVE ACTIVE EXAM WORKSPACE VIEW
 # =========================
 def exam_workspace_view():
+    st.session_state.show_instructions = False
+    
     questions = st.session_state.current_questions
     total_questions = len(questions)
 
@@ -669,11 +666,11 @@ def exam_workspace_view():
             for i in range(total_questions):
                 with cols[i % 3]:
                     q_id = questions[i]["id"]
-                    label = f"🔴 {i+1}" # Unanswered
+                    label = f"🔴 {i+1}"
                     if q_id in st.session_state.answers and st.session_state.answers[q_id]:
-                        label = f"🟢 {i+1}" # Answered
+                        label = f"🟢 {i+1}"
                     if i == current:
-                        label = f"🔵 {i+1}" # Active Current
+                        label = f"🔵 {i+1}"
 
                     if st.button(label, key=f"qnav_{i}", use_container_width=True):
                         st.session_state.question_index = i
@@ -746,9 +743,9 @@ if not st.session_state.logged_in:
 else:
     if st.session_state.role == "admin":
         admin_dashboard()
-    elif st.session_state.show_instructions:
-        show_instructions_view() # ఇన్‌స్ట్రక్షన్స్ రూటింగ్
     elif st.session_state.start_exam:
         exam_workspace_view()
+    elif st.session_state.show_instructions:
+        show_instructions_view()
     else:
         user_dashboard()
