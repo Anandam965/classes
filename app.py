@@ -1,51 +1,103 @@
 import streamlit as st
 from supabase import create_client, Client
-import os
+import uuid
 
 # ==========================================
-# 1. DATABASE CONNECTION (SUPABASE SETUP)
+# 1. HARDCODED DATABASE CONNECTION (FIXED)
 # ==========================================
-# గమనిక: మీ Supabase Credentials ని ఇక్కడ సెట్ చేసుకోండి లేదా Environment Variables ఉపయోగించండి
-SUPABASE_URL = "https://ntmclisjmohkfpfigwjt.supabase.co"
-SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im50bWNsaXNqbW9oa2ZwZmlnd2p0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg5ODU0NzQsImV4cCI6MjA5NDU2MTQ3NH0.bcm2hEBzCsEBklLKpBVvYGxXsGWNHHOZJOXx0w3YQBc"
+# Streamlit Cloud లో ఎలాంటి Secrets కాన్ఫిగరేషన్ అవసరం లేకుండా డైరెక్ట్ గా నీ Keys ఇక్కడే ఇచ్చేసాను
+SUPABASE_URL = "https://lybhhtorasnwwaehqvnc.supabase.co"
+SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx5YmhodG9yYXNud3dhZWhxdm5jIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxMDk0NTksImV4cCI6MjA5NDY4NTQ1OX0.8LO08tXBNBD83TIrR8oiuCIo97CtvvaupSIahTBAAuo"
+
 @st.cache_resource
 def init_supabase():
     return create_client(SUPABASE_URL, SUPABASE_KEY)
 
-try:
-    supabase: Client = init_supabase()
-except Exception as e:
-    st.error(f"Supabase Connection Failed: {e}")
+supabase: Client = init_supabase()
 
 # ==========================================
-# 2. HELPER FUNCTIONS
+# 2. SESSION STATES INITIALIZATION
+# ==========================================
+if "logged_in" not in st.session_state:
+    st.session_state.logged_in = False
+if "role" not in st.session_state:
+    st.session_state.role = ""
+if "user_id" not in st.session_state:
+    st.session_state.user_id = ""
+if "question_index" not in st.session_state:
+    st.session_state.question_index = 0
+if "answers" not in st.session_state:
+    st.session_state.answers = {}
+if "start_exam" not in st.session_state:
+    st.session_state.start_exam = False
+if "exam_submitted" not in st.session_state:
+    st.session_state.exam_submitted = False
+
+# ==========================================
+# 3. HELPER FUNCTIONS
 # ==========================================
 def get_exam_leaderboard(exam_id):
-    """ఎగ్జామ్ ఐడి ఆధారంగా టాప్ స్కోర్స్ సాధించిన విద్యార్థుల లిస్ట్ తెస్తుంది"""
     try:
-        response = supabase.table("exam_attempts").select("score, user_id").eq("exam_id", exam_id).order("score", desc=True).execute()
+        response = supabase.table("exam_attempts").select("*").eq("exam_id", exam_id).execute()
         attempts = response.data
-        
         leaderboard = []
+        user_best_scores = {}
         for att in attempts:
-            user_resp = supabase.table("users").select("name, email").eq("id", att["user_id"]).execute()
-            if user_resp.data:
+            uid = att["user_id"]
+            score = att["score"]
+            if uid not in user_best_scores or score > user_best_scores[uid]:
+                user_best_scores[uid] = score
+
+        for uid, max_score in user_best_scores.items():
+            user_info = supabase.table("users").select("name, email").eq("id", uid).execute().data
+            if user_info:
                 leaderboard.append({
-                    "Name": user_resp.data[0]["name"],
-                    "Email": user_resp.data[0]["email"],
-                    "Score": att["score"]
+                    "Name": user_info[0]["name"],
+                    "Email": user_info[0]["email"],
+                    "Score": max_score
                 })
-        return leaderboard
-    except Exception as e:
+        return sorted(leaderboard, key=lambda x: x["Score"], reverse=True)
+    except Exception:
         return []
 
 # ==========================================
-# 3. ADMIN DASHBOARD WORKSPACE
+# 4. LOGIN INTERFACE
+# ==========================================
+def login():
+    st.title("📚 LMS Login")
+    email = st.text_input("Email")
+    password = st.text_input("Password", type="password")
+
+    if st.button("Login", type="primary", use_container_width=True):
+        try:
+            response = supabase.auth.sign_in_with_password({
+                "email": email,
+                "password": password
+            })
+            user = response.user
+            user_data = supabase.table("users").select("*").eq("email", email).execute()
+
+            if len(user_data.data) > 0:
+                role = user_data.data[0]["role"]
+                st.session_state.logged_in = True
+                st.session_state.role = role
+                st.session_state.user_id = user.id
+                st.rerun()
+        except Exception as e:
+            st.error(f"Login failed: {str(e)}")
+
+# ==========================================
+# 5. ADMIN DASHBOARD WORKSPACE
 # ==========================================
 def admin_dashboard():
     st.sidebar.title("🛡️ Admin Workspace")
     
-    # Simple Clean Categorization Sidebar Menu
+    if st.sidebar.button("🚪 Logout", use_container_width=True):
+        st.session_state.logged_in = False
+        st.session_state.role = ""
+        st.session_state.user_id = ""
+        st.rerun()
+
     menu = st.sidebar.selectbox(
         "Navigation Control",
         ["🗂️ Manage Course Content", "📝 Manage Exams & Questions", "📊 Student Results & Ranks"]
@@ -57,7 +109,6 @@ def admin_dashboard():
     if menu == "🗂️ Manage Course Content":
         tab1, tab2, tab3 = st.tabs(["📁 Modules Setup", "📂 Submodules Setup", "🖥️ Live/Recorded Classes"])
         
-        # --- MODULES SETUP ---
         with tab1:
             st.subheader("Manage Core Modules")
             with st.form("add_module_form", clear_on_submit=True):
@@ -86,7 +137,6 @@ def admin_dashboard():
                         st.warning("Module Deleted!")
                         st.rerun()
 
-        # --- SUBMODULES SETUP ---
         with tab2:
             st.subheader("Manage Submodules")
             modules_list = supabase.table("modules").select("*").execute().data
@@ -124,7 +174,6 @@ def admin_dashboard():
                         st.warning("Deleted!")
                         st.rerun()
 
-        # --- CLASSES SETUP ---
         with tab3:
             st.subheader("Manage Stream/Video Classes")
             sub_list = supabase.table("submodules").select("*").execute().data
@@ -175,7 +224,6 @@ def admin_dashboard():
     elif menu == "📝 Manage Exams & Questions":
         ex_tab1, ex_tab2 = st.tabs(["📝 Exams Setup & Instant Control", "❓ Advanced Question Paper Builder"])
         
-        # --- EXAMS SETUP TAB ---
         with ex_tab1:
             st.subheader("Setup Dynamic Exams")
             classes_list = supabase.table("classes").select("*").execute().data
@@ -219,10 +267,8 @@ def admin_dashboard():
                         st.rerun()
                 st.divider()
 
-        # --- ADVANCED QUESTION PAPER BUILDER ---
         with ex_tab2:
             st.subheader("🛠️ Premium Question Paper Creator")
-            
             exams_q = supabase.table("exams").select("*").execute().data
             ex_options = {e["title"]: e["id"] for e in exams_q} if exams_q else {}
             
@@ -328,7 +374,6 @@ def admin_dashboard():
             "📜 All Submissions Log"
         ])
         
-        # --- TAB 1: LEADERBOARD ---
         with r_tab1:
             st.subheader("🏆 Exam Rankings")
             exams = supabase.table("exams").select("*").execute().data
@@ -346,7 +391,6 @@ def admin_dashboard():
                     else:
                         st.info("No attempts recorded for this exam yet.")
 
-        # --- TAB 2: MANUAL EVALUATION ---
         with r_tab2:
             st.subheader("📝 Manual Code & Essay Evaluator")
             st.markdown("స్టూడెంట్స్ టైప్ చేసిన ప్రోగ్రామింగ్ కోడ్ లేదా టెక్స్ట్ ఆన్సర్లను ఇక్కడ రివ్యూ చేసి మార్కులు ఇవ్వవచ్చు.")
@@ -370,7 +414,6 @@ def admin_dashboard():
                                 st.markdown(f"👤 **Student:** {student_name} | 🎯 **Exam:** {exam_title}")
                                 st.caption("💻 Submitted Answer / Code:")
                                 
-                                # స్టూడెంట్ రాసిన కోడ్ ఇక్కడ డిస్ప్లే అవుతుంది
                                 user_code = att.get("submitted_answers", "# No code answer text submitted.")
                                 st.code(user_code, language="python")
                             
@@ -391,7 +434,6 @@ def admin_dashboard():
                                     st.success(f"Score updated to {new_score}!")
                                     st.rerun()
 
-        # --- TAB 3: ALL SUBMISSIONS LOG ---
         with r_tab3:
             st.subheader("📜 System Submission Logs")
             attempts = supabase.table("exam_attempts").select("*").execute().data
@@ -406,29 +448,234 @@ def admin_dashboard():
                         st.divider()
 
 # ==========================================
-# 4. USER/STUDENT DASHBOARD WORKSPACE
+# 6. USER/STUDENT DASHBOARD WORKSPACE
 # ==========================================
 def user_dashboard():
-    st.title("🎓 Student Learning Portal")
-    st.write("Welcome to your dashboard. Here you can view courses and take exams.")
-    # మీ పాత యూజర్ డ్యాష్‌బోర్డ్ లాజిక్ కోడ్ అంతా ఇక్కడ వస్తుంది.
-    st.info("Student panel functions can be linked here natively.")
+    st.sidebar.title("User Workspace Panel")
+    if st.sidebar.button("🚪 Logout", use_container_width=True):
+        st.session_state.logged_in = False
+        st.session_state.role = ""
+        st.session_state.user_id = ""
+        st.rerun()
+
+    modules = supabase.table("modules").select("*").execute().data
+
+    for module in modules:
+        with st.expander(module["title"]):
+            submodules = supabase.table("submodules").select("*").eq("module_id", module["id"]).execute().data
+            for sub in submodules:
+                st.subheader(sub["title"])
+                classes = supabase.table("classes").select("*").eq("submodule_id", sub["id"]).execute().data
+                for cls in classes:
+                    st.markdown(f"### {cls['title']}")
+                    col_link1, col_link2, col_link3 = st.columns(3)
+                    with col_link1:
+                        st.link_button("Join Class", cls["class_link"], use_container_width=True)
+                    with col_link2:
+                        st.link_button("Watch Video", cls["recorded_video"], use_container_width=True)
+                    with col_link3:
+                        st.link_button("Notes PDF", cls["notes_pdf"], use_container_width=True)
+
+                    exams = supabase.table("exams").select("*").eq("class_id", cls["id"]).execute().data
+                    for exam in exams:
+                        if exam["enabled"]:
+                            st.write(f"📝 **Exam: {exam['title']}**")
+                            btn_col, lb_col = st.columns([2, 2])
+                            
+                            with lb_col:
+                                board = get_exam_leaderboard(exam["id"])
+                                if board:
+                                    st.markdown("🏆 **Top Performers:**")
+                                    for idx, student in enumerate(board[:3]):
+                                        medal = "🥇" if idx == 0 else "🥈" if idx == 1 else "🥉"
+                                        st.caption(f"{medal} {student['Name']} — Score: {student['Score']}")
+                                else:
+                                    st.caption("Be the first to top this exam! 🚀")
+
+                            with btn_col:
+                                check_attempt = supabase.table("exam_attempts").select("*")\
+                                    .eq("user_id", st.session_state.user_id)\
+                                    .eq("exam_id", exam["id"]).execute().data
+                                
+                                if len(check_attempt) > 0:
+                                    if st.button(f"🔍 Show Answers", key=f"view_{exam['id']}", use_container_width=True):
+                                        st.session_state.exam_id = exam["id"]
+                                        st.session_state.exam_title = exam["title"]
+                                        st.session_state.start_exam = True
+                                        st.session_state.exam_submitted = True 
+                                        st.rerun()
+                                else:
+                                    has_password = exam.get("password") is not None and str(exam["password"]).strip() != ""
+                                    if has_password:
+                                        entered_pwd = st.text_input(f"Access Code for {exam['title']}", type="password", key=f"pwd_{exam['id']}")
+                                        
+                                    if st.button(f"📝 Start Exam", key=f"btn_{exam['id']}", use_container_width=True):
+                                        if has_password and entered_pwd.strip() != str(exam["password"]).strip():
+                                            st.error("Wrong Exam Password!")
+                                        else:
+                                            st.session_state.exam_id = exam["id"]
+                                            st.session_state.exam_title = exam["title"]
+                                            st.session_state.start_exam = True
+                                            st.session_state.exam_submitted = False
+                                            st.session_state.answers = {}
+                                            st.session_state.question_index = 0
+                                            st.rerun()
+                    st.divider()
 
 # ==========================================
-# 5. MAIN APP ENTRY ROUTER
+# 7. MAIN APP ROUTING FLOW
 # ==========================================
 def main():
-    st.set_page_config(page_title="Learning Management System", page_icon="🚀", layout="wide")
-    
-    # Simple Session State User Role Simulation Selector
-    # (మీ అప్లికేషన్ లాగిన్ సిస్టమ్‌ని బట్టి దీన్ని మార్చుకోవచ్చు)
-    st.sidebar.markdown("### 🔑 System Access Login")
-    role = st.sidebar.radio("Select Interface Role:", ["Admin", "Student"])
-    
-    if role == "Admin":
-        admin_dashboard()
+    if not st.session_state.logged_in:
+        login()
     else:
-        user_dashboard()
+        if st.session_state.role == "admin":
+            admin_dashboard()
+        elif not st.session_state.start_exam:
+            user_dashboard()
+
+    # --- OPEN EXAM SHEET SUB-PAGE ---
+    if st.session_state.logged_in and st.session_state.start_exam:
+        questions = supabase.table("questions").select("*").eq("exam_id", st.session_state.exam_id).execute().data
+        total_questions = len(questions)
+
+        if total_questions == 0:
+            st.warning("No questions available in this exam.")
+            if st.button("Go Back"):
+                st.session_state.start_exam = False
+                st.rerun()
+        else:
+            if st.session_state.exam_submitted:
+                st.title(f"📊 Results: {st.session_state.exam_title}")
+                db_attempt = supabase.table("exam_attempts").select("*")\
+                    .eq("user_id", st.session_state.user_id)\
+                    .eq("exam_id", st.session_state.exam_id).execute().data
+                    
+                if len(db_attempt) > 0:
+                    score = db_attempt[0]["score"]
+                    st.success(f"🎉 Exam Already Submitted! Your Score: {score}/{total_questions}")
+                
+                db_answers = supabase.table("user_answers").select("*").eq("attempt_id", db_attempt[0]["id"]).execute().data if len(db_attempt) > 0 else []
+                ans_map = {a["question_id"]: a["answer"] for a in db_answers}
+
+                exam_data = supabase.table("exams").select("*").eq("id", st.session_state.exam_id).execute().data
+                if len(exam_data) > 0 and exam_data[0]["show_answers"]:
+                    st.subheader("📚 Review Sheet")
+                    for i, q in enumerate(questions):
+                        st.markdown(f"**Question {i+1}:** {q['question']}")
+                        u_ans = ans_map.get(q["id"], 'Not Answered')
+                        c_ans = q["correct_answer"]
+                        
+                        if str(u_ans).strip().lower() == str(c_ans).strip().lower():
+                            st.success(f"Your Answer: {u_ans} (Correct)")
+                        else:
+                            st.error(f"Your Answer: {u_ans}")
+                            st.warning(f"Correct Answer: {c_ans}")
+                        st.divider()
+                else:
+                    st.info("Answers are disabled by admin.")
+
+                if st.button("Return to Dashboard", type="primary"):
+                    st.session_state.start_exam = False
+                    st.session_state.exam_submitted = False
+                    st.session_state.answers = {}
+                    st.session_state.question_index = 0
+                    st.rerun()
+            
+            else:
+                st.title(st.session_state.exam_title)
+                current = st.session_state.question_index
+                question = questions[current]
+
+                left, right = st.columns([4, 1])
+
+                with right:
+                    st.subheader("Questions")
+                    cols = st.columns(3)
+                    for i in range(total_questions):
+                        with cols[i % 3]:
+                            q_id = questions[i]["id"]
+                            label = f"🔴 {i+1}"
+                            if q_id in st.session_state.answers and st.session_state.answers[q_id]:
+                                label = f"🟢 {i+1}"
+                            if i == current:
+                                label = f"🔵 {i+1}"
+
+                            if st.button(label, key=f"qnav_{i}", use_container_width=True):
+                                st.session_state.question_index = i
+                                st.rerun()
+
+                with left:
+                    st.subheader(f"Question {current+1}/{total_questions}")
+                    st.write(question["question"])
+
+                    stored_ans = st.session_state.answers.get(question["id"], "")
+                    
+                    if question["type"] == "mcq":
+                        opts = [question["option_a"], question["option_b"], question["option_c"], question["option_d"]]
+                        try:
+                            default_idx = opts.index(stored_ans) if stored_ans in opts else None
+                        except ValueError:
+                            default_idx = None
+
+                        answer = st.radio("Choose Answer", opts, index=default_idx, key=f"radio_{question['id']}")
+                    elif question["type"] == "blank":
+                        answer = st.text_input("Your Answer", value=stored_ans, key=f"text_{question['id']}")
+                    else:
+                        answer = st.text_area("Write your Code/Answer here", value=stored_ans, key=f"code_{question['id']}", height=200)
+
+                    if answer:
+                        st.session_state.answers[question["id"]] = answer
+
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        if st.button("Previous") and current > 0:
+                            st.session_state.question_index -= 1
+                            st.rerun()
+                    with col2:
+                        if current < total_questions - 1:
+                            if st.button("Next"):
+                                st.session_state.question_index += 1
+                                st.rerun()
+
+                if current == total_questions - 1:
+                    st.divider()
+                    if st.button("Submit Exam", type="primary", use_container_width=True):
+                        score = 0
+                        # Auto scoring logic for objective parts only
+                        for q in questions:
+                            user_ans = st.session_state.answers.get(q["id"], "")
+                            if q["type"] != "programming":
+                                if str(user_ans).strip().lower() == str(q["correct_answer"]).strip().lower():
+                                    score += 1
+                        
+                        # Concatenate all programming text answers to store in the main column for admin view
+                        compiled_answers_text = ""
+                        for idx, q in enumerate(questions):
+                            if q["type"] == "programming":
+                                ans_txt = st.session_state.answers.get(q["id"], "No Answer")
+                                compiled_answers_text += f"--- Q{idx+1} Code Submission ---\n{ans_txt}\n\n"
+
+                        attempt_response = supabase.table("exam_attempts").insert({
+                            "user_id": st.session_state.user_id,
+                            "exam_id": st.session_state.exam_id,
+                            "score": score,
+                            "submitted": True,
+                            "submitted_answers": compiled_answers_text if compiled_answers_text != "" else "Objective Test Only"
+                        }).execute()
+
+                        if attempt_response.data:
+                            attempt_id = attempt_response.data[0]["id"]
+                            for q in questions:
+                                user_answer = st.session_state.answers.get(q["id"], "")
+                                supabase.table("user_answers").insert({
+                                    "attempt_id": attempt_id,
+                                    "question_id": q["id"],
+                                    "answer": user_answer
+                                }).execute()
+
+                        st.session_state.exam_submitted = True
+                        st.rerun()
 
 if __name__ == "__main__":
     main()
