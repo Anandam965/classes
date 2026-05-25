@@ -14,7 +14,7 @@ supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 # PAGE CONFIG
 # =========================
 st.set_page_config(
-    page_title="LMS Application",
+    page_title="LMS Application with Leaderboard",
     layout="wide"
 )
 
@@ -63,13 +63,42 @@ def login():
             st.error(str(e))
 
 # =========================
+# HELPER: FETCH LEADERBOARD DATA
+# =========================
+def get_exam_leaderboard(exam_id):
+    """Fetches and sorts attempts for a specific exam to build a leaderboard"""
+    attempts = supabase.table("exam_attempts").select("*").eq("exam_id", exam_id).execute().data
+    leaderboard = []
+    
+    # Track unique users to show only their best attempt score
+    user_best_scores = {}
+    for att in attempts:
+        uid = att["user_id"]
+        score = att["score"]
+        if uid not in user_best_scores or score > user_best_scores[uid]:
+            user_best_scores[uid] = score
+
+    for uid, max_score in user_best_scores.items():
+        user_info = supabase.table("users").select("name, email").eq("id", uid).execute().data
+        if user_info:
+            leaderboard.append({
+                "Name": user_info[0]["name"],
+                "Email": user_info[0]["email"],
+                "Score": max_score
+            })
+            
+    # Sort by Score descending
+    leaderboard = sorted(leaderboard, key=lambda x: x["Score"], reverse=True)
+    return leaderboard
+
+# =========================
 # ADMIN DASHBOARD
 # =========================
 def admin_dashboard():
     st.sidebar.title("Admin Panel")
     menu = st.sidebar.selectbox(
         "Menu",
-        ["Add Module", "Add Submodule", "Add Class", "Create Exam", "Add Questions", "View Results"]
+        ["Add Module", "Add Submodule", "Add Class", "Create Exam", "Add Questions", "View Results", "Global Leaderboard"]
     )
 
     if menu == "Add Module":
@@ -112,30 +141,25 @@ def admin_dashboard():
                 st.subheader(f"{user['name']} - {exam['title']}")
                 st.success(f"Score : {attempt['score']}")
 
-                user_answers = supabase.table("user_answers").select("*").eq("attempt_id", attempt["id"]).execute().data
-
-                for ua in user_answers:
-                    question_data = supabase.table("questions").select("*").eq("id", ua["question_id"]).execute().data
-                    if len(question_data) == 0:
-                        continue
-                    q = question_data[0]
-
-                    st.markdown(f"### {q['question']}")
-                    st.info(f"User Answer : {ua['answer']}")
-                    correct_answer = q["correct_answer"]
-
-                    if ua["answer"].strip().lower() == correct_answer.strip().lower():
-                        st.success("✅ Correct")
-                    else:
-                        st.error("❌ Wrong")
-                        st.warning(f"Correct Answer : {correct_answer}")
-
-                    if q["type"] == "mcq":
-                        st.write("Options:")
-                        st.write(f"A. {q['option_a']}\nB. {q['option_b']}\nC. {q['option_c']}\nD. {q['option_d']}")
-                    elif q["type"] == "blank":
-                        st.info(f"Hint : {q['hint']}")
-                    st.divider()
+    elif menu == "Global Leaderboard":
+        st.title("🏆 Admin Leaderboard Viewer")
+        exams = supabase.table("exams").select("*").execute().data
+        if exams:
+            exam_titles = [e["title"] for e in exams]
+            selected_exam_title = st.selectbox("Select Exam to View Leaderboard", exam_titles)
+            selected_exam = next((e for e in exams if e["title"] == selected_exam_title), None)
+            
+            if selected_exam:
+                board = get_exam_leaderboard(selected_exam["id"])
+                if board:
+                    st.subheader(f"Rankings for {selected_exam['title']}")
+                    for idx, student in enumerate(board):
+                        medal = "🥇" if idx == 0 else "🥈" if idx == 1 else "🥉" if idx == 2 else f" {idx+1}."
+                        st.write(f"{medal} **{student['Name']}** ({student['Email']}) — Score: **{student['Score']}**")
+                else:
+                    st.info("No students have attempted this exam yet.")
+        else:
+            st.warning("No exams available.")
 
     elif menu == "Add Class":
         st.title("Add Class")
@@ -162,16 +186,14 @@ def admin_dashboard():
         selected_class = st.selectbox("Select Class", class_titles)
         exam_title = st.text_input("Exam Title")
         
-        # New Field added for password matching mapping
-        exam_password = st.text_input("Exam Password (Optional)", type="password", help="Leave blank if no password required")
+        # database Column update fixed to 'password'
+        exam_password = st.text_input("Exam Password (Optional)", type="password")
         
         enable_exam = st.checkbox("Enable Exam")
         show_answers = st.checkbox("Enable Answers")
 
         if st.button("Create Exam"):
             class_id = next((c["id"] for c in classes if c["title"] == selected_class), None)
-            
-            # Mapping inside database columns schema wrapper
             supabase.table("exams").insert({
                 "class_id": class_id, 
                 "title": exam_title, 
@@ -179,7 +201,7 @@ def admin_dashboard():
                 "enabled": enable_exam, 
                 "show_answers": show_answers
             }).execute()
-            st.success("Exam Created with Password Configuration")
+            st.success("Exam Created")
 
     elif menu == "Add Questions":
         st.title("Add Questions")
@@ -234,28 +256,42 @@ def user_dashboard():
                     exams = supabase.table("exams").select("*").eq("class_id", cls["id"]).execute().data
                     for exam in exams:
                         if exam["enabled"]:
-                            check_attempt = supabase.table("exam_attempts").select("*")\
-                                .eq("user_id", st.session_state.user_id)\
-                                .eq("exam_id", exam["id"]).execute().data
+                            st.write(f"📝 **Exam: {exam['title']}**")
                             
-                            if len(check_attempt) > 0:
-                                if st.button(f"🔍 Show Answers - {exam['title']}", key=f"view_{exam['id']}", use_container_width=True):
-                                    st.session_state.exam_id = exam["id"]
-                                    st.session_state.exam_title = exam["title"]
-                                    st.session_state.start_exam = True
-                                    st.session_state.exam_submitted = True 
-                                    st.rerun()
-                            else:
-                                # Dynamic verification fields rendering if password field exist inside row
-                                with st.container():
+                            # Layout dividing for Leaderboard vs Action Buttons
+                            btn_col, lb_col = st.columns([2, 2])
+                            
+                            with lb_col:
+                                # Mini Leaderboard showing Top 3 for students
+                                board = get_exam_leaderboard(exam["id"])
+                                if board:
+                                    st.markdown("🏆 **Top Performers:**")
+                                    for idx, student in enumerate(board[:3]): # Top 3 only
+                                        medal = "🥇" if idx == 0 else "🥈" if idx == 1 else "🥉"
+                                        st.caption(f"{medal} {student['Name']} — Score: {student['Score']}")
+                                else:
+                                    st.caption("Be the first to top this exam! 🚀")
+
+                            with btn_col:
+                                check_attempt = supabase.table("exam_attempts").select("*")\
+                                    .eq("user_id", st.session_state.user_id)\
+                                    .eq("exam_id", exam["id"]).execute().data
+                                
+                                if len(check_attempt) > 0:
+                                    if st.button(f"🔍 Show Answers", key=f"view_{exam['id']}", use_container_width=True):
+                                        st.session_state.exam_id = exam["id"]
+                                        st.session_state.exam_title = exam["title"]
+                                        st.session_state.start_exam = True
+                                        st.session_state.exam_submitted = True 
+                                        st.rerun()
+                                else:
                                     has_password = exam.get("password") is not None and str(exam["password"]).strip() != ""
-                                    
                                     if has_password:
-                                        entered_pwd = st.text_input(f"Enter Key Password for {exam['title']}", type="password", key=f"pwd_{exam['id']}")
+                                        entered_pwd = st.text_input(f"Access Code for {exam['title']}", type="password", key=f"pwd_{exam['id']}")
                                         
-                                    if st.button(f"📝 Start Exam - {exam['title']}", key=f"btn_{exam['id']}", use_container_width=True):
+                                    if st.button(f"📝 Start Exam", key=f"btn_{exam['id']}", use_container_width=True):
                                         if has_password and entered_pwd.strip() != str(exam["password"]).strip():
-                                            st.error("Wrong Exam Password! Please verify access key.")
+                                            st.error("Wrong Exam Password!")
                                         else:
                                             st.session_state.exam_id = exam["id"]
                                             st.session_state.exam_title = exam["title"]
@@ -264,6 +300,7 @@ def user_dashboard():
                                             st.session_state.answers = {}
                                             st.session_state.question_index = 0
                                             st.rerun()
+                    st.divider()
 
 # =========================
 # MAIN APP FLOW ROUTING
