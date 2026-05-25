@@ -161,15 +161,25 @@ def admin_dashboard():
         class_titles = [c["title"] for c in classes]
         selected_class = st.selectbox("Select Class", class_titles)
         exam_title = st.text_input("Exam Title")
+        
+        # New Field added for password matching mapping
+        exam_password = st.text_input("Exam Password (Optional)", type="password", help="Leave blank if no password required")
+        
         enable_exam = st.checkbox("Enable Exam")
         show_answers = st.checkbox("Enable Answers")
 
         if st.button("Create Exam"):
             class_id = next((c["id"] for c in classes if c["title"] == selected_class), None)
+            
+            # Mapping inside database columns schema wrapper
             supabase.table("exams").insert({
-                "class_id": class_id, "title": exam_title, "enabled": enable_exam, "show_answers": show_answers
+                "class_id": class_id, 
+                "title": exam_title, 
+                "password": exam_password if exam_password.strip() != "" else None,
+                "enabled": enable_exam, 
+                "show_answers": show_answers
             }).execute()
-            st.success("Exam Created")
+            st.success("Exam Created with Password Configuration")
 
     elif menu == "Add Questions":
         st.title("Add Questions")
@@ -224,29 +234,36 @@ def user_dashboard():
                     exams = supabase.table("exams").select("*").eq("class_id", cls["id"]).execute().data
                     for exam in exams:
                         if exam["enabled"]:
-                            # Student ee exam ni already attempt chesada leda ani check chestunnam
                             check_attempt = supabase.table("exam_attempts").select("*")\
                                 .eq("user_id", st.session_state.user_id)\
                                 .eq("exam_id", exam["id"]).execute().data
                             
-                            # Already attempt chesthe, direct ga results display modal button chupistam
                             if len(check_attempt) > 0:
                                 if st.button(f"🔍 Show Answers - {exam['title']}", key=f"view_{exam['id']}", use_container_width=True):
                                     st.session_state.exam_id = exam["id"]
                                     st.session_state.exam_title = exam["title"]
                                     st.session_state.start_exam = True
-                                    st.session_state.exam_submitted = True  # Direct result pane route avvadaniki
+                                    st.session_state.exam_submitted = True 
                                     st.rerun()
                             else:
-                                # Attempt cheyakapothe maathrame "Start Exam" kanipistundi
-                                if st.button(f"📝 Start Exam - {exam['title']}", key=f"btn_{exam['id']}", use_container_width=True):
-                                    st.session_state.exam_id = exam["id"]
-                                    st.session_state.exam_title = exam["title"]
-                                    st.session_state.start_exam = True
-                                    st.session_state.exam_submitted = False
-                                    st.session_state.answers = {}
-                                    st.session_state.question_index = 0
-                                    st.rerun()
+                                # Dynamic verification fields rendering if password field exist inside row
+                                with st.container():
+                                    has_password = exam.get("password") is not None and str(exam["password"]).strip() != ""
+                                    
+                                    if has_password:
+                                        entered_pwd = st.text_input(f"Enter Key Password for {exam['title']}", type="password", key=f"pwd_{exam['id']}")
+                                        
+                                    if st.button(f"📝 Start Exam - {exam['title']}", key=f"btn_{exam['id']}", use_container_width=True):
+                                        if has_password and entered_pwd.strip() != str(exam["password"]).strip():
+                                            st.error("Wrong Exam Password! Please verify access key.")
+                                        else:
+                                            st.session_state.exam_id = exam["id"]
+                                            st.session_state.exam_title = exam["title"]
+                                            st.session_state.start_exam = True
+                                            st.session_state.exam_submitted = False
+                                            st.session_state.answers = {}
+                                            st.session_state.question_index = 0
+                                            st.rerun()
 
 # =========================
 # MAIN APP FLOW ROUTING
@@ -272,11 +289,9 @@ if st.session_state.logged_in and st.session_state.start_exam:
             st.session_state.start_exam = False
             st.rerun()
     else:
-        # User already exam submit chesi unte dynamic block run avvali
         if st.session_state.exam_submitted:
             st.title(f"📊 Results: {st.session_state.exam_title}")
             
-            # Fetch score from DB since user can view later from dashboard
             db_attempt = supabase.table("exam_attempts").select("*")\
                 .eq("user_id", st.session_state.user_id)\
                 .eq("exam_id", st.session_state.exam_id).execute().data
@@ -285,7 +300,6 @@ if st.session_state.logged_in and st.session_state.start_exam:
                 score = db_attempt[0]["score"]
                 st.success(f"🎉 Exam Already Submitted! Your Score: {score}/{total_questions}")
             
-            # Fetch users previous answers to show review sheet accurately
             db_answers = supabase.table("user_answers").select("*").eq("attempt_id", db_attempt[0]["id"]).execute().data if len(db_attempt) > 0 else []
             ans_map = {a["question_id"]: a["answer"] for a in db_answers}
 
@@ -313,7 +327,6 @@ if st.session_state.logged_in and st.session_state.start_exam:
                 st.session_state.question_index = 0
                 st.rerun()
         
-        # Fresh Exam Interface handling
         else:
             st.title(st.session_state.exam_title)
             current = st.session_state.question_index
