@@ -524,14 +524,40 @@ if st.session_state.start_exam:
 
     question = questions[current]
 
-    st.subheader(
-        f"Question {current+1}/{total_questions}"
-    )
+    
+    left, right = st.columns([4,1])
+
+    with right:
+    
+        st.subheader("Questions")
+    
+        cols = st.columns(3)
+    
+        for i in range(total_questions):
+    
+            col = cols[i % 3]
+    
+            with col:
+    
+                if st.button(
+                    str(i + 1),
+                    key=f"nav_{i}"
+                ):
+    
+                    st.session_state.question_index = i
+                    st.rerun()
+    
+    with left:
+    
+        st.subheader(
+            f"Question {current+1}/{total_questions}"
+        )
+    
+        st.write(question["question"])
 
     st.write(question["question"])
 
     if question["type"] == "mcq":
-
         answer = st.radio(
             "Choose Answer",
             [
@@ -540,8 +566,10 @@ if st.session_state.start_exam:
                 question["option_c"],
                 question["option_d"]
             ],
+            index=None,
             key=question["id"]
         )
+        
 
     else:
 
