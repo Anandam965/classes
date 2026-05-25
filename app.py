@@ -224,14 +224,29 @@ def user_dashboard():
                     exams = supabase.table("exams").select("*").eq("class_id", cls["id"]).execute().data
                     for exam in exams:
                         if exam["enabled"]:
-                            if st.button(f"Start Exam - {exam['title']}", key=f"btn_{exam['id']}", use_container_width=True):
-                                st.session_state.exam_id = exam["id"]
-                                st.session_state.exam_title = exam["title"]
-                                st.session_state.start_exam = True
-                                st.session_state.exam_submitted = False
-                                st.session_state.answers = {}
-                                st.session_state.question_index = 0
-                                st.rerun()
+                            # Student ee exam ni already attempt chesada leda ani check chestunnam
+                            check_attempt = supabase.table("exam_attempts").select("*")\
+                                .eq("user_id", st.session_state.user_id)\
+                                .eq("exam_id", exam["id"]).execute().data
+                            
+                            # Already attempt chesthe, direct ga results display modal button chupistam
+                            if len(check_attempt) > 0:
+                                if st.button(f"🔍 Show Answers - {exam['title']}", key=f"view_{exam['id']}", use_container_width=True):
+                                    st.session_state.exam_id = exam["id"]
+                                    st.session_state.exam_title = exam["title"]
+                                    st.session_state.start_exam = True
+                                    st.session_state.exam_submitted = True  # Direct result pane route avvadaniki
+                                    st.rerun()
+                            else:
+                                # Attempt cheyakapothe maathrame "Start Exam" kanipistundi
+                                if st.button(f"📝 Start Exam - {exam['title']}", key=f"btn_{exam['id']}", use_container_width=True):
+                                    st.session_state.exam_id = exam["id"]
+                                    st.session_state.exam_title = exam["title"]
+                                    st.session_state.start_exam = True
+                                    st.session_state.exam_submitted = False
+                                    st.session_state.answers = {}
+                                    st.session_state.question_index = 0
+                                    st.rerun()
 
 # =========================
 # MAIN APP FLOW ROUTING
@@ -245,7 +260,7 @@ else:
         user_dashboard()
 
 # =========================
-# OPEN EXAM PAGE
+# OPEN EXAM PAGE / RESULT PAGE
 # =========================
 if st.session_state.logged_in and st.session_state.start_exam:
     questions = supabase.table("questions").select("*").eq("exam_id", st.session_state.exam_id).execute().data
@@ -257,103 +272,29 @@ if st.session_state.logged_in and st.session_state.start_exam:
             st.session_state.start_exam = False
             st.rerun()
     else:
-        st.title(st.session_state.exam_title)
-        current = st.session_state.question_index
-        question = questions[current]
-
-        left, right = st.columns([4, 1])
-
-        with right:
-            st.subheader("Questions")
-            cols = st.columns(3)
-            for i in range(total_questions):
-                with cols[i % 3]:
-                    q_id = questions[i]["id"]
-                    label = f"🔴 {i+1}"
-                    if q_id in st.session_state.answers and st.session_state.answers[q_id]:
-                        label = f"🟢 {i+1}"
-                    if i == current:
-                        label = f"🔵 {i+1}"
-
-                    if st.button(label, key=f"qnav_{i}", use_container_width=True):
-                        st.session_state.question_index = i
-                        st.rerun()
-
-        with left:
-            st.subheader(f"Question {current+1}/{total_questions}")
-            st.write(question["question"])
-
-            # Sync dynamic tracking inside dynamic index keys
-            stored_ans = st.session_state.answers.get(question["id"], "")
-            
-            if question["type"] == "mcq":
-                opts = [question["option_a"], question["option_b"], question["option_c"], question["option_d"]]
-                try:
-                    default_idx = opts.index(stored_ans) if stored_ans in opts else None
-                except ValueError:
-                    default_idx = None
-
-                answer = st.radio("Choose Answer", opts, index=default_idx, key=f"radio_{question['id']}")
-            else:
-                answer = st.text_input("Your Answer", value=stored_ans, key=f"text_{question['id']}")
-
-            if answer:
-                st.session_state.answers[question["id"]] = answer
-
-            col1, col2 = st.columns(2)
-            with col1:
-                if st.button("Previous") and current > 0:
-                    st.session_state.question_index -= 1
-                    st.rerun()
-            with col2:
-                if current < total_questions - 1:
-                    if st.button("Next"):
-                        st.session_state.question_index += 1
-                        st.rerun()
-
-        # Submit workflow section
-        if current == total_questions - 1 and not st.session_state.exam_submitted:
-            st.divider()
-            if st.button("Submit Exam", type="primary"):
-                score = 0
-                for q in questions:
-                    user_ans = st.session_state.answers.get(q["id"], "")
-                    if str(user_ans).strip().lower() == str(q["correct_answer"]).strip().lower():
-                        score += 1
-                
-                # Save Attempt details to table
-                attempt_response = supabase.table("exam_attempts").insert({
-                    "user_id": st.session_state.user_id,
-                    "exam_id": st.session_state.exam_id,
-                    "score": score,
-                    "submitted": True
-                }).execute()
-
-                if attempt_response.data:
-                    attempt_id = attempt_response.data[0]["id"]
-                    for q in questions:
-                        user_answer = st.session_state.answers.get(q["id"], "")
-                        supabase.table("user_answers").insert({
-                            "attempt_id": attempt_id,
-                            "question_id": q["id"],
-                            "answer": user_answer
-                        }).execute()
-
-                st.session_state.exam_submitted = True
-                st.rerun()
-
-        # Showing Results Block post-submission
+        # User already exam submit chesi unte dynamic block run avvali
         if st.session_state.exam_submitted:
-            st.divider()
-            score = sum(1 for q in questions if str(st.session_state.answers.get(q["id"], "")).strip().lower() == str(q["correct_answer"]).strip().lower())
-            st.success(f"🎉 Exam Submitted! Your Score: {score}/{total_questions}")
+            st.title(f"📊 Results: {st.session_state.exam_title}")
             
+            # Fetch score from DB since user can view later from dashboard
+            db_attempt = supabase.table("exam_attempts").select("*")\
+                .eq("user_id", st.session_state.user_id)\
+                .eq("exam_id", st.session_state.exam_id).execute().data
+                
+            if len(db_attempt) > 0:
+                score = db_attempt[0]["score"]
+                st.success(f"🎉 Exam Already Submitted! Your Score: {score}/{total_questions}")
+            
+            # Fetch users previous answers to show review sheet accurately
+            db_answers = supabase.table("user_answers").select("*").eq("attempt_id", db_attempt[0]["id"]).execute().data if len(db_attempt) > 0 else []
+            ans_map = {a["question_id"]: a["answer"] for a in db_answers}
+
             exam_data = supabase.table("exams").select("*").eq("id", st.session_state.exam_id).execute().data
             if len(exam_data) > 0 and exam_data[0]["show_answers"]:
                 st.subheader("📚 Review Sheet")
                 for i, q in enumerate(questions):
                     st.markdown(f"**Question {i+1}:** {q['question']}")
-                    u_ans = st.session_state.answers.get(q["id"], 'Not Answered')
+                    u_ans = ans_map.get(q["id"], 'Not Answered')
                     c_ans = q["correct_answer"]
                     
                     if str(u_ans).strip().lower() == str(c_ans).strip().lower():
@@ -361,12 +302,97 @@ if st.session_state.logged_in and st.session_state.start_exam:
                     else:
                         st.error(f"Your Answer: {u_ans}")
                         st.warning(f"Correct Answer: {c_ans}")
+                    st.divider()
             else:
                 st.info("Answers are disabled by admin.")
 
-            if st.button("Return to Dashboard"):
+            if st.button("Return to Dashboard", type="primary"):
                 st.session_state.start_exam = False
                 st.session_state.exam_submitted = False
                 st.session_state.answers = {}
                 st.session_state.question_index = 0
                 st.rerun()
+        
+        # Fresh Exam Interface handling
+        else:
+            st.title(st.session_state.exam_title)
+            current = st.session_state.question_index
+            question = questions[current]
+
+            left, right = st.columns([4, 1])
+
+            with right:
+                st.subheader("Questions")
+                cols = st.columns(3)
+                for i in range(total_questions):
+                    with cols[i % 3]:
+                        q_id = questions[i]["id"]
+                        label = f"🔴 {i+1}"
+                        if q_id in st.session_state.answers and st.session_state.answers[q_id]:
+                            label = f"🟢 {i+1}"
+                        if i == current:
+                            label = f"🔵 {i+1}"
+
+                        if st.button(label, key=f"qnav_{i}", use_container_width=True):
+                            st.session_state.question_index = i
+                            st.rerun()
+
+            with left:
+                st.subheader(f"Question {current+1}/{total_questions}")
+                st.write(question["question"])
+
+                stored_ans = st.session_state.answers.get(question["id"], "")
+                
+                if question["type"] == "mcq":
+                    opts = [question["option_a"], question["option_b"], question["option_c"], question["option_d"]]
+                    try:
+                        default_idx = opts.index(stored_ans) if stored_ans in opts else None
+                    except ValueError:
+                        default_idx = None
+
+                    answer = st.radio("Choose Answer", opts, index=default_idx, key=f"radio_{question['id']}")
+                else:
+                    answer = st.text_input("Your Answer", value=stored_ans, key=f"text_{question['id']}")
+
+                if answer:
+                    st.session_state.answers[question["id"]] = answer
+
+                col1, col2 = st.columns(2)
+                with col1:
+                    if st.button("Previous") and current > 0:
+                        st.session_state.question_index -= 1
+                        st.rerun()
+                with col2:
+                    if current < total_questions - 1:
+                        if st.button("Next"):
+                            st.session_state.question_index += 1
+                            st.rerun()
+
+            if current == total_questions - 1:
+                st.divider()
+                if st.button("Submit Exam", type="primary"):
+                    score = 0
+                    for q in questions:
+                        user_ans = st.session_state.answers.get(q["id"], "")
+                        if str(user_ans).strip().lower() == str(q["correct_answer"]).strip().lower():
+                            score += 1
+                    
+                    attempt_response = supabase.table("exam_attempts").insert({
+                        "user_id": st.session_state.user_id,
+                        "exam_id": st.session_state.exam_id,
+                        "score": score,
+                        "submitted": True
+                    }).execute()
+
+                    if attempt_response.data:
+                        attempt_id = attempt_response.data[0]["id"]
+                        for q in questions:
+                            user_answer = st.session_state.answers.get(q["id"], "")
+                            supabase.table("user_answers").insert({
+                                "attempt_id": attempt_id,
+                                "question_id": q["id"],
+                                "answer": user_answer
+                            }).execute()
+
+                    st.session_state.exam_submitted = True
+                    st.rerun()
