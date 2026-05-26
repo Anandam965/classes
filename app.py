@@ -6,7 +6,15 @@ import uuid
 import time
 import google.generativeai as genai
 import json
+import google.generativeai as genai
+import streamlit as st
 
+genai.configure(api_key=st.secrets["GOOGLE_API_KEY"])
+
+# అందుబాటులో ఉన్న మోడల్స్ అన్నింటినీ ప్రింట్ చేస్తుంది
+for m in genai.list_models():
+    if 'generateContent' in m.supported_methods:
+        print(m.name)
 try:
     SUPABASE_URL = st.secrets["SUPABASE_URL"]
     SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
