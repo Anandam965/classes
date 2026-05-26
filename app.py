@@ -7,13 +7,6 @@ import time
 import google.generativeai as genai
 import json
 
-# API Key సెటప్ (Gemini)
-genai.configure(api_key="YOUR_GEMINI_API_KEY")
-# =========================
-# SUPABASE CONFIG
-# =========================
-SUPABASE_URL = "https://lybhhtorasnwwaehqvnc.supabase.co"
-SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx5YmhodG9yYXNud3dhZWhxdm5jIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxMDk0NTksImV4cCI6MjA5NDY4NTQ1OX0.8LO08tXBNBD83TIrR8oiuCIo97CtvvaupSIahTBAAuo"
 
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
