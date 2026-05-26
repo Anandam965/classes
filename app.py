@@ -7,7 +7,13 @@ import time
 import google.generativeai as genai
 import json
 
-
+try:
+    SUPABASE_URL = st.secrets["SUPABASE_URL"]
+    SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
+    supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+except Exception as e:
+    st.error("Secrets లో విలువలు కనపడటం లేదు. Settings -> Secrets ని ఒకసారి చెక్ చేయండి.")
+    st.stop() # ఎర్రర్ వస్తే యాప్ ని ఇక్కడే ఆపేస్తుంది
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # =========================
