@@ -2,7 +2,11 @@ import streamlit as st
 from supabase import create_client
 import uuid
 import time
+import google.generativeai as genai
+import json
 
+# API Key సెటప్ (Gemini)
+genai.configure(api_key="YOUR_GEMINI_API_KEY")
 # =========================
 # SUPABASE CONFIG
 # =========================
@@ -227,8 +231,13 @@ def admin_dashboard():
                             st.rerun()
 
     elif menu == "📝 Manage Exams & Questions":
-        ex_tab1, ex_tab2, ex_tab3 = st.tabs(["📝 Exams Setup & Password Control", "❓ Add Questions", "🔍 Review & Edit Existing Papers"])
-        
+        ex_tab1, ex_tab2, ex_tab3, ex_tab4, ex_tab5 = st.tabs([
+            "📝 Exams Setup", 
+            "❓ Add Questions", 
+            "🔍 Review Papers", 
+            "📁 Bulk Upload (CSV)", 
+            "🤖 AI Gen"
+        ])
         with ex_tab1:
             st.subheader("Setup Dynamic Exams")
             classes_list = supabase.table("classes").select("*").execute().data
@@ -319,7 +328,49 @@ def admin_dashboard():
                     }).execute()
                     st.success("Question Added to Database Queue!")
                     st.rerun()
-
+        with ex_tab4:
+            st.subheader("📁 Bulk Upload Questions (CSV)")
+            st.write("CSV ఫార్మాట్: question, type, option_a, option_b, option_c, option_d, correct_answer, hint")
+            
+            uploaded_file = st.file_uploader("Upload CSV File", type="csv")
+            if uploaded_file:
+                df = pd.read_csv(uploaded_file)
+                st.write("Preview:", df.head())
+                
+                exam_list = supabase.table("exams").select("id, title").execute().data
+                exam_map = {e["title"]: e["id"] for e in exam_list}
+                target_exam = st.selectbox("Select Exam to Link", list(exam_map.keys()))
+                
+                if st.button("🚀 Upload All Questions"):
+                    data_to_insert = []
+                    for _, row in df.iterrows():
+                        data_to_insert.append({
+                            "exam_id": exam_map[target_exam],
+                            "question": row["question"],
+                            "type": row["type"],
+                            "option_a": row["option_a"],
+                            "option_b": row["option_b"],
+                            "option_c": row["option_c"],
+                            "option_d": row["option_d"],
+                            "correct_answer": row["correct_answer"],
+                            "hint": row["hint"]
+                        })
+                    supabase.table("questions").insert(data_to_insert).execute()
+                    st.success("All questions injected successfully!")
+            
+        with ex_tab5:
+            st.subheader("🤖 AI Question Generator")
+            lesson_text = st.text_area("Paste your Lesson Content here:")
+            
+            if st.button("✨ Generate Questions"):
+                model = genai.GenerativeModel('gemini-1.5-flash')
+                prompt = f"Convert this text into 5 MCQ questions in JSON format: {lesson_text}. Fields needed: question, option_a, option_b, option_c, option_d, correct_answer, hint"
+                
+                response = model.generate_content(prompt)
+                # ఇక్కడ response ని json.loads() ద్వారా పార్స్ చేసి డేటాబేస్ కి పంపవచ్చు
+                st.json(response.text)
+                st.info("Copy the JSON and upload it or use a script to push to Supabase.")
+            
         with ex_tab3:
             st.subheader("🔍 Review and Edit Existing Exam Papers")
             exams_all_edit = supabase.table("exams").select("*").execute().data
