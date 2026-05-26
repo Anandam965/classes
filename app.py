@@ -329,35 +329,46 @@ def admin_dashboard():
                     }).execute()
                     st.success("Question Added to Database Queue!")
                     st.rerun()
+       
         with ex_tab4:
             st.subheader("📁 Bulk Upload Questions (CSV)")
-            st.write("CSV ఫార్మాట్: question, type, option_a, option_b, option_c, option_d, correct_answer, hint")
             
-            uploaded_file = st.file_uploader("Upload CSV File", type="csv")
-            if uploaded_file:
+            # 1. సెలెక్ట్ ఎగ్జామ్ (ఏ ఎగ్జామ్ కి ప్రశ్నలు యాడ్ చేయాలో ఇది ముఖ్యం)
+            # మీ DB లో ఉన్న exam_id లను ఇక్కడ fetch చేయాలి
+            exams = supabase.table("exams").select("id, title").execute()
+            exam_options = {ex['title']: ex['id'] for ex in exams.data}
+            selected_exam = st.selectbox("Select Exam to add questions:", list(exam_options.keys()))
+            exam_id = exam_options[selected_exam]
+
+            uploaded_file = st.file_uploader("Upload CSV", type=["csv"])
+            
+            if uploaded_file is not None:
+                import pandas as pd
                 df = pd.read_csv(uploaded_file)
                 st.write("Preview:", df.head())
                 
-                exam_list = supabase.table("exams").select("id, title").execute().data
-                exam_map = {e["title"]: e["id"] for e in exam_list}
-                target_exam = st.selectbox("Select Exam to Link", list(exam_map.keys()))
-                
-                if st.button("🚀 Upload All Questions"):
-                    data_to_insert = []
-                    for _, row in df.iterrows():
-                        data_to_insert.append({
-                            "exam_id": exam_map[target_exam],
-                            "question": row["question"],
-                            "type": row["type"],
-                            "option_a": row["option_a"],
-                            "option_b": row["option_b"],
-                            "option_c": row["option_c"],
-                            "option_d": row["option_d"],
-                            "correct_answer": row["correct_answer"],
-                            "hint": row["hint"]
-                        })
-                    supabase.table("questions").insert(data_to_insert).execute()
-                    st.success("All questions injected successfully!")
+                if st.button("Upload to DB"):
+                    try:
+                        # 2. DataFrame ని Supabase లోకి పంపడం
+                        for index, row in df.iterrows():
+                            # మీ టేబుల్ లోని కాలమ్ పేర్లు మీ CSV కాలమ్స్ కి సరిపోవాలి
+                            data = {
+                                "exam_id": exam_id,
+                                "question": row['question'],
+                                "type": row['type'],
+                                "option_a": row['option_a'],
+                                "option_b": row['option_b'],
+                                "option_c": row['option_c'],
+                                "option_d": row['option_d'],
+                                "correct_answer": row['correct_answer'],
+                                "hint": row['hint']
+                            }
+                            supabase.table("questions").insert(data).execute()
+                        
+                        st.success(f"Successfully uploaded {len(df)} questions to '{selected_exam}'!")
+                    
+                    except Exception as e:
+                        st.error(f"Error uploading to DB: {e}")
             
        
         with ex_tab5:
