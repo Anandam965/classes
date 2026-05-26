@@ -9,16 +9,7 @@ import json
 import google.generativeai as genai
 import streamlit as st
 
-genai.configure(api_key=st.secrets["GOOGLE_API_KEY"])
 
-# అందుబాటులో ఉన్న మోడల్స్ అన్నింటినీ ప్రింట్ చేస్తుంది
-# పాత కోడ్ లో `if 'generateContent' in m.supported_methods:` అని ఉంది కదా
-# దానికి బదులుగా ఈ కింది కోడ్ వాడండి:
-
-for m in genai.list_models():
-    # 'supported_methods' ఉందో లేదో చెక్ చేసి, ఉంటేనే కండిషన్ చెక్ చేస్తుంది
-    if hasattr(m, 'supported_methods') and 'generateContent' in m.supported_methods:
-        st.write(f"Available model: {m.name}")
 try:
     SUPABASE_URL = st.secrets["SUPABASE_URL"]
     SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
