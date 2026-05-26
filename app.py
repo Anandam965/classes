@@ -366,8 +366,16 @@ def admin_dashboard():
             if st.button("✨ Generate Questions"):
                 model = genai.GenerativeModel('gemini-1.5-flash')
                 # మీ ప్రాంప్ట్ ఇలా సింపుల్ గా ఉండాలి
-                prompt = f"Create 5 MCQ questions based on this text. Output in JSON format: {lesson_text}"
-                response = model.generate_content(prompt)
+                response = model.generate_content(
+                    prompt,
+                    safety_settings={
+                        'HATE': 'BLOCK_NONE',
+                        'HARASSMENT': 'BLOCK_NONE',
+                        'SEXUAL': 'BLOCK_NONE',
+                        'DANGEROUS': 'BLOCK_NONE'
+                    }
+                )
+                
                 # ఇక్కడ response ని json.loads() ద్వారా పార్స్ చేసి డేటాబేస్ కి పంపవచ్చు
                 st.json(response.text)
                 st.info("Copy the JSON and upload it or use a script to push to Supabase.")
