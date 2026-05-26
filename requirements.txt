@@ -1,3 +1,4 @@
-streamlit==1.53.1
-supabase==2.30.0
-pandas==2.3.3
+streamlit
+supabase
+pandas
+google-generativeai
