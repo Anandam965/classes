@@ -359,26 +359,29 @@ def admin_dashboard():
                     supabase.table("questions").insert(data_to_insert).execute()
                     st.success("All questions injected successfully!")
             
+       
         with ex_tab5:
             st.subheader("🤖 AI Question Generator")
             lesson_text = st.text_area("Paste your Lesson Content here:")
             
             if st.button("✨ Generate Questions"):
-                model = genai.GenerativeModel('gemini-1.5-flash')
-                # మీ ప్రాంప్ట్ ఇలా సింపుల్ గా ఉండాలి
-                response = model.generate_content(
-                    prompt,
-                    safety_settings={
-                        'HATE': 'BLOCK_NONE',
-                        'HARASSMENT': 'BLOCK_NONE',
-                        'SEXUAL': 'BLOCK_NONE',
-                        'DANGEROUS': 'BLOCK_NONE'
-                    }
-                )
-                
-                # ఇక్కడ response ని json.loads() ద్వారా పార్స్ చేసి డేటాబేస్ కి పంపవచ్చు
-                st.json(response.text)
-                st.info("Copy the JSON and upload it or use a script to push to Supabase.")
+                if not lesson_text:
+                    st.warning("దయచేసి పాఠాన్ని పైన పేస్ట్ చేయండి!")
+                else:
+                    try:
+                        # ఇక్కడ ప్రాంప్ట్ వేరియబుల్‌ని డిక్లేర్ చేస్తున్నాము
+                        prompt = f"Convert this text into 5 MCQ questions in JSON format. Fields: question, option_a, option_b, option_c, option_d, correct_answer. Text: {lesson_text}"
+                        
+                        # ఇప్పుడు జనరేట్ చేస్తున్నాము
+                        model = genai.GenerativeModel('gemini-1.5-flash')
+                        response = model.generate_content(prompt)
+                        
+                        st.subheader("Generated Questions:")
+                        st.write(response.text)
+                        
+                    except Exception as e:
+                        st.error(f"Error: {e}")
+            
             
         with ex_tab3:
             st.subheader("🔍 Review and Edit Existing Exam Papers")
