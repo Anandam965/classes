@@ -1,3 +1,5 @@
+import os
+os.system("pip install google-generativeai")
 import streamlit as st
 from supabase import create_client
 import uuid
