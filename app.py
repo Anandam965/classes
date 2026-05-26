@@ -384,7 +384,7 @@ def admin_dashboard():
                         prompt = f"Convert this text into 5 MCQ questions in JSON format. Fields: question, option_a, option_b, option_c, option_d, correct_answer. Text: {lesson_text}"
                         
                         # ఇప్పుడు జనరేట్ చేస్తున్నాము
-                        model = genai.GenerativeModel('gemini-1.5-flash')
+                        model = genai.GenerativeModel(model_name="gemini-1.5-pro")
                         response = model.generate_content(prompt)
                         
                         st.subheader("Generated Questions:")
