@@ -365,8 +365,8 @@ def admin_dashboard():
             
             if st.button("✨ Generate Questions"):
                 model = genai.GenerativeModel('gemini-1.5-flash')
-                prompt = f"Convert this text into 5 MCQ questions in JSON format: {lesson_text}. Fields needed: question, option_a, option_b, option_c, option_d, correct_answer, hint"
-                
+                # మీ ప్రాంప్ట్ ఇలా సింపుల్ గా ఉండాలి
+                prompt = f"Create 5 MCQ questions based on this text. Output in JSON format: {lesson_text}"
                 response = model.generate_content(prompt)
                 # ఇక్కడ response ని json.loads() ద్వారా పార్స్ చేసి డేటాబేస్ కి పంపవచ్చు
                 st.json(response.text)
