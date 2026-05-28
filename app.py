@@ -9,7 +9,27 @@ import json
 import google.generativeai as genai
 import streamlit as st
 
-
+def evaluate_java_code(user_code, input_data, expected_output):
+    # మీ RapidAPI కీని ఇక్కడ ఇవ్వాలి
+    url = "https://judge0-ce.p.rapidapi.com/submissions?base64_encoded=false&fields=*"
+    payload = {
+        "source_code": user_code,
+        "language_id": 27, 
+        "stdin": input_data
+    }
+    headers = {
+        "x-rapidapi-key": "మీ_RAPIDAPI_KEY_ఇక్కడ_పేస్ట్_చేయండి",
+        "Content-Type": "application/json"
+    }
+    try:
+        response = requests.post(url, json=payload, headers=headers).json()
+        token = response.get("token")
+        if not token: return False
+        time.sleep(2)
+        result = requests.get(f"{url}&token={token}", headers=headers).json()
+        return result.get("stdout", "").strip() == expected_output.strip()
+    except:
+        return False
 try:
     SUPABASE_URL = st.secrets["SUPABASE_URL"]
     SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
@@ -663,16 +683,38 @@ def exam_workspace_view():
                 st.markdown(f"**Question {i+1}:** {q['question']}")
                 u_ans = ans_map.get(q["id"], 'Not Answered')
                 c_ans = q["correct_answer"]
+
+
+
+
+                if q["type"] == "programming":
+                    user_code = st.text_area(f"Java Solution for Q{q['id']}:")
+                    
+                    if st.button("Submit & Run Code"):
+                        # Supabase నుండి టెస్ట్ కేసెస్ తెచ్చుకోండి
+                        test_cases = supabase.table("test_cases").select("*").eq("question_id", q["id"]).execute().data
+                        
+                        passed = 0
+                        total = len(test_cases)
+                        
+                        for case in test_cases:
+                            if evaluate_java_code(user_code, case["input_data"], case["expected_output"]):
+                                passed += 1
+                        
+                        score = (passed / total) * 100
+                        st.write(f"✅ మీ స్కోర్: {score}% ({passed}/{total} టెస్ట్ కేసెస్ పాస్ అయ్యాయి)")
+                        
+                        # డేటాబేస్ లో సేవ్ చేయడం
+                        supabase.table("exam_attempts").insert({
+                            "user_id": st.session_state.user_id,
+                            "exam_id": st.session_state.exam_id,
+                            "score": score
+                        }).execute()
+
+
+
                 
-                if q["type"] != "programming":
-                    if str(u_ans).strip().lower() == str(c_ans).strip().lower():
-                        st.success(f"Your Answer: {u_ans} (Correct)")
-                    else:
-                        st.error(f"Your Answer: {u_ans}")
-                        st.warning(f"Correct Answer: {c_ans}")
-                else:
-                    st.info(f"Your Code/Answer: {u_ans} (Manual Review Item)")
-                st.divider()
+                
 
         if st.button("Return to Dashboard", type="primary"):
             st.session_state.start_exam = False
