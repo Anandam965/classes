@@ -562,9 +562,9 @@ def user_dashboard():
                     if class_id:
                         try:
                             comp = supabase.table("class_completions").select("*") \
-                                .eq("user_id", st.session_state.user_id) \
-                                .eq("class_id", str(class_id)).execute().data
-                            if comp:
+                                .eq("user_id", str(st.session_state.user_id)) \
+                                .eq("class_id", str(cls["id"])).execute().data
+                            if len(comp)>0:
                                 st.success("✅ మీరు ఈ క్లాస్ పూర్తి చేశారు!")
                             else:
                                 if st.button(f"Mark as Completed", key=f"btn_done_{cls['id']}"):
