@@ -571,32 +571,31 @@ def user_dashboard():
                         st.link_button("Notes PDF", cls["notes_pdf"], use_container_width=True)
                     # ... (పాత కోడ్)
                     
-                        
+                     # లూప్ లోపల క్లాస్ ఐడిని తీసుకునేటప్పుడు ఇలా మార్చండి:
+                    class_id = cls.get("id")
                     
-                    # --- ఇక్కడ నుండి కొత్త కోడ్ యాడ్ చేయండి ---
-                   # User Dashboard లో క్లాస్ కంప్లీషన్ బటన్ ఉన్న చోట ఇలా రాయండి:
-                    
-                    # 1. మొదట చెక్ చేయండి (ఇది మీ పాత కోడ్ లాగే ఉంచండి)
-                    comp = supabase.table("class_completions").select("*")\
-                        .eq("user_id", st.session_state.user_id)\
-                        .eq("class_id", int(cls["id"])).execute().data
-                    
-                    if len(comp) > 0:
-                        st.success("✅ మీరు ఈ క్లాస్ పూర్తి చేశారు!")
+                    if class_id is not None:
+                        try:
+                            # కంప్లీషన్ డేటాను తీసుకోవడానికి
+                            comp = supabase.table("class_completions").select("*")\
+                                .eq("user_id", st.session_state.user_id)\
+                                .eq("class_id", int(class_id)).execute().data
+                            
+                            if len(comp) > 0:
+                                st.success("✅ మీరు ఈ క్లాస్ పూర్తి చేశారు!")
+                            else:
+                                if st.button(f"Mark '{cls['title']}' as Completed", key=f"btn_done_{class_id}"):
+                                    supabase.table("class_completions").insert({
+                                        "user_id": str(st.session_state.user_id),
+                                        "class_id": int(class_id)
+                                    }).execute()
+                                    st.rerun()
+                        except Exception as e:
+                            st.error(f"Error: {e}")
                     else:
-                        # 2. బటన్ లాజిక్
-                        if st.button(f"Mark '{cls['title']}' as Completed", key=f"btn_done_{cls['id']}"):
-                            try:
-                                # ఇక్కడ .data వాడకండి, కేవలం .execute() మాత్రమే వాడండి
-                                supabase.table("class_completions").insert({
-                                    "user_id": str(st.session_state.user_id),
-                                    "class_id": int(cls["id"])
-                                }).execute()
-                                
-                                st.success("క్లాస్ కంప్లీట్ అయ్యింది!")
-                                st.rerun() # పేజీ రిఫ్రెష్ అవుతుంది
-                            except Exception as e:
-                                st.error(f"డేటాబేస్ ఎర్రర్: {e}")
+                        st.warning("ఈ క్లాస్‌కు సంబంధించిన ఐడి కనపడటం లేదు.")   
+                    
+                   
                     
                     exams = supabase.table("exams").select("*").eq("class_id", cls["id"]).execute().data
                     # ... (మిగిలిన ఎగ్జామ్స్ కోడ్)
