@@ -239,11 +239,7 @@ def admin_dashboard():
                     ec_link = st.text_input("Live Link", value=cls["class_link"], key=f"cl_{cls['id']}")
                     ev_link = st.text_input("Video Link", value=cls["recorded_video"], key=f"cv_{cls['id']}")
                     ep_link = st.text_input("PDF Link", value=cls["notes_pdf"], key=f"cp_{cls['id']}")
-                    # అడ్మిన్ సెక్షన్ లో ఇలా రాయండి
-                    response = supabase.table("class_completions").select("*", count='exact').eq("class_id", cls["id"]).execute()
-                   # response = supabase.table("class_completions").select("*", count='exact').eq("class_id", int(cls["id"])).execute()
-                    comp_count = len(response.data) # ఇది సులభమైన పద్ధతి
-                    st.info(f"📊 ఈ క్లాస్ ని {comp_count} మంది విద్యార్థులు పూర్తి చేశారు.")
+                    
                     b1, b2 = st.columns(2)
                     with b1:
                         if st.button("💾 Save Changes", key=f"cu_{cls['id']}", type="primary", use_container_width=True):
@@ -570,40 +566,7 @@ def user_dashboard():
                         st.link_button("Watch Video", cls["recorded_video"], use_container_width=True)
                     with col_link3:
                         st.link_button("Notes PDF", cls["notes_pdf"], use_container_width=True)
-                    # ... (పాత కోడ్)
-                    
-                     # లూప్ లోపల క్లాస్ ఐడిని తీసుకునేటప్పుడు ఇలా మార్చండి:
-                    class_id = cls.get("id")
-                    
-                    if class_id is not None:
-                        try:
-                            # కంప్లీషన్ డేటాను తీసుకోవడానికి
-                            comp = supabase.table("class_completions").select("*")\
-                                .eq("user_id", st.session_state.user_id)\
-                                .eq("class_id", int(class_id)).execute().data
-                            
-                            if len(comp) > 0:
-                                st.success("✅ మీరు ఈ క్లాస్ పూర్తి చేశారు!")
-                            else:
-                                # 'int()' ని పూర్తిగా తొలగించండి, ఎందుకంటే id ఇప్పుడు UUID స్ట్రింగ్
-                                if st.button(f"Mark '{cls['title']}' as Completed", key=f"btn_done_{cls['id']}"):
-                                    try:
-                                        supabase.table("class_completions").insert({
-                                            "user_id": str(st.session_state.user_id),
-                                            "class_id": str(cls["id"]) # ఇక్కడ int() తీసేసాము
-                                        }).execute()
-                                        
-                                        st.success("క్లాస్ కంప్లీట్ అయ్యింది!")
-                                        st.rerun()
-                                    except Exception as e:
-                                        st.error(f"డేటాబేస్ ఎర్రర్: {e}")
-                    if not cls.get("id"):
-                            st.warning("ఈ క్లాస్‌కు సంబంధించిన ఐడి కనపడటం లేదు.")
-                    
-                   
-                    
-                    exams = supabase.table("exams").select("*").eq("class_id", cls["id"]).execute().data
-                    # ... (మిగిలిన ఎగ్జామ్స్ కోడ్)
+
                     exams = supabase.table("exams").select("*").eq("class_id", cls["id"]).execute().data
                     for exam in exams:
                         if exam["enabled"]:
