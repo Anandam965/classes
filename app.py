@@ -597,8 +597,8 @@ def user_dashboard():
                                         st.rerun()
                                     except Exception as e:
                                         st.error(f"డేటాబేస్ ఎర్రర్: {e}")
-                    else:
-                        st.warning("ఈ క్లాస్‌కు సంబంధించిన ఐడి కనపడటం లేదు.")   
+                        else:
+                            st.warning("ఈ క్లాస్‌కు సంబంధించిన ఐడి కనపడటం లేదు.")   
                     
                    
                     
