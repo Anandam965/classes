@@ -259,17 +259,41 @@ def admin_dashboard():
 
             st.divider()
             st.write("### Active Classes Directory")
+
+            # Total enrolled users count (role = student)
+            total_users = len(supabase.table("users").select("id").eq("role", "student").execute().data)
+
             classes = supabase.table("classes").select("*").execute().data
             for cls in classes:
-                with st.expander(f"🖥️ {cls['title']} Settings"):
+                # Completion stats
+                comp_data = supabase.table("class_completions").select("user_id").eq("class_id", cls["id"]).execute().data
+                comp_count = len(comp_data)
+                pct = int((comp_count / total_users * 100)) if total_users > 0 else 0
+
+                # Expander title లోనే percentage చూపించాలి
+                expander_label = f"🖥️ {cls['title']}  —  {comp_count}/{total_users} students  ({pct}%)"
+                with st.expander(expander_label):
+
+                    # Progress bar
+                    col_prog, col_num = st.columns([5, 1])
+                    with col_prog:
+                        st.progress(pct / 100)
+                    with col_num:
+                        st.markdown(f"**{pct}%**")
+
+                    # Completed students list (expandable)
+                    if comp_count > 0:
+                        with st.expander(f"👥 {comp_count} మంది complete చేశారు — చూడు"):
+                            for row in comp_data:
+                                u = supabase.table("users").select("name, email").eq("id", row["user_id"]).execute().data
+                                if u:
+                                    st.caption(f"✅ {u[0]['name']} ({u[0]['email']})")
+
+                    st.divider()
                     ec_title = st.text_input("Title", value=cls["title"], key=f"ct_{cls['id']}")
                     ec_link = st.text_input("Live Link", value=cls.get("class_link", ""), key=f"cl_{cls['id']}")
                     ev_link = st.text_input("Video Link", value=cls.get("recorded_video", ""), key=f"cv_{cls['id']}")
                     ep_link = st.text_input("PDF Link", value=cls.get("notes_pdf", ""), key=f"cp_{cls['id']}")
-
-                    response = supabase.table("class_completions").select("*").eq("class_id", cls["id"]).execute()
-                    comp_count = len(response.data)
-                    st.info(f"📊 ఈ క్లాస్ ని {comp_count} మంది విద్యార్థులు పూర్తి చేశారు.")
 
                     b1, b2 = st.columns(2)
                     with b1:
