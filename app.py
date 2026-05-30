@@ -256,7 +256,10 @@ def admin_dashboard():
             st.rerun()
         user_dashboard(preview_mode=True)
         return
+
     else:
+        # Admin కి కూడా notifications చూపించాలి
+        show_notification_banner(st.session_state.user_id)
         if st.sidebar.button("👁️ Student View Preview", use_container_width=True):
             st.session_state.admin_preview_mode = True
             st.rerun()
@@ -468,12 +471,19 @@ def admin_dashboard():
                     col_btn1, col_btn2 = st.columns(2)
                     with col_btn1:
                         if st.button("💾 Save", key=f"up_ex_{ex['id']}", type="primary", use_container_width=True):
+                            old_pwd = str(ex.get("password") or "")
+                            new_pwd = updated_pwd.strip()
                             supabase.table("exams").update({
                                 "duration_mins": int(updated_dur),
-                                "password": updated_pwd.strip() if updated_pwd.strip() else None,
+                                "password": new_pwd if new_pwd else None,
                                 "enabled": t_active,
                                 "show_answers": t_ans
                             }).eq("id", ex["id"]).execute()
+                            # Password కొత్తగా set అయినప్పుడు notification పంపాలి
+                            if new_pwd and new_pwd != old_pwd:
+                                send_notification(
+                                    f"📝 '{ex['title']}' exam కి password set అయింది: {new_pwd}"
+                                )
                             st.success("Updated!")
                             st.rerun()
                     with col_btn2:
@@ -575,7 +585,7 @@ def admin_dashboard():
                             "Return ONLY a JSON array. Each item: question, option_a, option_b, "
                             f"option_c, option_d, correct_answer. Text: {lesson_text}"
                         )
-                        model = genai.GenerativeModel(model_name="gemini-2.0-flash")
+                        model = genai.GenerativeModel(model_name="gemini-2.0-flash-lite")
                         response = model.generate_content(prompt)
                         st.subheader("Generated Questions:")
                         st.write(response.text)
@@ -731,7 +741,96 @@ def admin_dashboard():
 
 
     elif menu == "💬 Group Chat":
+        # Admin custom notification పంపే option
+        with st.expander("🔔 Broadcast Notification పంపండి"):
+            notif_msg = st.text_input("Message", placeholder="అన్ని users కి notification...", key="broadcast_msg")
+            if st.button("📣 Send to All Users", type="primary"):
+                if notif_msg.strip():
+                    send_notification(notif_msg.strip())
+                    st.success("✅ Notification అందరికీ పంపబడింది!")
+                    st.rerun()
+                else:
+                    st.warning("Message enter చేయండి.")
+        st.divider()
         group_chat()
+
+# =========================
+# NOTIFICATIONS
+# =========================
+def send_notification(message, user_id=None):
+    """Notification పంపాలి — user_id=None అయితే అందరికీ"""
+    supabase.table("notifications").insert({
+        "user_id": str(user_id) if user_id else None,
+        "message": message,
+        "is_read": False
+    }).execute()
+
+def get_unread_notifications(user_id):
+    """User కి unread notifications తీసుకోవాలి"""
+    try:
+        # అందరికీ పంపిన (user_id=NULL) + ఈ user కి specifically పంపిన
+        all_notifs = supabase.table("notifications").select("*")             .eq("is_read", False).order("created_at", desc=True).execute().data
+        # Filter: NULL user_id (broadcast) OR this user's notifications
+        return [n for n in all_notifs
+                if n["user_id"] is None or n["user_id"] == str(user_id)]
+    except Exception:
+        return []
+
+def mark_notifications_read(user_id):
+    """User కి unread notifications అన్నీ read చేయాలి"""
+    try:
+        # Broadcast notifications mark as read
+        supabase.table("notifications").update({"is_read": True})             .is_("user_id", "null").execute()
+        # User specific notifications mark as read
+        supabase.table("notifications").update({"is_read": True})             .eq("user_id", str(user_id)).execute()
+    except Exception:
+        pass
+
+def show_notification_banner(user_id):
+    """Top లో blinking notification banner చూపించాలి"""
+    notifs = get_unread_notifications(user_id)
+    if not notifs:
+        return
+    # Blinking CSS + notification cards
+    st.markdown("""
+        <style>
+        @keyframes blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.3; }
+        }
+        .notif-banner {
+            animation: blink 1.2s ease-in-out infinite;
+            background: linear-gradient(90deg, #ff6b6b, #ffa500);
+            color: white;
+            padding: 10px 16px;
+            border-radius: 8px;
+            margin-bottom: 6px;
+            font-weight: 600;
+            font-size: 0.95rem;
+        }
+        .notif-banner-static {
+            background: #fff3cd;
+            color: #856404;
+            border: 1px solid #ffc107;
+            padding: 10px 16px;
+            border-radius: 8px;
+            margin-bottom: 4px;
+            font-size: 0.9rem;
+        }
+        </style>
+    """, unsafe_allow_html=True)
+
+    # First notification blink చేయాలి, rest static గా
+    for i, notif in enumerate(notifs):
+        css_class = "notif-banner" if i == 0 else "notif-banner-static"
+        st.markdown(
+            f"<div class='{css_class}'>🔔 {notif['message']}</div>",
+            unsafe_allow_html=True
+        )
+
+    if st.button(f"✅ Mark all as Read ({len(notifs)})", key="mark_notif_read", type="secondary"):
+        mark_notifications_read(user_id)
+        st.rerun()
 
 # =========================
 # GROUP CHAT
@@ -851,6 +950,10 @@ def user_dashboard(preview_mode=False):
     else:
         st.info("👁️ ఇది Student Preview Mode — student కి కనపడే view చూస్తున్నారు.")
         user_page = "📚 My Classes"
+
+    # Notification banner — top లో చూపించాలి
+    if not preview_mode:
+        show_notification_banner(st.session_state.user_id)
 
     if user_page == "💬 Group Chat":
         group_chat()
