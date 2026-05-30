@@ -50,11 +50,12 @@ defaults = {
     "current_questions": [],
     "completed_ids": None,
     "admin_preview_mode": False,
-    "pin_verified": False,      # PIN verify అయిందా లేదా
-    "pin_setup_mode": False,    # కొత్త PIN set చేస్తున్నారా
-    "email_temp": "",           # PIN screen కోసం email store
-    "user_id_temp": "",         # PIN screen కోసం user_id store
-    "role_temp": "",            # PIN screen కోసం role store
+    "pin_verified": False,
+    "pin_setup_mode": False,
+    "email_temp": "",
+    "user_id_temp": "",
+    "role_temp": "",
+    "user_page": "📚 My Classes",
 }
 for key, val in defaults.items():
     if key not in st.session_state:
@@ -777,11 +778,17 @@ def user_dashboard(preview_mode=False):
                 st.session_state[key] = defaults[key]
             st.rerun()
         st.sidebar.divider()
-        user_page = st.sidebar.radio(
-            "Menu",
-            ["📚 My Classes", "💬 Group Chat"],
-            label_visibility="collapsed"
-        )
+        if "user_page" not in st.session_state:
+            st.session_state.user_page = "📚 My Classes"
+        if st.sidebar.button("📚 My Classes", use_container_width=True,
+                             type="primary" if st.session_state.user_page == "📚 My Classes" else "secondary"):
+            st.session_state.user_page = "📚 My Classes"
+            st.rerun()
+        if st.sidebar.button("💬 Group Chat", use_container_width=True,
+                             type="primary" if st.session_state.user_page == "💬 Group Chat" else "secondary"):
+            st.session_state.user_page = "💬 Group Chat"
+            st.rerun()
+        user_page = st.session_state.user_page
     else:
         st.info("👁️ ఇది Student Preview Mode — student కి కనపడే view చూస్తున్నారు.")
         user_page = "📚 My Classes"
