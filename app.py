@@ -154,7 +154,7 @@ def admin_dashboard():
         if st.sidebar.button("🛡️ Admin View కి తిరిగి వెళ్ళు", use_container_width=True, type="primary"):
             st.session_state.admin_preview_mode = False
             st.rerun()
-        user_dashboard()
+        user_dashboard(preview_mode=True)
         return
     else:
         if st.sidebar.button("👁️ Student View Preview", use_container_width=True):
@@ -545,12 +545,15 @@ def admin_dashboard():
 # =========================
 # USER DASHBOARD
 # =========================
-def user_dashboard():
-    st.sidebar.title("User Workspace")
-    if st.sidebar.button("🚪 Logout", use_container_width=True):
-        for key in defaults:
-            st.session_state[key] = defaults[key]
-        st.rerun()
+def user_dashboard(preview_mode=False):
+    if not preview_mode:
+        st.sidebar.title("User Workspace")
+        if st.sidebar.button("🚪 Logout", use_container_width=True):
+            for key in defaults:
+                st.session_state[key] = defaults[key]
+            st.rerun()
+    else:
+        st.info("👁️ ఇది Student Preview Mode — student కి కనపడే view చూస్తున్నారు.")
 
     modules = supabase.table("modules").select("*").execute().data
 
@@ -817,4 +820,4 @@ elif st.session_state.role == "admin":
 elif st.session_state.start_exam:
     exam_workspace_view()
 else:
-    user_dashboard()
+    user_dashboard(preview_mode=False)
