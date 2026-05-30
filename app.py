@@ -262,10 +262,15 @@ def admin_dashboard():
             st.rerun()
     st.sidebar.divider()
 
+    unread_admin = get_unread_count(st.session_state.user_id)
+    chat_menu_label = f"💬 Group Chat 🔴 {unread_admin}" if unread_admin > 0 else "💬 Group Chat"
     menu = st.sidebar.selectbox(
         "Navigation Control",
-        ["🗂️ Manage Course Content", "📝 Manage Exams & Questions", "📊 Student Results & Ranks", "💬 Group Chat"]
+        ["🗂️ Manage Course Content", "📝 Manage Exams & Questions", "📊 Student Results & Ranks", chat_menu_label]
     )
+    # selectbox value normalize చేయాలి
+    if "Group Chat" in menu:
+        menu = "💬 Group Chat"
 
     if menu == "🗂️ Manage Course Content":
         tab1, tab2, tab3 = st.tabs(["📁 Modules Setup", "📂 Submodules Setup", "🖥️ Live/Recorded Classes"])
@@ -709,10 +714,27 @@ def admin_dashboard():
 # =========================
 # GROUP CHAT
 # =========================
+def get_unread_count(user_id):
+    """Unread messages count తీసుకోవాలి"""
+    try:
+        read_data = supabase.table("message_reads").select("last_read_at")             .eq("user_id", str(user_id)).execute().data
+        if not read_data:
+            # ఒక్కసారీ chat చూడలేదు — total count
+            total = supabase.table("messages").select("id").execute().data
+            return len(total)
+        last_read = read_data[0]["last_read_at"]
+        unread = supabase.table("messages").select("id")             .gt("created_at", last_read)             .neq("user_id", str(user_id)).execute().data
+        return len(unread)
+    except Exception:
+        return 0
+
+
 def group_chat():
     st.title("💬 Group Chat")
 
-    # Messages fetch — latest 50
+    user_id = str(st.session_state.user_id)
+
+    # Messages fetch
     messages = supabase.table("messages").select("*")         .order("created_at", desc=False).limit(50).execute().data
 
     # Chat container
@@ -721,50 +743,63 @@ def group_chat():
         if not messages:
             st.info("ఇంకా messages లేవు. మొదటిగా message చేయండి! 👋")
         for msg in messages:
-            is_me = msg["user_id"] == st.session_state.user_id
+            is_me = msg["user_id"] == user_id
+            time_str = str(msg.get("created_at", ""))[:16]
             if is_me:
-                # Right side — own message
                 col1, col2 = st.columns([2, 5])
                 with col2:
                     st.markdown(
                         f"""<div style='background:#dcf8c6;padding:10px 14px;border-radius:12px 12px 0px 12px;margin:4px 0;'>
                         <small style='color:#555;font-weight:600'>You</small><br>
                         {msg['message']}
-                        <br><small style='color:#999;font-size:10px'>{str(msg.get('created_at',''))[:16]}</small>
+                        <br><small style='color:#999;font-size:10px'>{time_str}</small>
                         </div>""",
                         unsafe_allow_html=True
                     )
             else:
-                # Left side — others message
                 col1, col2 = st.columns([5, 2])
                 with col1:
                     st.markdown(
                         f"""<div style='background:#f1f0f0;padding:10px 14px;border-radius:12px 12px 12px 0px;margin:4px 0;'>
                         <small style='color:#0084ff;font-weight:600'>{msg.get('user_name','Unknown')}</small><br>
                         {msg['message']}
-                        <br><small style='color:#999;font-size:10px'>{str(msg.get('created_at',''))[:16]}</small>
+                        <br><small style='color:#999;font-size:10px'>{time_str}</small>
                         </div>""",
                         unsafe_allow_html=True
                     )
 
     st.divider()
 
-    # Message input
-    col_input, col_btn = st.columns([6, 1])
+    # Message input + Mark as Read
+    col_input, col_send, col_read = st.columns([5, 1, 1])
     with col_input:
         new_msg = st.text_input("Message రాయండి...", key="chat_input", label_visibility="collapsed")
-    with col_btn:
+    with col_send:
         send = st.button("📤 Send", use_container_width=True, type="primary")
+    with col_read:
+        mark_read = st.button("✅ Read", use_container_width=True)
 
     if send and new_msg.strip():
-        # user name తీసుకోవాలి
-        uinfo = supabase.table("users").select("name").eq("id", st.session_state.user_id).execute().data
+        uinfo = supabase.table("users").select("name").eq("id", user_id).execute().data
         uname = uinfo[0]["name"] if uinfo else "Unknown"
         supabase.table("messages").insert({
-            "user_id": str(st.session_state.user_id),
+            "user_id": user_id,
             "user_name": uname,
             "message": new_msg.strip()
         }).execute()
+        # Send చేసిన తర్వాత automatically mark as read చేయాలి
+        supabase.table("message_reads").upsert({
+            "user_id": user_id,
+            "last_read_at": "now()"
+        }, on_conflict="user_id").execute()
+        st.rerun()
+
+    if mark_read:
+        supabase.table("message_reads").upsert({
+            "user_id": user_id,
+            "last_read_at": "now()"
+        }, on_conflict="user_id").execute()
+        st.success("✅ అన్ని messages చదివినట్లు mark అయింది!")
         st.rerun()
 
 # =========================
@@ -784,7 +819,9 @@ def user_dashboard(preview_mode=False):
                              type="primary" if st.session_state.user_page == "📚 My Classes" else "secondary"):
             st.session_state.user_page = "📚 My Classes"
             st.rerun()
-        if st.sidebar.button("💬 Group Chat", use_container_width=True,
+        unread = get_unread_count(st.session_state.user_id)
+        chat_label = f"💬 Group Chat  🔴 {unread}" if unread > 0 else "💬 Group Chat"
+        if st.sidebar.button(chat_label, use_container_width=True,
                              type="primary" if st.session_state.user_page == "💬 Group Chat" else "secondary"):
             st.session_state.user_page = "💬 Group Chat"
             st.rerun()
