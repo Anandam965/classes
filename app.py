@@ -814,12 +814,13 @@ def user_dashboard(preview_mode=False):
 
                             if check_attempt:
                                 # అన్ని attempts scores చూపించాలి
+                                # అన్ని attempts scores చూపించాలి
+                                q_count = supabase.table("questions").select("id").eq("exam_id", exam["id"]).execute().data
+                                total_q = len(q_count)
                                 st.markdown("**📊 మీ Attempts:**")
                                 for idx, att in enumerate(check_attempt):
-                                    attempt_num = len(check_attempt) - idx
                                     attempt_num = idx + 1
-                                    st.caption(f"Attempt {attempt_num}: **{att['score']}/{total_questions}**")
-
+                                    st.caption(f"Attempt {attempt_num}: **{att['score']}/{total_q}**")
                                 # Latest attempt తో Show Answers
                                 if st.button("🔍 Show Answers", key=f"view_{exam['id']}", use_container_width=True):
                                     st.session_state.exam_id = exam["id"]
