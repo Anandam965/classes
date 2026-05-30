@@ -518,25 +518,47 @@ def admin_dashboard():
                 uploaded_file = st.file_uploader("Upload CSV", type=["csv"])
                 if uploaded_file is not None:
                     import pandas as pd
-                    df = pd.read_csv(uploaded_file)
-                    st.write("Preview:", df.head())
-                    if st.button("Upload to DB"):
+                    import io
+                    try:
+                        # encoding fix — utf-8 try చేసి fail అయితే latin1
+                        raw = uploaded_file.read()
                         try:
-                            for _, row in df.iterrows():
-                                supabase.table("questions").insert({
-                                    "exam_id": exam_id,
-                                    "question": row["question"],
-                                    "type": row["type"],
-                                    "option_a": row.get("option_a", ""),
-                                    "option_b": row.get("option_b", ""),
-                                    "option_c": row.get("option_c", ""),
-                                    "option_d": row.get("option_d", ""),
-                                    "correct_answer": row.get("correct_answer", ""),
-                                    "hint": row.get("hint", "")
-                                }).execute()
-                            st.success(f"Successfully uploaded {len(df)} questions!")
-                        except Exception as e:
-                            st.error(f"Upload Error: {e}")
+                            df = pd.read_csv(io.StringIO(raw.decode("utf-8")))
+                        except UnicodeDecodeError:
+                            df = pd.read_csv(io.StringIO(raw.decode("latin1")))
+
+                        # Required columns check
+                        required = ["question", "type", "correct_answer"]
+                        missing = [c for c in required if c not in df.columns]
+                        if missing:
+                            st.error(f"CSV లో ఈ columns లేవు: {missing}")
+                            st.caption("Expected columns: question, type, option_a, option_b, option_c, option_d, correct_answer, hint")
+                        else:
+                            # NaN values ని empty string గా మార్చాలి
+                            df = df.fillna("")
+                            st.success(f"✅ {len(df)} rows loaded!")
+                            st.write("Preview:", df.head())
+
+                            if st.button("Upload to DB"):
+                                try:
+                                    for _, row in df.iterrows():
+                                        supabase.table("questions").insert({
+                                            "exam_id": exam_id,
+                                            "question": str(row.get("question", "")),
+                                            "type": str(row.get("type", "mcq")),
+                                            "option_a": str(row.get("option_a", "")),
+                                            "option_b": str(row.get("option_b", "")),
+                                            "option_c": str(row.get("option_c", "")),
+                                            "option_d": str(row.get("option_d", "")),
+                                            "correct_answer": str(row.get("correct_answer", "")),
+                                            "hint": str(row.get("hint", ""))
+                                        }).execute()
+                                    st.success(f"✅ {len(df)} questions uploaded!")
+                                except Exception as e:
+                                    st.error(f"Upload Error: {e}")
+                    except Exception as e:
+                        st.error(f"CSV చదవలేకపోయాం: {e}")
+                        st.caption("CSV file సరిగ్గా ఉందో check చేయండి. Excel లో save చేస్తే 'CSV UTF-8' గా save చేయండి.")
             else:
                 st.warning("ముందుగా ఒక Exam create చేయండి.")
 
