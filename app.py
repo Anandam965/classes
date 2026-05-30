@@ -8,6 +8,33 @@ import streamlit as st
 from supabase import create_client
 import google.generativeai as genai
 
+
+# =========================
+# IMGBB IMAGE UPLOAD
+# =========================
+def upload_image_to_imgbb(image_file):
+    """Image ని ImgBB కి upload చేసి URL return చేయాలి"""
+    import base64
+    try:
+        api_key = st.secrets.get("IMGBB_API_KEY", "")
+        if not api_key:
+            st.error("IMGBB_API_KEY secrets లో లేదు!")
+            return None
+        img_data = base64.b64encode(image_file.read()).decode("utf-8")
+        response = requests.post(
+            "https://api.imgbb.com/1/upload",
+            data={"key": api_key, "image": img_data}
+        )
+        result = response.json()
+        if result.get("success"):
+            return result["data"]["url"]
+        else:
+            st.error(f"Upload failed: {result}")
+            return None
+    except Exception as e:
+        st.error(f"Image upload error: {e}")
+        return None
+
 # =========================
 # PAGE CONFIG - FIX 2: Must be FIRST streamlit call
 # =========================
@@ -497,26 +524,48 @@ def admin_dashboard():
             exams_q = supabase.table("exams").select("*").execute().data
             ex_options = {e["title"]: e["id"] for e in exams_q} if exams_q else {}
 
-            with st.form("add_question_form", clear_on_submit=True):
-                sel_ex = st.selectbox("Select Exam", list(ex_options.keys()) or ["No exams yet"])
-                q_type = st.selectbox("Question Type", ["mcq", "blank", "programming"])
-                q_text = st.text_area("Question Text")
-                a = st.text_input("Choice A")
-                b = st.text_input("Choice B")
-                c = st.text_input("Choice C")
-                d = st.text_input("Choice D")
-                h_text = st.text_input("Hint")
-                c_ans_text = st.text_input("Correct Answer")
-                if st.form_submit_button("➕ Add Question"):
-                    if sel_ex in ex_options and q_text.strip():
-                        supabase.table("questions").insert({
-                            "exam_id": ex_options[sel_ex], "question": q_text, "type": q_type,
-                            "option_a": a, "option_b": b, "option_c": c, "option_d": d,
-                            "correct_answer": c_ans_text if q_type != "programming" else "Manual Review Required",
-                            "hint": h_text
-                        }).execute()
-                        st.success("Question Added!")
-                        st.rerun()
+            # Image upload — form బయట ఉండాలి (st.form లో file_uploader పని చేయదు)
+            st.markdown("#### ➕ Add Question")
+            sel_ex = st.selectbox("Select Exam", list(ex_options.keys()) or ["No exams yet"], key="add_q_exam")
+            q_type = st.selectbox("Question Type", ["mcq", "blank", "programming"], key="add_q_type")
+            q_text = st.text_area("Question Text", key="add_q_text")
+
+            # Image — URL లేదా Upload
+            st.caption("📷 Image (optional)")
+            img_col1, img_col2 = st.columns([1, 1])
+            with img_col1:
+                img_url_input = st.text_input("Image URL paste చేయండి", key="add_img_url", placeholder="https://...")
+            with img_col2:
+                img_file = st.file_uploader("లేదా Image upload చేయండి", type=["jpg","jpeg","png","gif"], key="add_img_file")
+
+            col_ab, col_cd = st.columns(2)
+            with col_ab:
+                a = st.text_input("Choice A", key="add_a")
+                b = st.text_input("Choice B", key="add_b")
+            with col_cd:
+                c = st.text_input("Choice C", key="add_c")
+                d = st.text_input("Choice D", key="add_d")
+            h_text = st.text_input("Hint", key="add_hint")
+            c_ans_text = st.text_input("Correct Answer", key="add_ans")
+
+            if st.button("➕ Add Question", type="primary", key="add_q_btn"):
+                if sel_ex in ex_options and q_text.strip():
+                    # Image URL decide చేయాలి
+                    final_img_url = None
+                    if img_file:
+                        final_img_url = upload_image_to_imgbb(img_file)
+                    elif img_url_input.strip():
+                        final_img_url = img_url_input.strip()
+
+                    supabase.table("questions").insert({
+                        "exam_id": ex_options[sel_ex], "question": q_text, "type": q_type,
+                        "option_a": a, "option_b": b, "option_c": c, "option_d": d,
+                        "correct_answer": c_ans_text if q_type != "programming" else "Manual Review Required",
+                        "hint": h_text,
+                        "image_url": final_img_url
+                    }).execute()
+                    st.success("Question Added!")
+                    st.rerun()
 
         with ex_tab4:
             st.subheader("📁 Bulk Upload Questions (CSV)")
@@ -612,6 +661,8 @@ def admin_dashboard():
                             col_q1, col_q2, col_q3 = st.columns([5, 1, 1])
                             with col_q1:
                                 st.markdown(f"**Q{idx+1}. {q['question']}** `({str(q['type']).upper()})`")
+                                if q.get("image_url"):
+                                    st.image(q["image_url"], width=200)
                                 if q["type"] == "mcq":
                                     st.caption(f"A: {q['option_a']} | B: {q['option_b']} | C: {q['option_c']} | D: {q['option_d']}")
                                 st.caption(f"🎯 Answer: {q['correct_answer']} | 💡 Hint: {q['hint']}")
@@ -642,6 +693,9 @@ def admin_dashboard():
                                         eq_d = st.text_input("Option D", value=q.get("option_d",""), key=f"eq_d_{q['id']}")
                                     eq_ans = st.text_input("Correct Answer", value=q.get("correct_answer",""), key=f"eq_ans_{q['id']}")
                                     eq_hint = st.text_input("Hint", value=q.get("hint",""), key=f"eq_hint_{q['id']}")
+                                    eq_img_url = st.text_input("Image URL", value=q.get("image_url","") or "", key=f"eq_img_{q['id']}")
+                                    if q.get("image_url"):
+                                        st.image(q["image_url"], width=150, caption="Current image")
                                     save_col, cancel_col = st.columns(2)
                                     with save_col:
                                         saved = st.form_submit_button("💾 Save", use_container_width=True, type="primary")
@@ -654,7 +708,8 @@ def admin_dashboard():
                                             "option_a": eq_a, "option_b": eq_b,
                                             "option_c": eq_c, "option_d": eq_d,
                                             "correct_answer": eq_ans,
-                                            "hint": eq_hint
+                                            "hint": eq_hint,
+                                            "image_url": eq_img_url.strip() if eq_img_url.strip() else None
                                         }).eq("id", q["id"]).execute()
                                         st.session_state[f"editing_{q['id']}"] = False
                                         st.success("Updated!")
@@ -1339,6 +1394,8 @@ def exam_workspace_view():
         with left:
             st.subheader(f"Question {current+1}/{total_questions}")
             st.write(question["question"])
+            if question.get("image_url"):
+                st.image(question["image_url"], width=350)
             stored_ans = st.session_state.answers.get(question["id"], "")
 
             if question["type"] == "mcq":
