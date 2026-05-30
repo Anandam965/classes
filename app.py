@@ -557,14 +557,43 @@ def user_dashboard(preview_mode=False):
 
     modules = supabase.table("modules").select("*").execute().data
 
+    # ముందే user completions అన్నీ ఒకేసారి fetch చేయడం (performance కోసం)
+    all_completions = supabase.table("class_completions").select("class_id")        .eq("user_id", st.session_state.user_id).execute().data
+    completed_ids = {str(c["class_id"]) for c in all_completions}
+
     for module in modules:
-        with st.expander(module["title"]):
+        # Module లో total classes count చేయడం
+        module_submodules = supabase.table("submodules").select("id").eq("module_id", module["id"]).execute().data
+        sub_ids = [s["id"] for s in module_submodules]
+        module_total = 0
+        module_done = 0
+        for sid in sub_ids:
+            cls_list = supabase.table("classes").select("id").eq("submodule_id", sid).execute().data
+            module_total += len(cls_list)
+            module_done += sum(1 for c in cls_list if str(c["id"]) in completed_ids)
+
+        pct = int((module_done / module_total * 100)) if module_total > 0 else 0
+        expander_label = f"{module['title']}  —  {module_done}/{module_total} classes  ({pct}%)"
+
+        with st.expander(expander_label):
+            if module_total > 0:
+                st.progress(pct / 100, text=f"Module Progress: {pct}% complete")
             submodules = supabase.table("submodules").select("*").eq("module_id", module["id"]).execute().data
             for sub in submodules:
-                st.subheader(sub["title"])
+                # Submodule progress
+                sub_classes = supabase.table("classes").select("id").eq("submodule_id", sub["id"]).execute().data
+                sub_total = len(sub_classes)
+                sub_done = sum(1 for c in sub_classes if str(c["id"]) in completed_ids)
+                sub_pct = int((sub_done / sub_total * 100)) if sub_total > 0 else 0
+
+                st.subheader(f"{sub['title']}  ✅ {sub_done}/{sub_total}")
+                if sub_total > 0:
+                    st.progress(sub_pct / 100)
                 classes = supabase.table("classes").select("*").eq("submodule_id", sub["id"]).execute().data
                 for cls in classes:
-                    st.markdown(f"### {cls['title']}")
+                    is_done = str(cls.get("id")) in completed_ids
+                    cls_label = f"✅ {cls['title']}" if is_done else f"🔲 {cls['title']}"
+                    st.markdown(f"### {cls_label}")
                     col_link1, col_link2, col_link3 = st.columns(3)
                     with col_link1:
                         if cls.get("class_link"):
