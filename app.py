@@ -597,8 +597,8 @@ def user_dashboard(preview_mode=False):
     if st.session_state.completed_ids is None:
         all_completions = supabase.table("class_completions").select("class_id") \
             .eq("user_id", st.session_state.user_id).execute().data
+        st.session_state.completed_ids = {str(c["class_id"]) for c in all_completions}
     completed_ids = st.session_state.completed_ids
-
     for module in modules:
         # Module లో total classes count చేయడం
         module_submodules = supabase.table("submodules").select("id").eq("module_id", module["id"]).execute().data
