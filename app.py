@@ -808,12 +808,16 @@ def user_dashboard(preview_mode=False):
                                 st.caption("Be the first to top this exam! 🚀")
 
                         with btn_col:
-                            check_attempt = supabase.table("exam_attempts").select("*") \
-                                .eq("user_id", st.session_state.user_id) \
-                                .eq("exam_id", exam["id"]).execute().data
+                            check_attempt = supabase.table("exam_attempts").select("*")                                 .eq("user_id", st.session_state.user_id)                                 .eq("exam_id", exam["id"])                                 .order("created_at", desc=True).execute().data
 
                             if check_attempt:
-                                # Already attempted — Show Answers + Re-exam Request
+                                # అన్ని attempts scores చూపించాలి
+                                st.markdown("**📊 మీ Attempts:**")
+                                for idx, att in enumerate(check_attempt):
+                                    attempt_num = len(check_attempt) - idx
+                                    st.caption(f"Attempt {attempt_num}: **{att['score']}/{total_questions}** — {str(att.get('created_at', ''))[:10]}")
+
+                                # Latest attempt తో Show Answers
                                 if st.button("🔍 Show Answers", key=f"view_{exam['id']}", use_container_width=True):
                                     st.session_state.exam_id = exam["id"]
                                     st.session_state.exam_title = exam["title"]
@@ -942,9 +946,18 @@ def exam_workspace_view():
             .eq("exam_id", st.session_state.exam_id).execute().data
 
         if db_attempt:
-            score = db_attempt[0]["score"]
-            st.success(f"🎉 Your Score: {score}/{total_questions}")
-            db_answers = supabase.table("user_answers").select("*").eq("attempt_id", db_attempt[0]["id"]).execute().data
+            # అన్ని attempts చూపించాలి
+            st.markdown("### 📊 మీ అన్ని Attempts")
+            for idx, att in enumerate(reversed(db_attempt)):
+                attempt_num = idx + 1
+                icon = "🏆" if idx == len(db_attempt) - 1 else f"#{attempt_num}"
+                st.info(f"{icon} Attempt {attempt_num}: **{att['score']}/{total_questions}** — {str(att.get('created_at', ''))[:10]}")
+
+            st.divider()
+            # Latest attempt answers చూపించాలి
+            latest = db_attempt[0]
+            st.success(f"🎉 Latest Score: {latest['score']}/{total_questions}")
+            db_answers = supabase.table("user_answers").select("*").eq("attempt_id", latest["id"]).execute().data
             ans_map = {a["question_id"]: a["answer"] for a in db_answers}
 
             exam_data = supabase.table("exams").select("*").eq("id", st.session_state.exam_id).execute().data
