@@ -47,7 +47,9 @@ defaults = {
     "exam_id": "",
     "exam_title": "",
     "exam_end_time": 0.0,
-    "current_questions": []
+    "current_questions": [],
+    "completed_ids": None,        # None = not loaded yet, set() = loaded but empty
+    "admin_preview_mode": False
 }
 for key, val in defaults.items():
     if key not in st.session_state:
@@ -591,9 +593,11 @@ def user_dashboard(preview_mode=False):
 
     modules = supabase.table("modules").select("*").execute().data
 
-    # ముందే user completions అన్నీ ఒకేసారి fetch చేయడం (performance కోసం)
-    all_completions = supabase.table("class_completions").select("class_id")        .eq("user_id", st.session_state.user_id).execute().data
-    completed_ids = {str(c["class_id"]) for c in all_completions}
+    # completed_ids ని session_state లో cache చేయడం — rerun లేకుండా local update చేయడానికి
+    if st.session_state.completed_ids is None:
+        all_completions = supabase.table("class_completions").select("class_id") \
+            .eq("user_id", st.session_state.user_id).execute().data
+    completed_ids = st.session_state.completed_ids
 
     for module in modules:
         # Module లో total classes count చేయడం
@@ -642,32 +646,26 @@ def user_dashboard(preview_mode=False):
                     # FIX 6: Class completion logic - clean indentation
                     class_id = cls.get("id")
                     if class_id:
-                        # Supabase లో class_id column type detect చేయడం
-                        # UUID అయితే string గా, bigint అయితే int గా పంపిస్తాం
                         try:
-                            cid = int(class_id)   # bigint column అయితే ఇది పని చేస్తుంది
+                            cid = int(class_id)
                         except (ValueError, TypeError):
-                            cid = str(class_id)   # uuid column అయితే string గా పంపిస్తాం
+                            cid = str(class_id)
 
-                        try:
-                            comp = supabase.table("class_completions").select("*") \
-                                .eq("user_id", st.session_state.user_id) \
-                                .eq("class_id", cid).execute().data
-                            if comp:
-                                st.success("✅ మీరు ఈ క్లాస్ పూర్తి చేశారు!")
-                            else:
-                                if st.button("Mark as Completed", key=f"btn_done_{cls['id']}"):
-                                    try:
-                                        supabase.table("class_completions").insert({
-                                            "user_id": str(st.session_state.user_id),
-                                            "class_id": cid
-                                        }).execute()
-                                        st.success("క్లాస్ కంప్లీట్ అయ్యింది!")
-                                        st.rerun()
-                                    except Exception as e:
-                                        st.error(f"Insert Error: {e}")
-                        except Exception as e:
-                            st.error(f"Completion check error: {e}")
+                        # rerun లేకుండా — session_state లో check చేయడం
+                        if str(class_id) in completed_ids:
+                            st.success("✅ మీరు ఈ క్లాస్ పూర్తి చేశారు!")
+                        else:
+                            if st.button("✔️ Mark as Completed", key=f"btn_done_{cls['id']}"):
+                                try:
+                                    supabase.table("class_completions").insert({
+                                        "user_id": str(st.session_state.user_id),
+                                        "class_id": cid
+                                    }).execute()
+                                    # rerun లేకుండా local state update
+                                    st.session_state.completed_ids.add(str(class_id))
+                                    st.success("✅ క్లాస్ కంప్లీట్ అయ్యింది!")
+                                except Exception as e:
+                                    st.error(f"Insert Error: {e}")
 
                     # Exams for this class
                     exams = supabase.table("exams").select("*").eq("class_id", cls["id"]).execute().data
