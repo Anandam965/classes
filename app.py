@@ -575,7 +575,7 @@ def admin_dashboard():
                             "Return ONLY a JSON array. Each item: question, option_a, option_b, "
                             f"option_c, option_d, correct_answer. Text: {lesson_text}"
                         )
-                        model = genai.GenerativeModel(model_name="gemini-1.5-pro")
+                        model = genai.GenerativeModel(model_name="gemini-2.0-flash")
                         response = model.generate_content(prompt)
                         st.subheader("Generated Questions:")
                         st.write(response.text)
