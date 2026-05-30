@@ -609,17 +609,59 @@ def admin_dashboard():
                 else:
                     for idx, q in enumerate(current_questions):
                         with st.container(border=True):
-                            col_q1, col_q2 = st.columns([5, 1])
+                            col_q1, col_q2, col_q3 = st.columns([5, 1, 1])
                             with col_q1:
                                 st.markdown(f"**Q{idx+1}. {q['question']}** `({str(q['type']).upper()})`")
                                 if q["type"] == "mcq":
                                     st.caption(f"A: {q['option_a']} | B: {q['option_b']} | C: {q['option_c']} | D: {q['option_d']}")
                                 st.caption(f"🎯 Answer: {q['correct_answer']} | 💡 Hint: {q['hint']}")
                             with col_q2:
+                                if st.button("✏️ Edit", key=f"edit_btn_{q['id']}", use_container_width=True):
+                                    st.session_state[f"editing_{q['id']}"] = True
+                                    st.rerun()
+                            with col_q3:
                                 if st.button("🗑️ Delete", key=f"del_q_{q['id']}", type="secondary", use_container_width=True):
                                     supabase.table("questions").delete().eq("id", q["id"]).execute()
                                     st.success(f"Q{idx+1} Deleted!")
                                     st.rerun()
+
+                            # Edit form — Edit button నొక్కినప్పుడు expand అవుతుంది
+                            if st.session_state.get(f"editing_{q['id']}", False):
+                                with st.form(key=f"edit_form_{q['id']}"):
+                                    st.markdown("##### ✏️ Question Edit చేయండి")
+                                    eq_type = st.selectbox("Type", ["mcq", "blank", "programming"],
+                                                           index=["mcq","blank","programming"].index(q["type"]) if q["type"] in ["mcq","blank","programming"] else 0,
+                                                           key=f"eq_type_{q['id']}")
+                                    eq_text = st.text_area("Question", value=q["question"], key=f"eq_text_{q['id']}")
+                                    col1, col2 = st.columns(2)
+                                    with col1:
+                                        eq_a = st.text_input("Option A", value=q.get("option_a",""), key=f"eq_a_{q['id']}")
+                                        eq_b = st.text_input("Option B", value=q.get("option_b",""), key=f"eq_b_{q['id']}")
+                                    with col2:
+                                        eq_c = st.text_input("Option C", value=q.get("option_c",""), key=f"eq_c_{q['id']}")
+                                        eq_d = st.text_input("Option D", value=q.get("option_d",""), key=f"eq_d_{q['id']}")
+                                    eq_ans = st.text_input("Correct Answer", value=q.get("correct_answer",""), key=f"eq_ans_{q['id']}")
+                                    eq_hint = st.text_input("Hint", value=q.get("hint",""), key=f"eq_hint_{q['id']}")
+                                    save_col, cancel_col = st.columns(2)
+                                    with save_col:
+                                        saved = st.form_submit_button("💾 Save", use_container_width=True, type="primary")
+                                    with cancel_col:
+                                        cancelled = st.form_submit_button("✖️ Cancel", use_container_width=True)
+                                    if saved:
+                                        supabase.table("questions").update({
+                                            "type": eq_type,
+                                            "question": eq_text,
+                                            "option_a": eq_a, "option_b": eq_b,
+                                            "option_c": eq_c, "option_d": eq_d,
+                                            "correct_answer": eq_ans,
+                                            "hint": eq_hint
+                                        }).eq("id", q["id"]).execute()
+                                        st.session_state[f"editing_{q['id']}"] = False
+                                        st.success("Updated!")
+                                        st.rerun()
+                                    if cancelled:
+                                        st.session_state[f"editing_{q['id']}"] = False
+                                        st.rerun()
 
                 st.divider()
                 st.markdown("#### ➕ Quick Add Question")
