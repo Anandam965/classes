@@ -146,6 +146,22 @@ def admin_dashboard():
             st.session_state[key] = defaults[key]
         st.rerun()
 
+    if "admin_preview_mode" not in st.session_state:
+        st.session_state.admin_preview_mode = False
+
+    st.sidebar.divider()
+    if st.session_state.admin_preview_mode:
+        if st.sidebar.button("🛡️ Admin View కి తిరిగి వెళ్ళు", use_container_width=True, type="primary"):
+            st.session_state.admin_preview_mode = False
+            st.rerun()
+        user_dashboard()
+        return
+    else:
+        if st.sidebar.button("👁️ Student View Preview", use_container_width=True):
+            st.session_state.admin_preview_mode = True
+            st.rerun()
+    st.sidebar.divider()
+
     menu = st.sidebar.selectbox(
         "Navigation Control",
         ["🗂️ Manage Course Content", "📝 Manage Exams & Questions", "📊 Student Results & Ranks"]
