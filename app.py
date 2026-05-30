@@ -48,8 +48,13 @@ defaults = {
     "exam_title": "",
     "exam_end_time": 0.0,
     "current_questions": [],
-    "completed_ids": None,        # None = not loaded yet, set() = loaded but empty
-    "admin_preview_mode": False
+    "completed_ids": None,
+    "admin_preview_mode": False,
+    "pin_verified": False,      # PIN verify అయిందా లేదా
+    "pin_setup_mode": False,    # కొత్త PIN set చేస్తున్నారా
+    "email_temp": "",           # PIN screen కోసం email store
+    "user_id_temp": "",         # PIN screen కోసం user_id store
+    "role_temp": "",            # PIN screen కోసం role store
 }
 for key, val in defaults.items():
     if key not in st.session_state:
@@ -101,15 +106,78 @@ def login():
             user_data = supabase.table("users").select("*").eq("email", email).execute()
 
             if user_data.data and len(user_data.data) > 0:
-                role = user_data.data[0]["role"]
-                st.session_state.logged_in = True
-                st.session_state.role = role
-                st.session_state.user_id = user.id
+                urow = user_data.data[0]
+                # Temp గా store చేయి — PIN verify తర్వాత proper login అవుతుంది
+                st.session_state.email_temp = email
+                st.session_state.user_id_temp = user.id
+                st.session_state.role_temp = urow["role"]
+                # PIN ఉందా లేదా check చేయి
+                if urow.get("app_pin"):
+                    st.session_state.pin_setup_mode = False
+                else:
+                    st.session_state.pin_setup_mode = True
+                st.session_state.pin_verified = False
                 st.rerun()
             else:
                 st.error("User record కనపడటం లేదు.")
         except Exception as e:
             st.error(str(e))
+
+
+def pin_screen():
+    """PIN setup లేదా verify screen"""
+    st.title("🔒 App Lock")
+
+    if st.session_state.pin_setup_mode:
+        # కొత్త PIN set చేయాలి
+        st.subheader("మీ 4-digit PIN set చేయండి")
+        st.caption("ఈ PIN తో మీరు తర్వాత నేరుగా app లోకి enter అవ్వవచ్చు.")
+        pin1 = st.text_input("కొత్త PIN (4 digits)", type="password", max_chars=4, key="pin_new")
+        pin2 = st.text_input("PIN మళ్ళీ enter చేయండి", type="password", max_chars=4, key="pin_confirm")
+
+        if st.button("✅ PIN Set చేయి", type="primary", use_container_width=True):
+            if len(pin1) != 4 or not pin1.isdigit():
+                st.error("4 digits మాత్రమే enter చేయండి!")
+            elif pin1 != pin2:
+                st.error("రెండు PINలు match కాలేదు!")
+            else:
+                # DB లో save చేయి
+                supabase.table("users").update({"app_pin": pin1})                     .eq("id", st.session_state.user_id_temp).execute()
+                # Login complete చేయి
+                st.session_state.logged_in = True
+                st.session_state.role = st.session_state.role_temp
+                st.session_state.user_id = st.session_state.user_id_temp
+                st.session_state.pin_verified = True
+                st.success("PIN set అయింది! Welcome 🎉")
+                st.rerun()
+
+    else:
+        # Existing PIN verify చేయాలి
+        st.subheader("మీ PIN enter చేయండి")
+        pin_input = st.text_input("4-digit PIN", type="password", max_chars=4, key="pin_entry")
+
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("🔓 Enter App", type="primary", use_container_width=True):
+                # DB నుండి PIN fetch చేసి compare చేయి
+                urow = supabase.table("users").select("app_pin").eq("id", st.session_state.user_id_temp).execute().data
+                if urow and urow[0]["app_pin"] == pin_input:
+                    st.session_state.logged_in = True
+                    st.session_state.role = st.session_state.role_temp
+                    st.session_state.user_id = st.session_state.user_id_temp
+                    st.session_state.pin_verified = True
+                    st.rerun()
+                else:
+                    st.error("❌ Wrong PIN! మళ్ళీ try చేయండి.")
+        with col2:
+            if st.button("🔙 వేరే Account తో Login", use_container_width=True):
+                # Temp state clear చేసి login కి తిరిగి వెళ్ళు
+                st.session_state.email_temp = ""
+                st.session_state.user_id_temp = ""
+                st.session_state.role_temp = ""
+                st.session_state.pin_verified = False
+                st.session_state.pin_setup_mode = False
+                st.rerun()
 
 # =========================
 # HELPER: LEADERBOARD
@@ -986,7 +1054,11 @@ def exam_workspace_view():
 # MAIN ROUTING
 # =========================
 if not st.session_state.logged_in:
-    login()
+    # user_id_temp ఉంటే PIN screen చూపించాలి, లేకపోతే login
+    if st.session_state.user_id_temp:
+        pin_screen()
+    else:
+        login()
 elif st.session_state.role == "admin":
     admin_dashboard()
 elif st.session_state.start_exam:
