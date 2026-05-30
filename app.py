@@ -860,7 +860,40 @@ def exam_workspace_view():
         left, right = st.columns([4, 1])
         with right:
             mins, secs = divmod(remaining_time, 60)
-            st.metric(label="⏱️ Time Remaining", value=f"{mins:02d}:{secs:02d}")
+            # JavaScript తో client-side countdown — page reload అవ్వదు
+            st.components.v1.html(f"""
+                <div id="timer" style="
+                    font-size: 2rem;
+                    font-weight: 600;
+                    text-align: center;
+                    padding: 12px;
+                    border-radius: 8px;
+                    background: {'#fff3cd' if remaining_time < 300 else '#e8f4fd'};
+                    color: {'#856404' if remaining_time < 300 else '#0c63e4'};
+                    border: 1px solid {'#ffc107' if remaining_time < 300 else '#b6d4fe'};
+                ">⏱️ <span id="countdown">{mins:02d}:{secs:02d}</span></div>
+                <script>
+                    var total = {remaining_time};
+                    function tick() {{
+                        if (total <= 0) {{
+                            document.getElementById('countdown').innerText = "00:00";
+                            window.parent.postMessage({{type: 'streamlit:setComponentValue', value: true}}, '*');
+                            return;
+                        }}
+                        total--;
+                        var m = Math.floor(total / 60).toString().padStart(2, '0');
+                        var s = (total % 60).toString().padStart(2, '0');
+                        document.getElementById('countdown').innerText = m + ':' + s;
+                        var el = document.getElementById('timer');
+                        if (total < 300) {{
+                            el.style.background = '#fff3cd';
+                            el.style.color = '#856404';
+                            el.style.border = '1px solid #ffc107';
+                        }}
+                    }}
+                    setInterval(tick, 1000);
+                </script>
+            """, height=80)
             st.divider()
             st.subheader("Questions")
             cols = st.columns(3)
@@ -922,8 +955,10 @@ def exam_workspace_view():
                     st.session_state.exam_submitted = True
                     st.rerun()
 
-        time.sleep(1)
-        st.rerun()
+        # Timer ఇప్పుడు client-side JavaScript లో నడుస్తుంది
+        # Time out అయినప్పుడు మాత్రమే rerun కావాలి
+        if remaining_time <= 0:
+            st.rerun()
 
 # =========================
 # MAIN ROUTING
