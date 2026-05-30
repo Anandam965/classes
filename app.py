@@ -263,7 +263,7 @@ def admin_dashboard():
 
     menu = st.sidebar.selectbox(
         "Navigation Control",
-        ["🗂️ Manage Course Content", "📝 Manage Exams & Questions", "📊 Student Results & Ranks"]
+        ["🗂️ Manage Course Content", "📝 Manage Exams & Questions", "📊 Student Results & Ranks", "💬 Group Chat"]
     )
 
     if menu == "🗂️ Manage Course Content":
@@ -701,6 +701,71 @@ def admin_dashboard():
                                     st.warning("Rejected!")
                                     st.rerun()
 
+
+    elif menu == "💬 Group Chat":
+        group_chat()
+
+# =========================
+# GROUP CHAT
+# =========================
+def group_chat():
+    st.title("💬 Group Chat")
+
+    # Messages fetch — latest 50
+    messages = supabase.table("messages").select("*")         .order("created_at", desc=False).limit(50).execute().data
+
+    # Chat container
+    chat_container = st.container(height=450)
+    with chat_container:
+        if not messages:
+            st.info("ఇంకా messages లేవు. మొదటిగా message చేయండి! 👋")
+        for msg in messages:
+            is_me = msg["user_id"] == st.session_state.user_id
+            if is_me:
+                # Right side — own message
+                col1, col2 = st.columns([2, 5])
+                with col2:
+                    st.markdown(
+                        f"""<div style='background:#dcf8c6;padding:10px 14px;border-radius:12px 12px 0px 12px;margin:4px 0;'>
+                        <small style='color:#555;font-weight:600'>You</small><br>
+                        {msg['message']}
+                        <br><small style='color:#999;font-size:10px'>{str(msg.get('created_at',''))[:16]}</small>
+                        </div>""",
+                        unsafe_allow_html=True
+                    )
+            else:
+                # Left side — others message
+                col1, col2 = st.columns([5, 2])
+                with col1:
+                    st.markdown(
+                        f"""<div style='background:#f1f0f0;padding:10px 14px;border-radius:12px 12px 12px 0px;margin:4px 0;'>
+                        <small style='color:#0084ff;font-weight:600'>{msg.get('user_name','Unknown')}</small><br>
+                        {msg['message']}
+                        <br><small style='color:#999;font-size:10px'>{str(msg.get('created_at',''))[:16]}</small>
+                        </div>""",
+                        unsafe_allow_html=True
+                    )
+
+    st.divider()
+
+    # Message input
+    col_input, col_btn = st.columns([6, 1])
+    with col_input:
+        new_msg = st.text_input("Message రాయండి...", key="chat_input", label_visibility="collapsed")
+    with col_btn:
+        send = st.button("📤 Send", use_container_width=True, type="primary")
+
+    if send and new_msg.strip():
+        # user name తీసుకోవాలి
+        uinfo = supabase.table("users").select("name").eq("id", st.session_state.user_id).execute().data
+        uname = uinfo[0]["name"] if uinfo else "Unknown"
+        supabase.table("messages").insert({
+            "user_id": str(st.session_state.user_id),
+            "user_name": uname,
+            "message": new_msg.strip()
+        }).execute()
+        st.rerun()
+
 # =========================
 # USER DASHBOARD
 # =========================
@@ -711,8 +776,19 @@ def user_dashboard(preview_mode=False):
             for key in defaults:
                 st.session_state[key] = defaults[key]
             st.rerun()
+        st.sidebar.divider()
+        user_page = st.sidebar.radio(
+            "Menu",
+            ["📚 My Classes", "💬 Group Chat"],
+            label_visibility="collapsed"
+        )
     else:
         st.info("👁️ ఇది Student Preview Mode — student కి కనపడే view చూస్తున్నారు.")
+        user_page = "📚 My Classes"
+
+    if user_page == "💬 Group Chat":
+        group_chat()
+        return
 
     modules = supabase.table("modules").select("*").execute().data
 
