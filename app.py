@@ -358,7 +358,9 @@ def admin_dashboard():
             st.write("### Active Classes Directory")
 
             # Total enrolled users count (role = student)
-            total_users = len(supabase.table("users").select("id").eq("role", "student").execute().data)
+            # admin కాకుండా అన్ని users count చేయాలి
+            all_users = supabase.table("users").select("id, role").execute().data
+            total_users = len([u for u in all_users if u.get("role") == "user"])
 
             classes = supabase.table("classes").select("*").execute().data
             for cls in classes:
