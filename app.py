@@ -762,71 +762,74 @@ def send_notification(message, user_id=None):
     supabase.table("notifications").insert({
         "user_id": str(user_id) if user_id else None,
         "message": message,
-        "is_read": False
     }).execute()
 
 def get_unread_notifications(user_id):
-    """User కి unread notifications తీసుకోవాలి"""
+    """User కి unread notifications తీసుకోవాలి — per-user read tracking"""
     try:
-        # అందరికీ పంపిన (user_id=NULL) + ఈ user కి specifically పంపిన
-        all_notifs = supabase.table("notifications").select("*")             .eq("is_read", False).order("created_at", desc=True).execute().data
-        # Filter: NULL user_id (broadcast) OR this user's notifications
-        return [n for n in all_notifs
-                if n["user_id"] is None or n["user_id"] == str(user_id)]
+        uid = str(user_id)
+        # అన్ని notifications తీసుకోవాలి
+        all_notifs = supabase.table("notifications").select("*")             .order("created_at", desc=True).execute().data
+
+        # ఈ user చదివిన notification ids తీసుకోవాలి
+        read_data = supabase.table("notification_reads").select("notification_id")             .eq("user_id", uid).execute().data
+        read_ids = {r["notification_id"] for r in read_data}
+
+        # Unread filter: broadcast (user_id=NULL) OR this user specific, AND not read by this user
+        unread = [
+            n for n in all_notifs
+            if (n["user_id"] is None or n["user_id"] == uid)
+            and n["id"] not in read_ids
+        ]
+        return unread
     except Exception:
         return []
 
 def mark_notifications_read(user_id):
-    """User కి unread notifications అన్నీ read చేయాలి"""
+    """ఈ user కి unread notifications అన్నీ read గా mark చేయాలి"""
     try:
-        # Broadcast notifications mark as read
-        supabase.table("notifications").update({"is_read": True})             .is_("user_id", "null").execute()
-        # User specific notifications mark as read
-        supabase.table("notifications").update({"is_read": True})             .eq("user_id", str(user_id)).execute()
+        uid = str(user_id)
+        unread = get_unread_notifications(uid)
+        for n in unread:
+            supabase.table("notification_reads").upsert({
+                "user_id": uid,
+                "notification_id": n["id"]
+            }, on_conflict="user_id,notification_id").execute()
     except Exception:
         pass
 
 def show_notification_banner(user_id):
-    """Top లో blinking notification banner చూపించాలి"""
+    """Top లో colour notification banner చూపించాలి"""
     notifs = get_unread_notifications(user_id)
     if not notifs:
         return
-    # Blinking CSS + notification cards
+
     st.markdown("""
         <style>
-        @keyframes blink {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.3; }
-        }
-        .notif-banner {
-            animation: blink 1.2s ease-in-out infinite;
-            background: linear-gradient(90deg, #ff6b6b, #ffa500);
-            color: white;
+        .notif-wrap {
+            border-left: 5px solid #ff6b6b;
+            background: #fff5f5;
             padding: 10px 16px;
-            border-radius: 8px;
-            margin-bottom: 6px;
-            font-weight: 600;
-            font-size: 0.95rem;
+            border-radius: 0 8px 8px 0;
+            margin-bottom: 5px;
+            font-size: 0.92rem;
+            color: #c0392b;
+            font-weight: 500;
         }
-        .notif-banner-static {
-            background: #fff3cd;
-            color: #856404;
-            border: 1px solid #ffc107;
-            padding: 10px 16px;
-            border-radius: 8px;
-            margin-bottom: 4px;
-            font-size: 0.9rem;
+        .notif-wrap:first-child {
+            border-left-color: #e74c3c;
+            background: #ffeaea;
+            font-weight: 700;
+            font-size: 0.97rem;
         }
         </style>
     """, unsafe_allow_html=True)
 
-    # First notification blink చేయాలి, rest static గా
-    for i, notif in enumerate(notifs):
-        css_class = "notif-banner" if i == 0 else "notif-banner-static"
-        st.markdown(
-            f"<div class='{css_class}'>🔔 {notif['message']}</div>",
-            unsafe_allow_html=True
-        )
+    notif_html = "".join(
+        f"<div class='notif-wrap'>🔔 {n['message']}</div>"
+        for n in notifs
+    )
+    st.markdown(notif_html, unsafe_allow_html=True)
 
     if st.button(f"✅ Mark all as Read ({len(notifs)})", key="mark_notif_read", type="secondary"):
         mark_notifications_read(user_id)
