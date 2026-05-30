@@ -486,8 +486,8 @@ def admin_dashboard():
                             st.error("Question text cannot be empty!")
 
     elif menu == "📊 Student Results & Ranks":
-        r_tab1, r_tab2, r_tab3 = st.tabs([
-            "🏆 Leaderboards", "📝 Manual Evaluation", "📜 Score Summary"
+        r_tab1, r_tab2, r_tab3, r_tab4 = st.tabs([
+            "🏆 Leaderboards", "📝 Manual Evaluation", "📜 Score Summary", "🔄 Re-Exam Requests"
         ])
 
         with r_tab1:
@@ -541,6 +541,40 @@ def admin_dashboard():
                     if u_prof and e_prof:
                         st.markdown(f"👤 **{u_prof[0]['name']}** completed **{e_prof[0]['title']}** | Score: **{att['score']}**")
                         st.divider()
+
+
+        with r_tab4:
+            st.title("🔄 Re-Exam Requests")
+            requests_data = supabase.table("exam_retake_requests").select("*")                 .eq("status", "pending").order("requested_at", desc=True).execute().data
+
+            if not requests_data:
+                st.info("ఇప్పుడు pending requests లేవు.")
+            else:
+                for req in requests_data:
+                    u_info = supabase.table("users").select("name, email").eq("id", req["user_id"]).execute().data
+                    e_info = supabase.table("exams").select("title").eq("id", req["exam_id"]).execute().data
+                    if u_info and e_info:
+                        with st.container(border=True):
+                            col1, col2, col3 = st.columns([4, 1, 1])
+                            with col1:
+                                st.markdown(f"**👤 {u_info[0]['name']}** ({u_info[0]['email']})")
+                                st.caption(f"📝 Exam: {e_info[0]['title']} | Requested: {req['requested_at'][:10]}")
+                            with col2:
+                                if st.button("✅ Approve", key=f"apr_{req['id']}", type="primary", use_container_width=True):
+                                    supabase.table("exam_retake_requests").update({
+                                        "status": "approved",
+                                        "reviewed_at": "now()"
+                                    }).eq("id", req["id"]).execute()
+                                    st.success("Approved!")
+                                    st.rerun()
+                            with col3:
+                                if st.button("❌ Reject", key=f"rej_{req['id']}", use_container_width=True):
+                                    supabase.table("exam_retake_requests").update({
+                                        "status": "rejected",
+                                        "reviewed_at": "now()"
+                                    }).eq("id", req["id"]).execute()
+                                    st.warning("Rejected!")
+                                    st.rerun()
 
 # =========================
 # USER DASHBOARD
@@ -660,6 +694,7 @@ def user_dashboard(preview_mode=False):
                                 .eq("exam_id", exam["id"]).execute().data
 
                             if check_attempt:
+                                # Already attempted — Show Answers + Re-exam Request
                                 if st.button("🔍 Show Answers", key=f"view_{exam['id']}", use_container_width=True):
                                     st.session_state.exam_id = exam["id"]
                                     st.session_state.exam_title = exam["title"]
@@ -667,6 +702,57 @@ def user_dashboard(preview_mode=False):
                                     st.session_state.exam_submitted = True
                                     st.session_state.current_questions = supabase.table("questions").select("*").eq("exam_id", exam["id"]).execute().data
                                     st.rerun()
+
+                                # Re-exam request status check
+                                retake_req = supabase.table("exam_retake_requests").select("*")                                     .eq("user_id", st.session_state.user_id)                                     .eq("exam_id", exam["id"])                                     .order("requested_at", desc=True).limit(1).execute().data
+
+                                if retake_req:
+                                    status = retake_req[0]["status"]
+                                    if status == "pending":
+                                        st.warning("⏳ Re-exam request pending... Admin approval కోసం వేచి ఉండండి.")
+                                    elif status == "rejected":
+                                        st.error("❌ Re-exam request rejected చేయబడింది.")
+                                        if st.button("🔄 మళ్ళీ Request పంపు", key=f"retry_req_{exam['id']}", use_container_width=True):
+                                            supabase.table("exam_retake_requests").insert({
+                                                "user_id": st.session_state.user_id,
+                                                "exam_id": exam["id"],
+                                                "status": "pending"
+                                            }).execute()
+                                            st.success("Request పంపబడింది!")
+                                            st.rerun()
+                                    elif status == "approved":
+                                        st.success("✅ Re-exam approved! మీరు మళ్ళీ రాయవచ్చు.")
+                                        has_password = exam.get("password") is not None and str(exam["password"]).strip() != ""
+                                        entered_pwd = ""
+                                        if has_password:
+                                            entered_pwd = st.text_input(
+                                                f"Access Code for {exam['title']}", type="password",
+                                                key=f"repwd_{exam['id']}"
+                                            )
+                                        if st.button("📝 Re-Exam Start చేయండి", key=f"rebtn_{exam['id']}", use_container_width=True, type="primary"):
+                                            if has_password and entered_pwd.strip() != str(exam["password"]).strip():
+                                                st.error("Wrong Password!")
+                                            else:
+                                                supabase.table("exam_retake_requests").update({"status": "used"})                                                     .eq("id", retake_req[0]["id"]).execute()
+                                                q_data = supabase.table("questions").select("*").eq("exam_id", exam["id"]).execute().data
+                                                st.session_state.exam_id = exam["id"]
+                                                st.session_state.exam_title = exam["title"]
+                                                st.session_state.start_exam = True
+                                                st.session_state.exam_submitted = False
+                                                st.session_state.answers = {}
+                                                st.session_state.question_index = 0
+                                                st.session_state.current_questions = q_data
+                                                st.session_state.exam_end_time = time.time() + (int(exam_dur) * 60)
+                                                st.rerun()
+                                else:
+                                    if st.button("🔄 Try Again Request", key=f"req_{exam['id']}", use_container_width=True):
+                                        supabase.table("exam_retake_requests").insert({
+                                            "user_id": st.session_state.user_id,
+                                            "exam_id": exam["id"],
+                                            "status": "pending"
+                                        }).execute()
+                                        st.success("✅ Request పంపబడింది! Admin approve చేస్తే మళ్ళీ రాయవచ్చు.")
+                                        st.rerun()
                             else:
                                 has_password = exam.get("password") is not None and str(exam["password"]).strip() != ""
                                 entered_pwd = ""
