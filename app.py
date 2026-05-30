@@ -94,36 +94,30 @@ def evaluate_java_code(user_code, input_data, expected_output):
 def login():
     st.title("📚 LMS Login")
 
-    # Login method toggle
     login_method = st.radio(
-        "Login చేయండి:",
+        "Login method:",
         ["📧 Email & Password", "🔑 PIN తో Login"],
-        horizontal=True
+        horizontal=True,
+        key="login_method_radio"
     )
 
     if login_method == "📧 Email & Password":
         email = st.text_input("Email", key="login_email")
         password = st.text_input("Password", type="password", key="login_password")
 
-        if st.button("Login", type="primary", use_container_width=True):
+        if st.button("Login", type="primary", use_container_width=True, key="email_login_btn"):
             try:
                 response = supabase.auth.sign_in_with_password({
-                    "email": email,
-                    "password": password
+                    "email": email, "password": password
                 })
                 user = response.user
                 user_data = supabase.table("users").select("*").eq("email", email).execute()
-
-                if user_data.data and len(user_data.data) > 0:
+                if user_data.data:
                     urow = user_data.data[0]
                     st.session_state.email_temp = email
                     st.session_state.user_id_temp = user.id
                     st.session_state.role_temp = urow["role"]
-                    # PIN set చేసారా లేదా check చేయి
-                    if urow.get("app_pin"):
-                        st.session_state.pin_setup_mode = False
-                    else:
-                        st.session_state.pin_setup_mode = True
+                    st.session_state.pin_setup_mode = not bool(urow.get("app_pin"))
                     st.session_state.pin_verified = False
                     st.rerun()
                 else:
@@ -132,32 +126,26 @@ def login():
                 st.error(str(e))
 
     else:
-        # PIN తో login
-        st.caption("PIN set చేసుకున్న users మాత్రమే ఇక్కడ login చేయగలరు.")
-        email = st.text_input("Email", key="pin_login_email")
-        pin = st.text_input("4-digit PIN", type="password", max_chars=4, key="pin_login_pin")
+        # PIN only login — globally unique PIN
+        st.caption("మీ unique PIN enter చేయండి.")
+        pin = st.text_input("🔑 PIN", type="password", max_chars=6, key="pin_only_input")
 
-        if st.button("🔓 PIN తో Enter చేయండి", type="primary", use_container_width=True):
-            if not email or not pin:
-                st.error("Email మరియు PIN రెండూ enter చేయండి.")
+        if st.button("🔓 Enter App", type="primary", use_container_width=True, key="pin_only_btn"):
+            if not pin:
+                st.error("PIN enter చేయండి.")
             else:
                 try:
-                    user_data = supabase.table("users").select("*").eq("email", email).execute()
+                    # PIN unique కాబట్టి directly DB లో search చేయి
+                    user_data = supabase.table("users").select("*").eq("app_pin", pin).execute()
                     if not user_data.data:
-                        st.error("ఈ email తో user కనపడటం లేదు.")
+                        st.error("❌ Wrong PIN! మళ్ళీ try చేయండి.")
                     else:
                         urow = user_data.data[0]
-                        if not urow.get("app_pin"):
-                            st.error("మీరు ఇంకా PIN set చేసుకోలేదు. ముందు Email & Password తో login చేయండి.")
-                        elif urow["app_pin"] != pin:
-                            st.error("❌ Wrong PIN!")
-                        else:
-                            # PIN correct — Supabase auth లేకుండా directly login చేయి
-                            st.session_state.logged_in = True
-                            st.session_state.role = urow["role"]
-                            st.session_state.user_id = urow["id"]
-                            st.session_state.pin_verified = True
-                            st.rerun()
+                        st.session_state.logged_in = True
+                        st.session_state.role = urow["role"]
+                        st.session_state.user_id = urow["id"]
+                        st.session_state.pin_verified = True
+                        st.rerun()
                 except Exception as e:
                     st.error(str(e))
 
@@ -168,26 +156,29 @@ def pin_screen():
 
     if st.session_state.pin_setup_mode:
         # కొత్త PIN set చేయాలి
-        st.subheader("మీ 4-digit PIN set చేయండి")
-        st.caption("ఈ PIN తో మీరు తర్వాత నేరుగా app లోకి enter అవ్వవచ్చు.")
-        pin1 = st.text_input("కొత్త PIN (4 digits)", type="password", max_chars=4, key="pin_new")
-        pin2 = st.text_input("PIN మళ్ళీ enter చేయండి", type="password", max_chars=4, key="pin_confirm")
+        st.subheader("మీ PIN set చేయండి (4-6 digits)")
+        st.caption("ఈ PIN globally unique గా ఉంటుంది. మీకు మాత్రమే తెలిసిన PIN ఇవ్వండి.")
+        pin1 = st.text_input("కొత్త PIN (4-6 digits)", type="password", max_chars=6, key="pin_new")
+        pin2 = st.text_input("PIN మళ్ళీ enter చేయండి", type="password", max_chars=6, key="pin_confirm")
 
         if st.button("✅ PIN Set చేయి", type="primary", use_container_width=True):
-            if len(pin1) != 4 or not pin1.isdigit():
-                st.error("4 digits మాత్రమే enter చేయండి!")
+            if not pin1.isdigit() or len(pin1) < 4:
+                st.error("4-6 digits మాత్రమే enter చేయండి!")
             elif pin1 != pin2:
                 st.error("రెండు PINలు match కాలేదు!")
             else:
-                # DB లో save చేయి
-                supabase.table("users").update({"app_pin": pin1})                     .eq("id", st.session_state.user_id_temp).execute()
-                # Login complete చేయి
-                st.session_state.logged_in = True
-                st.session_state.role = st.session_state.role_temp
-                st.session_state.user_id = st.session_state.user_id_temp
-                st.session_state.pin_verified = True
-                st.success("PIN set అయింది! Welcome 🎉")
-                st.rerun()
+                # Unique check — ఈ PIN వేరె user వాడుతున్నారా?
+                existing = supabase.table("users").select("id").eq("app_pin", pin1).execute().data
+                if existing and existing[0]["id"] != st.session_state.user_id_temp:
+                    st.error("❌ ఈ PIN వేరె user వాడుతున్నారు. వేరే PIN try చేయండి!")
+                else:
+                    supabase.table("users").update({"app_pin": pin1})                         .eq("id", st.session_state.user_id_temp).execute()
+                    st.session_state.logged_in = True
+                    st.session_state.role = st.session_state.role_temp
+                    st.session_state.user_id = st.session_state.user_id_temp
+                    st.session_state.pin_verified = True
+                    st.success("PIN set అయింది! Welcome 🎉")
+                    st.rerun()
 
     else:
         # Existing PIN verify చేయాలి
