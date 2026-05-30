@@ -93,35 +93,73 @@ def evaluate_java_code(user_code, input_data, expected_output):
 # =========================
 def login():
     st.title("📚 LMS Login")
-    email = st.text_input("Email")
-    password = st.text_input("Password", type="password")
 
-    if st.button("Login", type="primary", use_container_width=True):
-        try:
-            response = supabase.auth.sign_in_with_password({
-                "email": email,
-                "password": password
-            })
-            user = response.user
-            user_data = supabase.table("users").select("*").eq("email", email).execute()
+    # Login method toggle
+    login_method = st.radio(
+        "Login చేయండి:",
+        ["📧 Email & Password", "🔑 PIN తో Login"],
+        horizontal=True
+    )
 
-            if user_data.data and len(user_data.data) > 0:
-                urow = user_data.data[0]
-                # Temp గా store చేయి — PIN verify తర్వాత proper login అవుతుంది
-                st.session_state.email_temp = email
-                st.session_state.user_id_temp = user.id
-                st.session_state.role_temp = urow["role"]
-                # PIN ఉందా లేదా check చేయి
-                if urow.get("app_pin"):
-                    st.session_state.pin_setup_mode = False
+    if login_method == "📧 Email & Password":
+        email = st.text_input("Email", key="login_email")
+        password = st.text_input("Password", type="password", key="login_password")
+
+        if st.button("Login", type="primary", use_container_width=True):
+            try:
+                response = supabase.auth.sign_in_with_password({
+                    "email": email,
+                    "password": password
+                })
+                user = response.user
+                user_data = supabase.table("users").select("*").eq("email", email).execute()
+
+                if user_data.data and len(user_data.data) > 0:
+                    urow = user_data.data[0]
+                    st.session_state.email_temp = email
+                    st.session_state.user_id_temp = user.id
+                    st.session_state.role_temp = urow["role"]
+                    # PIN set చేసారా లేదా check చేయి
+                    if urow.get("app_pin"):
+                        st.session_state.pin_setup_mode = False
+                    else:
+                        st.session_state.pin_setup_mode = True
+                    st.session_state.pin_verified = False
+                    st.rerun()
                 else:
-                    st.session_state.pin_setup_mode = True
-                st.session_state.pin_verified = False
-                st.rerun()
+                    st.error("User record కనపడటం లేదు.")
+            except Exception as e:
+                st.error(str(e))
+
+    else:
+        # PIN తో login
+        st.caption("PIN set చేసుకున్న users మాత్రమే ఇక్కడ login చేయగలరు.")
+        email = st.text_input("Email", key="pin_login_email")
+        pin = st.text_input("4-digit PIN", type="password", max_chars=4, key="pin_login_pin")
+
+        if st.button("🔓 PIN తో Enter చేయండి", type="primary", use_container_width=True):
+            if not email or not pin:
+                st.error("Email మరియు PIN రెండూ enter చేయండి.")
             else:
-                st.error("User record కనపడటం లేదు.")
-        except Exception as e:
-            st.error(str(e))
+                try:
+                    user_data = supabase.table("users").select("*").eq("email", email).execute()
+                    if not user_data.data:
+                        st.error("ఈ email తో user కనపడటం లేదు.")
+                    else:
+                        urow = user_data.data[0]
+                        if not urow.get("app_pin"):
+                            st.error("మీరు ఇంకా PIN set చేసుకోలేదు. ముందు Email & Password తో login చేయండి.")
+                        elif urow["app_pin"] != pin:
+                            st.error("❌ Wrong PIN!")
+                        else:
+                            # PIN correct — Supabase auth లేకుండా directly login చేయి
+                            st.session_state.logged_in = True
+                            st.session_state.role = urow["role"]
+                            st.session_state.user_id = urow["id"]
+                            st.session_state.pin_verified = True
+                            st.rerun()
+                except Exception as e:
+                    st.error(str(e))
 
 
 def pin_screen():
