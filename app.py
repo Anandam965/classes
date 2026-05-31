@@ -977,206 +977,173 @@ def admin_dashboard():
 # EXAM PPT GENERATOR (python-pptx)
 # =========================
 def generate_exam_ppt(questions, exam_title, q_requesters=None):
-    """Exam questions ని PPT గా generate చేయాలి — pure Python"""
+    """Exam questions PPT — clean layout, image right side, names banner"""
     from pptx import Presentation
-    from pptx.util import Inches, Pt, Emu
+    from pptx.util import Inches, Pt
     from pptx.dml.color import RGBColor
     from pptx.enum.text import PP_ALIGN
-    import io
+    import io, requests as _req
 
-    def rgb(hex_str):
-        h = hex_str.lstrip("#")
+    def rgb(h):
+        h = h.lstrip("#")
         return RGBColor(int(h[0:2],16), int(h[2:4],16), int(h[4:6],16))
 
-    def add_rect(slide, x, y, w, h, fill_hex, line_hex=None, line_width=Pt(0)):
-        from pptx.util import Inches
-        shape = slide.shapes.add_shape(1, Inches(x), Inches(y), Inches(w), Inches(h))
-        shape.fill.solid()
-        shape.fill.fore_color.rgb = rgb(fill_hex)
-        if line_hex:
-            shape.line.color.rgb = rgb(line_hex)
-            shape.line.width = line_width
-        else:
-            shape.line.fill.background()
-        return shape
+    def box(sl, x, y, w, h, fill, border=None, bw=Pt(1)):
+        s = sl.shapes.add_shape(1, Inches(x), Inches(y), Inches(w), Inches(h))
+        s.fill.solid(); s.fill.fore_color.rgb = rgb(fill)
+        if border: s.line.color.rgb = rgb(border); s.line.width = bw
+        else: s.line.fill.background()
+        return s
 
-    def add_text(slide, text, x, y, w, h, font_size=14, bold=False,
-                 color_hex="1A1A2E", align=PP_ALIGN.LEFT, italic=False):
-        from pptx.util import Inches
-        txBox = slide.shapes.add_textbox(Inches(x), Inches(y), Inches(w), Inches(h))
-        tf = txBox.text_frame
-        tf.word_wrap = True
-        p = tf.paragraphs[0]
-        p.alignment = align
-        run = p.add_run()
-        run.text = str(text)
-        run.font.size = Pt(font_size)
-        run.font.bold = bold
-        run.font.italic = italic
-        run.font.color.rgb = rgb(color_hex)
-        return txBox
+    def txt(sl, text, x, y, w, h, sz=13, bold=False, color="1A1A2E",
+            align=PP_ALIGN.LEFT, italic=False):
+        tb = sl.shapes.add_textbox(Inches(x), Inches(y), Inches(w), Inches(h))
+        tf = tb.text_frame; tf.word_wrap = True
+        p = tf.paragraphs[0]; p.alignment = align
+        r = p.add_run(); r.text = str(text)
+        r.font.size = Pt(sz); r.font.bold = bold
+        r.font.italic = italic; r.font.color.rgb = rgb(color)
+        return tb
 
-    # Colors
-    NAVY    = "1E2761"
-    LIGHT   = "F4F6FB"
-    ACCENT  = "4A90D9"
-    GREEN   = "27AE60"
-    GREEN_D = "1E8449"
-    WHITE   = "FFFFFF"
-    DARK    = "1A1A2E"
-    MUTED   = "7F8C8D"
-    RED_BG  = "FDEDEC"
+    NAV="1E2761"; LGT="F4F6FB"; ACC="4A90D9"
+    GRN="27AE60"; GRD="1E8449"; WHT="FFFFFF"
+    DRK="1A1A2E"; MUT="7F8C8D"
 
     prs = Presentation()
     prs.slide_width  = Inches(10)
     prs.slide_height = Inches(5.625)
-    blank_layout = prs.slide_layouts[6]
+    BL = prs.slide_layouts[6]
 
-    # ── Title Slide ──
-    ts = prs.slides.add_slide(blank_layout)
-    add_rect(ts, 0, 0, 10, 5.625, NAVY)
-    add_rect(ts, 0, 2.3, 10, 0.06, ACCENT)
-    add_text(ts, exam_title or "Exam Review",
-             0.5, 0.9, 9, 1.2, font_size=36, bold=True,
-             color_hex=WHITE, align=PP_ALIGN.CENTER)
-    add_text(ts, f"{len(questions)} Questions",
-             0.5, 2.5, 9, 0.6, font_size=20,
-             color_hex="CADCFC", align=PP_ALIGN.CENTER)
-    add_text(ts, "Correct answers → Green   |   Wrong answers → White",
-             0.5, 4.5, 9, 0.4, font_size=12, italic=True,
-             color_hex="8899CC", align=PP_ALIGN.CENTER)
+    # Title slide
+    ts = prs.slides.add_slide(BL)
+    box(ts, 0, 0, 10, 5.625, NAV)
+    box(ts, 0, 2.5, 10, 0.06, ACC)
+    txt(ts, exam_title or "Exam Review", 0.5, 1.0, 9, 1.2,
+        sz=36, bold=True, color=WHT, align=PP_ALIGN.CENTER)
+    txt(ts, f"{len(questions)} Questions", 0.5, 2.65, 9, 0.6,
+        sz=20, color="CADCFC", align=PP_ALIGN.CENTER)
+    txt(ts, "Correct → Green  |  Wrong → White",
+        0.5, 4.6, 9, 0.4, sz=12, italic=True,
+        color="8899CC", align=PP_ALIGN.CENTER)
 
-    # ── Question Slides ──
     for idx, q in enumerate(questions):
-        sl = prs.slides.add_slide(blank_layout)
-        add_rect(sl, 0, 0, 10, 5.625, LIGHT)
+        sl = prs.slides.add_slide(BL)
+        box(sl, 0, 0, 10, 5.625, LGT)
 
-        # Q badge
-        add_rect(sl, 0.3, 0.2, 0.75, 0.45, ACCENT)
-        add_text(sl, f"Q{idx+1}", 0.3, 0.2, 0.75, 0.45,
-                 font_size=15, bold=True, color_hex=WHITE, align=PP_ALIGN.CENTER)
+        cur_y = 0.18  # current top cursor
 
-        # Student names — ఈ question explain request చేసిన students (max 4)
+        # ── Q badge ──
+        box(sl, 0.3, cur_y, 0.7, 0.42, ACC)
+        txt(sl, f"Q{idx+1}", 0.3, cur_y, 0.7, 0.42,
+            sz=14, bold=True, color=WHT, align=PP_ALIGN.CENTER)
+
+        # ── Question text (beside badge) ──
+        txt(sl, q.get("question",""), 1.12, cur_y, 8.55, 0.72,
+            sz=15, bold=True, color=DRK)
+
+        cur_y += 0.78
+
+        # ── Names banner ──
         if q_requesters and q.get("id") in q_requesters:
             names = q_requesters[q["id"]][:4]
-            names_str = "📌 " + ",  ".join(names)
+            ns = "📌 " + ",  ".join(names)
             if len(q_requesters[q["id"]]) > 4:
-                names_str += f"  +{len(q_requesters[q['id']])-4} more"
-            add_rect(sl, 0.3, 0.68, 9.4, 0.28, "FFF9C4", "F9A825", Pt(1))
-            add_text(sl, names_str, 0.4, 0.69, 9.2, 0.26,
-                     font_size=10, color_hex="7B5800", italic=True)
-            q_text_y = 1.0
-        else:
-            q_text_y = 0.2
+                ns += f"  +{len(q_requesters[q['id']])-4} more"
+            box(sl, 0.3, cur_y, 9.4, 0.3, "FFF9C4", "F9A825", Pt(1))
+            txt(sl, ns, 0.45, cur_y+0.02, 9.1, 0.28,
+                sz=10, italic=True, color="7B5800")
+            cur_y += 0.35
 
-        # Question text
-        has_image = bool(q.get("image_url"))
-        add_text(sl, q.get("question",""), 1.2, q_text_y, 8.3, 0.65,
-                 font_size=16, bold=True, color_hex=DARK)
+        # ── Divider ──
+        box(sl, 0.3, cur_y, 9.4, 0.03, "D0D8E8")
+        cur_y += 0.1
 
-        # Image ఉంటే slide లో add చేయాలి
-        if has_image:
+        # ── Image (fetch from URL) ──
+        img_available = False
+        if q.get("image_url"):
             try:
                 import io as _io
-                headers = {
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                    "Referer": "https://ibb.co/"
-                }
-                img_resp = requests.get(q["image_url"], timeout=15, headers=headers)
-                if img_resp.status_code == 200 and len(img_resp.content) > 1000:
-                    img_buf = _io.BytesIO(img_resp.content)
-                    # Image right side లో పెట్టాలి — options left లో ఉంటాయి
-                    sl.shapes.add_picture(img_buf, Inches(5.8), Inches(0.9), Inches(3.9), Inches(2.6))
+                r2 = _req.get(q["image_url"], timeout=10,
+                              headers={"User-Agent":"Mozilla/5.0"})
+                if r2.status_code == 200 and len(r2.content) > 500:
+                    img_buf = _io.BytesIO(r2.content)
+                    # Image right side లో పెట్టాలి
+                    sl.shapes.add_picture(img_buf,
+                        Inches(6.0), Inches(cur_y), Inches(3.7), Inches(2.5))
                     img_available = True
-                else:
-                    img_available = False
             except Exception:
-                img_available = False
-        else:
-            img_available = False
-        img_offset = 0  # Image always right side — no vertical offset needed
+                pass
 
-        # Divider
-        names_offset = 0.55 if (q_requesters and q.get("id") in q_requesters) else 0.0
-        div_y = 1.0 + names_offset + img_offset
-        add_rect(sl, 0.3, div_y, 9.4, 0.04, "D0D8E8")
-
+        # ── MCQ Options ──
         correct_ans = str(q.get("correct_answer","")).strip()
 
-        if q.get("type") == "mcq":
-            opts = [
-                ("A", q.get("option_a","")),
-                ("B", q.get("option_b","")),
-                ("C", q.get("option_c","")),
-                ("D", q.get("option_d","")),
-            ]
-            for i, (lbl, txt) in enumerate(opts):
-                # Image ఉంటే options left side లో stack చేయాలి (single column)
+        if q.get("type","mcq") == "mcq":
+            opts = [("A", q.get("option_a","")),
+                    ("B", q.get("option_b","")),
+                    ("C", q.get("option_c","")),
+                    ("D", q.get("option_d",""))]
+
+            opt_w = 5.5 if img_available else 4.5
+
+            for i, (lbl, otxt) in enumerate(opts):
                 if img_available:
-                    x = 0.3
-                    y = div_y + 0.15 + i * 0.88
-                    w, h = 5.5, 0.78
+                    # Single column left side
+                    ox = 0.3
+                    oy = cur_y + i * 0.82
+                    ow, oh = 5.5, 0.72
                 else:
-                    col = i % 2
-                    row = i // 2
-                    x = 0.3 if col == 0 else 5.2
-                    y = div_y + 0.15 + row * 1.0
-                    w, h = 4.5, 0.82
+                    # Two columns
+                    ox = 0.3 if i % 2 == 0 else 5.2
+                    oy = cur_y + (i // 2) * 0.95
+                    ow, oh = 4.5, 0.82
 
-                is_correct = (
-                    correct_ans.upper() == lbl or
-                    correct_ans.lower() == str(txt).strip().lower()
-                )
+                is_cor = (correct_ans.upper() == lbl or
+                          correct_ans.strip().lower() == str(otxt).strip().lower())
 
-                bg  = GREEN   if is_correct else WHITE
-                txt_color = WHITE if is_correct else DARK
-                border = GREEN if is_correct else "C8D6E5"
+                bg  = GRN if is_cor else WHT
+                tc  = WHT if is_cor else DRK
+                br  = GRN if is_cor else "C8D6E5"
 
-                add_rect(sl, x, y, w, h, bg, border, Pt(1.5))
-                # Label circle (oval via rect with same fill)
-                add_rect(sl, x+0.1, y+0.19, 0.5, 0.5,
-                         GREEN_D if is_correct else ACCENT)
-                add_text(sl, lbl, x+0.1, y+0.19, 0.5, 0.5,
-                         font_size=13, bold=True, color_hex=WHITE, align=PP_ALIGN.CENTER)
-                add_text(sl, str(txt), x+0.72, y+0.1, w-0.85, h-0.2,
-                         font_size=13, color_hex=txt_color)
+                box(sl, ox, oy, ow, oh, bg, br, Pt(1.5))
+                box(sl, ox+0.1, oy+0.16, 0.46, 0.46, GRD if is_cor else ACC)
+                txt(sl, lbl, ox+0.1, oy+0.16, 0.46, 0.46,
+                    sz=12, bold=True, color=WHT, align=PP_ALIGN.CENTER)
+                txt(sl, str(otxt), ox+0.68, oy+0.08, ow-0.8, oh-0.16,
+                    sz=13, color=tc)
 
             # Correct answer label
-            add_text(sl, f"✓  Correct Answer: {correct_ans}",
-                     0.3, 4.9, 9, 0.4, font_size=12, bold=True, color_hex=GREEN)
+            txt(sl, f"✓  Correct: {correct_ans}",
+                0.3, 5.15, 9, 0.35, sz=11, bold=True, color=GRN)
 
         else:
             # Blank / Programming
-            add_text(sl, "Answer:", 0.3, 1.15, 2, 0.4,
-                     font_size=13, bold=True, color_hex=MUTED)
-            add_rect(sl, 0.3, 1.6, 9.4, 1.1, "EAF7EE", GREEN, Pt(2))
-            add_text(sl, correct_ans, 0.5, 1.65, 9.0, 1.0,
-                     font_size=14, bold=True, color_hex=GREEN)
+            box(sl, 0.3, cur_y, 9.4, 1.1, "EAF7EE", GRN, Pt(2))
+            txt(sl, correct_ans, 0.5, cur_y+0.1, 9.0, 0.9,
+                sz=14, bold=True, color=GRN)
 
         # Hint
-        hint = q.get("hint","")
-        if hint and str(hint).strip():
-            add_text(sl, f"💡 Hint: {hint}", 0.3, 5.2, 9, 0.3,
-                     font_size=11, italic=True, color_hex=MUTED)
+        hint = str(q.get("hint","") or "").strip()
+        if hint:
+            txt(sl, f"💡 {hint}", 0.3, 5.38, 9, 0.25,
+                sz=10, italic=True, color=MUT)
 
         # Slide number
-        add_text(sl, f"{idx+1} / {len(questions)}",
-                 8.5, 5.2, 1.2, 0.3, font_size=10,
-                 color_hex=MUTED, align=PP_ALIGN.RIGHT)
+        txt(sl, f"{idx+1}/{len(questions)}",
+            8.6, 5.38, 1.1, 0.25, sz=9, color=MUT, align=PP_ALIGN.RIGHT)
 
-    # ── End Slide ──
-    es = prs.slides.add_slide(blank_layout)
-    add_rect(es, 0, 0, 10, 5.625, NAVY)
-    add_text(es, "End of Review", 0.5, 1.8, 9, 1.5,
-             font_size=38, bold=True, color_hex=WHITE, align=PP_ALIGN.CENTER)
-    add_text(es, "Review your answers and keep improving!",
-             0.5, 3.4, 9, 0.6, font_size=18, italic=True,
-             color_hex="CADCFC", align=PP_ALIGN.CENTER)
+    # End slide
+    es = prs.slides.add_slide(BL)
+    box(es, 0, 0, 10, 5.625, NAV)
+    txt(es, "End of Review", 0.5, 1.8, 9, 1.5,
+        sz=38, bold=True, color=WHT, align=PP_ALIGN.CENTER)
+    txt(es, "Keep improving!", 0.5, 3.4, 9, 0.6,
+        sz=18, italic=True, color="CADCFC", align=PP_ALIGN.CENTER)
 
     buf = io.BytesIO()
     prs.save(buf)
     buf.seek(0)
     return buf.read()
+
 
 # =========================
 # NOTIFICATIONS
