@@ -652,7 +652,22 @@ def admin_dashboard():
                 selected_exam_id = exam_edit_options[selected_exam_title]
                 current_questions = supabase.table("questions").select("*").eq("exam_id", selected_exam_id).execute().data
 
-                st.write(f"### Questions in **{selected_exam_title}** ({len(current_questions)} total)")
+                col_title, col_ppt = st.columns([4, 1])
+                with col_title:
+                    st.write(f"### Questions in **{selected_exam_title}** ({len(current_questions)} total)")
+                with col_ppt:
+                    if current_questions:
+                        if st.button("📊 Download PPT", use_container_width=True, type="primary"):
+                            with st.spinner("PPT generate అవుతుంది..."):
+                                ppt_bytes = generate_exam_ppt(current_questions, selected_exam_title)
+                                if ppt_bytes:
+                                    st.download_button(
+                                        label="⬇️ Download",
+                                        data=ppt_bytes,
+                                        file_name=f"{selected_exam_title[:30]}_review.pptx",
+                                        mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                                        key="ppt_download_btn"
+                                    )
                 if not current_questions:
                     st.warning("No questions in this exam.")
                 else:
@@ -850,6 +865,168 @@ def admin_dashboard():
                     st.warning("Message enter చేయండి.")
         st.divider()
         group_chat()
+
+
+# =========================
+# EXAM PPT GENERATOR (python-pptx)
+# =========================
+def generate_exam_ppt(questions, exam_title):
+    """Exam questions ని PPT గా generate చేయాలి — pure Python"""
+    from pptx import Presentation
+    from pptx.util import Inches, Pt, Emu
+    from pptx.dml.color import RGBColor
+    from pptx.enum.text import PP_ALIGN
+    import io
+
+    def rgb(hex_str):
+        h = hex_str.lstrip("#")
+        return RGBColor(int(h[0:2],16), int(h[2:4],16), int(h[4:6],16))
+
+    def add_rect(slide, x, y, w, h, fill_hex, line_hex=None, line_width=Pt(0)):
+        from pptx.util import Inches
+        shape = slide.shapes.add_shape(1, Inches(x), Inches(y), Inches(w), Inches(h))
+        shape.fill.solid()
+        shape.fill.fore_color.rgb = rgb(fill_hex)
+        if line_hex:
+            shape.line.color.rgb = rgb(line_hex)
+            shape.line.width = line_width
+        else:
+            shape.line.fill.background()
+        return shape
+
+    def add_text(slide, text, x, y, w, h, font_size=14, bold=False,
+                 color_hex="1A1A2E", align=PP_ALIGN.LEFT, italic=False):
+        from pptx.util import Inches
+        txBox = slide.shapes.add_textbox(Inches(x), Inches(y), Inches(w), Inches(h))
+        tf = txBox.text_frame
+        tf.word_wrap = True
+        p = tf.paragraphs[0]
+        p.alignment = align
+        run = p.add_run()
+        run.text = str(text)
+        run.font.size = Pt(font_size)
+        run.font.bold = bold
+        run.font.italic = italic
+        run.font.color.rgb = rgb(color_hex)
+        return txBox
+
+    # Colors
+    NAVY    = "1E2761"
+    LIGHT   = "F4F6FB"
+    ACCENT  = "4A90D9"
+    GREEN   = "27AE60"
+    GREEN_D = "1E8449"
+    WHITE   = "FFFFFF"
+    DARK    = "1A1A2E"
+    MUTED   = "7F8C8D"
+    RED_BG  = "FDEDEC"
+
+    prs = Presentation()
+    prs.slide_width  = Inches(10)
+    prs.slide_height = Inches(5.625)
+    blank_layout = prs.slide_layouts[6]
+
+    # ── Title Slide ──
+    ts = prs.slides.add_slide(blank_layout)
+    add_rect(ts, 0, 0, 10, 5.625, NAVY)
+    add_rect(ts, 0, 2.3, 10, 0.06, ACCENT)
+    add_text(ts, exam_title or "Exam Review",
+             0.5, 0.9, 9, 1.2, font_size=36, bold=True,
+             color_hex=WHITE, align=PP_ALIGN.CENTER)
+    add_text(ts, f"{len(questions)} Questions",
+             0.5, 2.5, 9, 0.6, font_size=20,
+             color_hex="CADCFC", align=PP_ALIGN.CENTER)
+    add_text(ts, "Correct answers → Green   |   Wrong answers → White",
+             0.5, 4.5, 9, 0.4, font_size=12, italic=True,
+             color_hex="8899CC", align=PP_ALIGN.CENTER)
+
+    # ── Question Slides ──
+    for idx, q in enumerate(questions):
+        sl = prs.slides.add_slide(blank_layout)
+        add_rect(sl, 0, 0, 10, 5.625, LIGHT)
+
+        # Q badge
+        add_rect(sl, 0.3, 0.2, 0.75, 0.45, ACCENT)
+        add_text(sl, f"Q{idx+1}", 0.3, 0.2, 0.75, 0.45,
+                 font_size=15, bold=True, color_hex=WHITE, align=PP_ALIGN.CENTER)
+
+        # Question text
+        add_text(sl, q.get("question",""), 1.2, 0.2, 8.3, 0.65,
+                 font_size=16, bold=True, color_hex=DARK)
+
+        # Divider
+        add_rect(sl, 0.3, 1.0, 9.4, 0.04, "D0D8E8")
+
+        correct_ans = str(q.get("correct_answer","")).strip()
+
+        if q.get("type") == "mcq":
+            opts = [
+                ("A", q.get("option_a","")),
+                ("B", q.get("option_b","")),
+                ("C", q.get("option_c","")),
+                ("D", q.get("option_d","")),
+            ]
+            for i, (lbl, txt) in enumerate(opts):
+                col = i % 2
+                row = i // 2
+                x = 0.3 if col == 0 else 5.2
+                y = 1.15 + row * 1.1
+                w, h = 4.5, 0.88
+
+                is_correct = (
+                    correct_ans.upper() == lbl or
+                    correct_ans.lower() == str(txt).strip().lower()
+                )
+
+                bg  = GREEN   if is_correct else WHITE
+                txt_color = WHITE if is_correct else DARK
+                border = GREEN if is_correct else "C8D6E5"
+
+                add_rect(sl, x, y, w, h, bg, border, Pt(1.5))
+                # Label circle (oval via rect with same fill)
+                add_rect(sl, x+0.1, y+0.19, 0.5, 0.5,
+                         GREEN_D if is_correct else ACCENT)
+                add_text(sl, lbl, x+0.1, y+0.19, 0.5, 0.5,
+                         font_size=13, bold=True, color_hex=WHITE, align=PP_ALIGN.CENTER)
+                add_text(sl, str(txt), x+0.72, y+0.1, w-0.85, h-0.2,
+                         font_size=13, color_hex=txt_color)
+
+            # Correct answer label
+            add_text(sl, f"✓  Correct Answer: {correct_ans}",
+                     0.3, 4.9, 9, 0.4, font_size=12, bold=True, color_hex=GREEN)
+
+        else:
+            # Blank / Programming
+            add_text(sl, "Answer:", 0.3, 1.15, 2, 0.4,
+                     font_size=13, bold=True, color_hex=MUTED)
+            add_rect(sl, 0.3, 1.6, 9.4, 1.1, "EAF7EE", GREEN, Pt(2))
+            add_text(sl, correct_ans, 0.5, 1.65, 9.0, 1.0,
+                     font_size=14, bold=True, color_hex=GREEN)
+
+        # Hint
+        hint = q.get("hint","")
+        if hint and str(hint).strip():
+            add_text(sl, f"💡 Hint: {hint}", 0.3, 5.2, 9, 0.3,
+                     font_size=11, italic=True, color_hex=MUTED)
+
+        # Slide number
+        add_text(sl, f"{idx+1} / {len(questions)}",
+                 8.5, 5.2, 1.2, 0.3, font_size=10,
+                 color_hex=MUTED, align=PP_ALIGN.RIGHT)
+
+    # ── End Slide ──
+    es = prs.slides.add_slide(blank_layout)
+    add_rect(es, 0, 0, 10, 5.625, NAVY)
+    add_text(es, "End of Review", 0.5, 1.8, 9, 1.5,
+             font_size=38, bold=True, color_hex=WHITE, align=PP_ALIGN.CENTER)
+    add_text(es, "Review your answers and keep improving!",
+             0.5, 3.4, 9, 0.6, font_size=18, italic=True,
+             color_hex="CADCFC", align=PP_ALIGN.CENTER)
+
+    buf = io.BytesIO()
+    prs.save(buf)
+    buf.seek(0)
+    return buf.read()
 
 # =========================
 # NOTIFICATIONS
