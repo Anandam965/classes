@@ -1077,15 +1077,24 @@ def generate_exam_ppt(questions, exam_title, q_requesters=None):
         # Image ఉంటే slide లో add చేయాలి
         if has_image:
             try:
-                from pptx.util import Inches as _In
-                sl.shapes.add_picture(
-                    q["image_url"], _In(1.2), _In(0.9), _In(3.5), _In(2.2)
-                )
-                img_offset = 3.2   # image height తర్వాత options start అవ్వాలి
+                import io as _io
+                headers = {
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                    "Referer": "https://ibb.co/"
+                }
+                img_resp = requests.get(q["image_url"], timeout=15, headers=headers)
+                if img_resp.status_code == 200 and len(img_resp.content) > 1000:
+                    img_buf = _io.BytesIO(img_resp.content)
+                    # Image right side లో పెట్టాలి — options left లో ఉంటాయి
+                    sl.shapes.add_picture(img_buf, Inches(5.8), Inches(0.9), Inches(3.9), Inches(2.6))
+                    img_available = True
+                else:
+                    img_available = False
             except Exception:
-                img_offset = 0
+                img_available = False
         else:
-            img_offset = 0
+            img_available = False
+        img_offset = 0  # Image always right side — no vertical offset needed
 
         # Divider
         names_offset = 0.55 if (q_requesters and q.get("id") in q_requesters) else 0.0
@@ -1102,11 +1111,17 @@ def generate_exam_ppt(questions, exam_title, q_requesters=None):
                 ("D", q.get("option_d","")),
             ]
             for i, (lbl, txt) in enumerate(opts):
-                col = i % 2
-                row = i // 2
-                x = 0.3 if col == 0 else 5.2
-                y = div_y + 0.15 + row * 1.0
-                w, h = 4.5, 0.82
+                # Image ఉంటే options left side లో stack చేయాలి (single column)
+                if img_available:
+                    x = 0.3
+                    y = div_y + 0.15 + i * 0.88
+                    w, h = 5.5, 0.78
+                else:
+                    col = i % 2
+                    row = i // 2
+                    x = 0.3 if col == 0 else 5.2
+                    y = div_y + 0.15 + row * 1.0
+                    w, h = 4.5, 0.82
 
                 is_correct = (
                     correct_ans.upper() == lbl or
