@@ -652,22 +652,72 @@ def admin_dashboard():
                 selected_exam_id = exam_edit_options[selected_exam_title]
                 current_questions = supabase.table("questions").select("*").eq("exam_id", selected_exam_id).execute().data
 
-                col_title, col_ppt = st.columns([4, 1])
-                with col_title:
-                    st.write(f"### Questions in **{selected_exam_title}** ({len(current_questions)} total)")
-                with col_ppt:
+                import json as _json
+                st.write(f"### Questions in **{selected_exam_title}** ({len(current_questions)} total)")
+
+                # Explain requests లో ఈ exam కి marked questions + student names collect చేయాలి
+                exp_reqs = supabase.table("explain_requests").select("*")                     .eq("exam_id", selected_exam_id).execute().data
+
+                # question_id → [student names] mapping
+                q_requesters = {}
+                for req in exp_reqs:
+                    qids = _json.loads(req.get("question_ids") or "[]")
+                    uinfo = supabase.table("users").select("name").eq("id", req["user_id"]).execute().data
+                    uname = uinfo[0]["name"] if uinfo else "Unknown"
+                    for qid in qids:
+                        q_requesters.setdefault(qid, [])
+                        if uname not in q_requesters[qid]:
+                            q_requesters[qid].append(uname)
+
+                # Marked questions = కనీసం ఒక్క student request చేసిన questions
+                marked_q_ids = set(q_requesters.keys())
+                marked_questions = [q for q in current_questions if q["id"] in marked_q_ids]
+
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("Total Questions", len(current_questions))
+                with col2:
+                    st.metric("Explain Requested", len(marked_questions))
+                with col3:
+                    st.metric("Students Requested", len(set(
+                        req["user_id"] for req in exp_reqs
+                    )))
+
+                dl_col1, dl_col2 = st.columns(2)
+                with dl_col1:
                     if current_questions:
-                        if st.button("📊 Download PPT", use_container_width=True, type="primary"):
+                        if st.button("📊 All Questions PPT", use_container_width=True):
                             with st.spinner("PPT generate అవుతుంది..."):
-                                ppt_bytes = generate_exam_ppt(current_questions, selected_exam_title)
+                                ppt_bytes = generate_exam_ppt(
+                                    current_questions, selected_exam_title,
+                                    q_requesters=q_requesters
+                                )
                                 if ppt_bytes:
                                     st.download_button(
-                                        label="⬇️ Download",
+                                        label="⬇️ All Questions Download",
                                         data=ppt_bytes,
-                                        file_name=f"{selected_exam_title[:30]}_review.pptx",
+                                        file_name=f"{selected_exam_title[:25]}_all.pptx",
                                         mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
-                                        key="ppt_download_btn"
+                                        key="ppt_all_btn"
                                     )
+                with dl_col2:
+                    if marked_questions:
+                        if st.button(f"📌 Marked Questions PPT ({len(marked_questions)})", use_container_width=True, type="primary"):
+                            with st.spinner("PPT generate అవుతుంది..."):
+                                ppt_bytes = generate_exam_ppt(
+                                    marked_questions, f"{selected_exam_title} - Explain",
+                                    q_requesters=q_requesters
+                                )
+                                if ppt_bytes:
+                                    st.download_button(
+                                        label="⬇️ Marked Questions Download",
+                                        data=ppt_bytes,
+                                        file_name=f"{selected_exam_title[:25]}_marked.pptx",
+                                        mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                                        key="ppt_marked_btn"
+                                    )
+                    else:
+                        st.info("ఇంకా marked questions లేవు.")
                 if not current_questions:
                     st.warning("No questions in this exam.")
                 else:
@@ -880,7 +930,18 @@ def admin_dashboard():
                             if qids:
                                 marked_qs = supabase.table("questions").select("*").in_("id", qids).execute().data
                                 if marked_qs:
-                                    ppt_bytes = generate_exam_ppt(marked_qs, f"{ename} - Explain")
+                                    # q_requesters build చేయాలి
+                                    all_reqs_for_exam = supabase.table("explain_requests").select("*").eq("exam_id", req["exam_id"]).execute().data
+                                    qr = {}
+                                    for r2 in all_reqs_for_exam:
+                                        qids2 = _json.loads(r2.get("question_ids") or "[]")
+                                        ui2 = supabase.table("users").select("name").eq("id", r2["user_id"]).execute().data
+                                        un2 = ui2[0]["name"] if ui2 else "Unknown"
+                                        for qid2 in qids2:
+                                            qr.setdefault(qid2, [])
+                                            if un2 not in qr[qid2]:
+                                                qr[qid2].append(un2)
+                                    ppt_bytes = generate_exam_ppt(marked_qs, f"{ename} - Explain", q_requesters=qr)
                                     if ppt_bytes:
                                         st.download_button(
                                             label="📊 PPT Download",
@@ -915,7 +976,7 @@ def admin_dashboard():
 # =========================
 # EXAM PPT GENERATOR (python-pptx)
 # =========================
-def generate_exam_ppt(questions, exam_title):
+def generate_exam_ppt(questions, exam_title, q_requesters=None):
     """Exam questions ని PPT గా generate చేయాలి — pure Python"""
     from pptx import Presentation
     from pptx.util import Inches, Pt, Emu
@@ -995,10 +1056,22 @@ def generate_exam_ppt(questions, exam_title):
         add_text(sl, f"Q{idx+1}", 0.3, 0.2, 0.75, 0.45,
                  font_size=15, bold=True, color_hex=WHITE, align=PP_ALIGN.CENTER)
 
+        # Student names — ఈ question explain request చేసిన students (max 4)
+        if q_requesters and q.get("id") in q_requesters:
+            names = q_requesters[q["id"]][:4]
+            names_str = "📌 " + ",  ".join(names)
+            if len(q_requesters[q["id"]]) > 4:
+                names_str += f"  +{len(q_requesters[q['id']])-4} more"
+            add_rect(sl, 0.3, 0.68, 9.4, 0.28, "FFF9C4", "F9A825", Pt(1))
+            add_text(sl, names_str, 0.4, 0.69, 9.2, 0.26,
+                     font_size=10, color_hex="7B5800", italic=True)
+            q_text_y = 1.0
+        else:
+            q_text_y = 0.2
+
         # Question text
         has_image = bool(q.get("image_url"))
-        # Image ఉంటే question text కి తక్కువ height ఇవ్వాలి
-        add_text(sl, q.get("question",""), 1.2, 0.2, 8.3, 0.65,
+        add_text(sl, q.get("question",""), 1.2, q_text_y, 8.3, 0.65,
                  font_size=16, bold=True, color_hex=DARK)
 
         # Image ఉంటే slide లో add చేయాలి
@@ -1015,7 +1088,8 @@ def generate_exam_ppt(questions, exam_title):
             img_offset = 0
 
         # Divider
-        div_y = 1.0 + img_offset
+        names_offset = 0.55 if (q_requesters and q.get("id") in q_requesters) else 0.0
+        div_y = 1.0 + names_offset + img_offset
         add_rect(sl, 0.3, div_y, 9.4, 0.04, "D0D8E8")
 
         correct_ans = str(q.get("correct_answer","")).strip()
