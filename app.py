@@ -761,8 +761,8 @@ def admin_dashboard():
                             st.error("Question text cannot be empty!")
 
     elif menu == "📊 Student Results & Ranks":
-        r_tab1, r_tab2, r_tab3, r_tab4 = st.tabs([
-            "🏆 Leaderboards", "📝 Manual Evaluation", "📜 Score Summary", "🔄 Re-Exam Requests"
+        r_tab1, r_tab2, r_tab3, r_tab4, r_tab5 = st.tabs([
+            "🏆 Leaderboards", "📝 Manual Evaluation", "📜 Score Summary", "🔄 Re-Exam Requests", "📌 Explain Requests"
         ])
 
         with r_tab1:
@@ -850,6 +850,51 @@ def admin_dashboard():
                                     }).eq("id", req["id"]).execute()
                                     st.warning("Rejected!")
                                     st.rerun()
+
+        with r_tab5:
+            st.title("📌 Explain Requests")
+            import json as _json
+
+            exp_requests = supabase.table("explain_requests").select("*")                 .order("created_at", desc=True).execute().data
+
+            if not exp_requests:
+                st.info("ఇంకా explain requests లేవు.")
+            else:
+                for req in exp_requests:
+                    u_info = supabase.table("users").select("name, email").eq("id", req["user_id"]).execute().data
+                    e_info = supabase.table("exams").select("title").eq("id", req["exam_id"]).execute().data
+                    uname = u_info[0]["name"] if u_info else "Unknown"
+                    ename = e_info[0]["title"] if e_info else "Unknown Exam"
+                    qids = _json.loads(req["question_ids"]) if req.get("question_ids") else []
+                    status = req.get("status", "pending")
+
+                    status_color = {"pending": "🟡", "done": "🟢", "rejected": "🔴"}.get(status, "🟡")
+
+                    with st.container(border=True):
+                        col1, col2, col3 = st.columns([4, 1, 1])
+                        with col1:
+                            st.markdown(f"**👤 {uname}** ({u_info[0]['email'] if u_info else ''})")
+                            st.caption(f"📝 Exam: **{ename}** | {len(qids)} questions | {status_color} {status} | {str(req.get('created_at',''))[:10]}")
+                        with col2:
+                            # Marked questions fetch చేసి PPT download చేయాలి
+                            if qids:
+                                marked_qs = supabase.table("questions").select("*").in_("id", qids).execute().data
+                                if marked_qs:
+                                    ppt_bytes = generate_exam_ppt(marked_qs, f"{ename} - Explain")
+                                    if ppt_bytes:
+                                        st.download_button(
+                                            label="📊 PPT Download",
+                                            data=ppt_bytes,
+                                            file_name=f"{ename[:20]}_explain.pptx",
+                                            mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                                            key=f"exp_ppt_{req['id']}"
+                                        )
+                        with col3:
+                            if status == "pending":
+                                if st.button("✅ Done", key=f"exp_done_{req['id']}", use_container_width=True, type="primary"):
+                                    supabase.table("explain_requests").update({"status": "done"}).eq("id", req["id"]).execute()
+                                    st.rerun()
+
 
 
     elif menu == "💬 Group Chat":
@@ -951,11 +996,27 @@ def generate_exam_ppt(questions, exam_title):
                  font_size=15, bold=True, color_hex=WHITE, align=PP_ALIGN.CENTER)
 
         # Question text
+        has_image = bool(q.get("image_url"))
+        # Image ఉంటే question text కి తక్కువ height ఇవ్వాలి
         add_text(sl, q.get("question",""), 1.2, 0.2, 8.3, 0.65,
                  font_size=16, bold=True, color_hex=DARK)
 
+        # Image ఉంటే slide లో add చేయాలి
+        if has_image:
+            try:
+                from pptx.util import Inches as _In
+                sl.shapes.add_picture(
+                    q["image_url"], _In(1.2), _In(0.9), _In(3.5), _In(2.2)
+                )
+                img_offset = 3.2   # image height తర్వాత options start అవ్వాలి
+            except Exception:
+                img_offset = 0
+        else:
+            img_offset = 0
+
         # Divider
-        add_rect(sl, 0.3, 1.0, 9.4, 0.04, "D0D8E8")
+        div_y = 1.0 + img_offset
+        add_rect(sl, 0.3, div_y, 9.4, 0.04, "D0D8E8")
 
         correct_ans = str(q.get("correct_answer","")).strip()
 
@@ -970,8 +1031,8 @@ def generate_exam_ppt(questions, exam_title):
                 col = i % 2
                 row = i // 2
                 x = 0.3 if col == 0 else 5.2
-                y = 1.15 + row * 1.1
-                w, h = 4.5, 0.88
+                y = div_y + 0.15 + row * 1.0
+                w, h = 4.5, 0.82
 
                 is_correct = (
                     correct_ans.upper() == lbl or
@@ -1491,18 +1552,65 @@ def exam_workspace_view():
             exam_data = supabase.table("exams").select("*").eq("id", st.session_state.exam_id).execute().data
             if exam_data and exam_data[0]["show_answers"]:
                 st.subheader("📚 Review Sheet")
+
+                # Explain request tracking — session state లో selected questions store చేయాలి
+                if "explain_selected" not in st.session_state:
+                    st.session_state.explain_selected = set()
+
                 for i, q in enumerate(questions):
-                    st.markdown(f"**Q{i+1}:** {q['question']}")
-                    u_ans = ans_map.get(q["id"], "Not Answered")
-                    c_ans = q["correct_answer"]
-                    if q["type"] == "programming":
-                        # FIX 7: Programming review - show submitted code only (Judge0 already handled above)
-                        st.code(u_ans, language="java")
-                    else:
-                        if str(u_ans).strip().lower() == str(c_ans).strip().lower():
-                            st.success(f"✅ Your answer: {u_ans}")
+                    with st.container(border=True):
+                        col_q, col_btn = st.columns([6, 1])
+                        with col_q:
+                            st.markdown(f"**Q{i+1}:** {q['question']}")
+                            # Image ఉంటే చూపించాలి
+                            if q.get("image_url"):
+                                st.image(q["image_url"], width=320)
+                        with col_btn:
+                            qid = q["id"]
+                            is_selected = qid in st.session_state.explain_selected
+                            if is_selected:
+                                if st.button("✅ Marked", key=f"exp_{qid}", use_container_width=True, type="primary"):
+                                    st.session_state.explain_selected.discard(qid)
+                                    st.rerun()
+                            else:
+                                if st.button("📌 Explain", key=f"exp_{qid}", use_container_width=True):
+                                    st.session_state.explain_selected.add(qid)
+                                    st.rerun()
+
+                        u_ans = ans_map.get(q["id"], "Not Answered")
+                        c_ans = q["correct_answer"]
+                        if q["type"] == "programming":
+                            st.code(u_ans, language="java")
                         else:
-                            st.error(f"❌ Your answer: {u_ans} | Correct: {c_ans}")
+                            if str(u_ans).strip().lower() == str(c_ans).strip().lower():
+                                st.success(f"✅ Your answer: {u_ans}")
+                            else:
+                                st.error(f"❌ Your answer: {u_ans} | Correct: {c_ans}")
+
+                # Explain request send button
+                st.divider()
+                selected_count = len(st.session_state.explain_selected)
+                if selected_count > 0:
+                    st.info(f"📌 {selected_count} questions marked for explanation")
+                    if st.button(f"📨 Admin కి Explain Request పంపు ({selected_count} questions)",
+                                 type="primary", use_container_width=True):
+                        try:
+                            import json as _json
+                            supabase.table("explain_requests").insert({
+                                "user_id": str(st.session_state.user_id),
+                                "exam_id": str(st.session_state.exam_id),
+                                "question_ids": _json.dumps(list(st.session_state.explain_selected)),
+                                "status": "pending"
+                            }).execute()
+                            # Notification కూడా పంపాలి
+                            uinfo = supabase.table("users").select("name").eq("id", st.session_state.user_id).execute().data
+                            uname = uinfo[0]["name"] if uinfo else "Student"
+                            send_notification(f"📌 {uname} {selected_count} questions కి explanation request చేశారు!")
+                            st.session_state.explain_selected = set()
+                            st.success("✅ Request పంపబడింది! Admin explain చేస్తారు.")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Request error: {e}")
 
         if st.button("Return to Dashboard", type="primary"):
             st.session_state.start_exam = False
