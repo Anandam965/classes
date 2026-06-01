@@ -1744,13 +1744,47 @@ def exam_workspace_view():
                         st.rerun()
 
         with left:
-            st.subheader(f"Question {current+1}/{total_questions}")
+            # Question header + individual timer same row లో
+            hcol1, hcol2 = st.columns([4, 1])
+            with hcol1:
+                st.subheader(f"Question {current+1}/{total_questions}")
+            with hcol2:
+                # ఈ question కి ఇప్పటి వరకు ఎంత time spend చేశారో calculate చేయాలి
+                qid = question["id"]
+                already_spent = st.session_state.question_time_log.get(qid, 0)
+                st.components.v1.html(f"""
+                    <div style="
+                        background:#f0f4ff;
+                        border:1px solid #b6d4fe;
+                        border-radius:8px;
+                        padding:6px 10px;
+                        text-align:center;
+                        font-family:monospace;
+                        font-size:1.1rem;
+                        font-weight:600;
+                        color:#0c63e4;
+                        margin-top:8px;
+                    ">
+                        📝 <span id="qtimer">00:00</span>
+                    </div>
+                    <script>
+                        var elapsed = {already_spent};
+                        var qtimer = document.getElementById('qtimer');
+                        function qtick() {{
+                            elapsed++;
+                            var m = Math.floor(elapsed/60).toString().padStart(2,'0');
+                            var s = (elapsed%60).toString().padStart(2,'0');
+                            qtimer.innerText = m + ':' + s;
+                        }}
+                        setInterval(qtick, 1000);
+                    </script>
+                """, height=55)
+
             st.write(question["question"])
             if question.get("image_url"):
                 st.image(question["image_url"], width=350)
 
             # Question open అయిన time record చేయాలి
-            qid = question["id"]
             if qid not in st.session_state.question_start_time:
                 st.session_state.question_start_time[qid] = time.time()
 
