@@ -83,6 +83,8 @@ defaults = {
     "user_id_temp": "",
     "role_temp": "",
     "user_page": "📚 My Classes",
+    "question_start_time": {},   # question_id -> time.time() when opened
+    "question_time_log": {},     # question_id -> total seconds spent
 }
 for key, val in defaults.items():
     if key not in st.session_state:
@@ -1635,6 +1637,15 @@ def exam_workspace_view():
 
                         u_ans = ans_map.get(q["id"], "Not Answered")
                         c_ans = q["correct_answer"]
+
+                        # Time spent fetch చేయాలి
+                        ua_data = supabase.table("user_answers").select("time_spent_seconds")                             .eq("attempt_id", db_attempt[0]["id"])                             .eq("question_id", q["id"]).execute().data
+                        t_spent = ua_data[0]["time_spent_seconds"] if ua_data else 0
+                        if t_spent and t_spent > 0:
+                            mins_s, secs_s = divmod(t_spent, 60)
+                            time_str = f"{mins_s}m {secs_s}s" if mins_s > 0 else f"{secs_s}s"
+                            st.caption(f"⏱️ Time spent: **{time_str}**")
+
                         if q["type"] == "programming":
                             st.code(u_ans, language="java")
                         else:
@@ -1737,6 +1748,12 @@ def exam_workspace_view():
             st.write(question["question"])
             if question.get("image_url"):
                 st.image(question["image_url"], width=350)
+
+            # Question open అయిన time record చేయాలి
+            qid = question["id"]
+            if qid not in st.session_state.question_start_time:
+                st.session_state.question_start_time[qid] = time.time()
+
             stored_ans = st.session_state.answers.get(question["id"], "")
 
             if question["type"] == "mcq":
@@ -1751,17 +1768,31 @@ def exam_workspace_view():
             if answer != stored_ans:
                 st.session_state.answers[question["id"]] = answer
 
+            def save_current_q_time():
+                """Current question లో ఉన్న time save చేయాలి"""
+                qid_cur = question["id"]
+                if qid_cur in st.session_state.question_start_time:
+                    elapsed = int(time.time() - st.session_state.question_start_time[qid_cur])
+                    prev = st.session_state.question_time_log.get(qid_cur, 0)
+                    st.session_state.question_time_log[qid_cur] = prev + elapsed
+                    del st.session_state.question_start_time[qid_cur]
+
             nav_col1, nav_col2, submit_col = st.columns([1, 1, 2])
             with nav_col1:
                 if st.button("⬅️ Previous", disabled=(current == 0), use_container_width=True):
+                    save_current_q_time()
                     st.session_state.question_index -= 1
                     st.rerun()
             with nav_col2:
                 if st.button("Next ➡️", disabled=(current == total_questions - 1), use_container_width=True):
+                    save_current_q_time()
                     st.session_state.question_index += 1
                     st.rerun()
             with submit_col:
                 if st.button("🚀 Submit Exam", type="primary", use_container_width=True):
+                    # Current question time save చేయాలి
+                    save_current_q_time()
+
                     final_score = 0
                     attempt_uuid = str(uuid.uuid4())
                     for q in questions:
@@ -1775,9 +1806,16 @@ def exam_workspace_view():
                     }).execute()
                     for q in questions:
                         user_val = st.session_state.answers.get(q["id"], "")
+                        t_spent = st.session_state.question_time_log.get(q["id"], 0)
                         supabase.table("user_answers").insert({
-                            "attempt_id": attempt_uuid, "question_id": q["id"], "answer": user_val
+                            "attempt_id": attempt_uuid,
+                            "question_id": q["id"],
+                            "answer": user_val,
+                            "time_spent_seconds": t_spent
                         }).execute()
+                    # Reset time logs
+                    st.session_state.question_time_log = {}
+                    st.session_state.question_start_time = {}
                     st.session_state.exam_submitted = True
                     st.rerun()
 
