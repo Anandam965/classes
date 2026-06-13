@@ -143,6 +143,59 @@ def evaluate_java_code(user_code, input_data, expected_output):
     except Exception:
         return False
 
+
+def extract_question_from_image(image_file):
+    """Extract question data from an uploaded question image using Gemini vision."""
+    import io
+    import re
+    from PIL import Image
+
+    try:
+        if isinstance(image_file, str):
+            image_bytes = requests.get(image_file, timeout=15).content
+        else:
+            image_bytes = image_file.getvalue()
+        image = Image.open(io.BytesIO(image_bytes))
+        prompt = """
+You are helping an LMS admin extract exam data from an image.
+Read the image carefully and return ONLY valid JSON with these keys:
+{
+  "question": "",
+  "type": "mcq",
+  "option_a": "",
+  "option_b": "",
+  "option_c": "",
+  "option_d": "",
+  "correct_answer": "",
+  "hint": ""
+}
+
+Rules:
+- If options are visible, type must be "mcq".
+- If it is fill in the blank with no options, type must be "blank".
+- correct_answer should be the exact option text if answer is visible; otherwise keep it empty.
+- Do not add markdown, explanation, or code fences.
+"""
+        model = genai.GenerativeModel(model_name="gemini-2.0-flash")
+        response = model.generate_content([prompt, image])
+        raw_text = (response.text or "").strip()
+        raw_text = re.sub(r"^```(?:json)?\s*", "", raw_text)
+        raw_text = re.sub(r"\s*```$", "", raw_text)
+        parsed = json.loads(raw_text)
+        return {
+            "question": str(parsed.get("question", "")).strip(),
+            "type": str(parsed.get("type", "mcq")).strip().lower(),
+            "option_a": str(parsed.get("option_a", "")).strip(),
+            "option_b": str(parsed.get("option_b", "")).strip(),
+            "option_c": str(parsed.get("option_c", "")).strip(),
+            "option_d": str(parsed.get("option_d", "")).strip(),
+            "correct_answer": str(parsed.get("correct_answer", "")).strip(),
+            "hint": str(parsed.get("hint", "")).strip(),
+        }
+    except Exception as e:
+        st.error(f"Image nundi question extract avvaledu: {e}")
+        return None
+
 # =========================
 # LOGIN FUNCTION
 # =========================
@@ -565,6 +618,30 @@ def admin_dashboard():
             # Image upload — form బయట ఉండాలి (st.form లో file_uploader పని చేయదు)
             st.markdown("#### ➕ Add Question")
             sel_ex = st.selectbox("Select Exam", list(ex_options.keys()) or ["No exams yet"], key="add_q_exam")
+            st.caption("Question image upload chesthe AI question/options extract chestundi.")
+            img_col1, img_col2 = st.columns([1, 1])
+            with img_col1:
+                extract_img_url_input = st.text_input("Image URL paste à°šà±‡à°¯à°‚à°¡à°¿", key="extract_img_url", placeholder="https://...")
+            with img_col2:
+                extract_img_file = st.file_uploader("à°²à±‡à°¦à°¾ Image upload à°šà±‡à°¯à°‚à°¡à°¿", type=["jpg","jpeg","png","gif"], key="extract_img_file")
+
+            if (extract_img_file or extract_img_url_input.strip()) and st.button("Image nundi Question Extract", key="extract_q_from_img", use_container_width=True):
+                extract_source = extract_img_file if extract_img_file else extract_img_url_input.strip()
+                extracted = extract_question_from_image(extract_source)
+                if extracted:
+                    q_type_value = extracted.get("type", "mcq")
+                    if q_type_value not in ["mcq", "blank", "programming"]:
+                        q_type_value = "mcq"
+                    st.session_state.add_q_type = q_type_value
+                    st.session_state.add_q_text = extracted.get("question", "")
+                    st.session_state.add_a = extracted.get("option_a", "")
+                    st.session_state.add_b = extracted.get("option_b", "")
+                    st.session_state.add_c = extracted.get("option_c", "")
+                    st.session_state.add_d = extracted.get("option_d", "")
+                    st.session_state.add_ans = extracted.get("correct_answer", "")
+                    st.session_state.add_hint = extracted.get("hint", "")
+                    st.success("Question details fill ayyayi. Check chesi Add Question click cheyyandi.")
+                    st.rerun()
             q_type = st.selectbox("Question Type", ["mcq", "blank", "programming"], key="add_q_type")
             q_text = st.text_area("Question Text", key="add_q_text")
 
@@ -592,8 +669,12 @@ def admin_dashboard():
                     final_img_url = None
                     if img_file:
                         final_img_url = upload_image_to_imgbb(img_file)
+                    elif extract_img_file:
+                        final_img_url = upload_image_to_imgbb(extract_img_file)
                     elif img_url_input.strip():
                         final_img_url = img_url_input.strip()
+                    elif extract_img_url_input.strip():
+                        final_img_url = extract_img_url_input.strip()
 
                     supabase.table("questions").insert({
                         "exam_id": ex_options[sel_ex], "question": q_text, "type": q_type,
