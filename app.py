@@ -91,6 +91,28 @@ for key, val in defaults.items():
         st.session_state[key] = val
 
 # =========================
+# PERSISTENT LOGIN (survive page refresh) - NEW
+# =========================
+# Page reload అయినప్పుడు Streamlit session_state మొత్తం reset అవుతుంది.
+# అందుకే login successful అయినప్పుడు uid/role ని URL query params లో
+# save చేసి, app start అయినప్పుడు అక్కడి నుండి తిరిగి login state
+# restore చేస్తాము. Logout బటన్ నొక్కితే మాత్రమే ఈ params clear అవుతాయి.
+if not st.session_state.logged_in:
+    try:
+        qp = st.query_params
+        saved_uid = qp.get("uid", "")
+        saved_role = qp.get("role", "")
+        if saved_uid and saved_role:
+            urow_data = supabase.table("users").select("*").eq("id", saved_uid).execute().data
+            if urow_data and urow_data[0]["role"] == saved_role:
+                st.session_state.logged_in = True
+                st.session_state.role = saved_role
+                st.session_state.user_id = saved_uid
+                st.session_state.pin_verified = True
+    except Exception:
+        pass
+
+# =========================
 # JAVA CODE EVALUATOR
 # =========================
 def evaluate_java_code(user_code, input_data, expected_output):
@@ -175,6 +197,9 @@ def login():
                         st.session_state.role = urow["role"]
                         st.session_state.user_id = urow["id"]
                         st.session_state.pin_verified = True
+                        # Persist login across page refresh
+                        st.query_params["uid"] = str(urow["id"])
+                        st.query_params["role"] = urow["role"]
                         st.rerun()
                 except Exception as e:
                     st.error(str(e))
@@ -202,11 +227,15 @@ def pin_screen():
                 if existing and existing[0]["id"] != st.session_state.user_id_temp:
                     st.error("❌ ఈ PIN వేరె user వాడుతున్నారు. వేరే PIN try చేయండి!")
                 else:
-                    supabase.table("users").update({"app_pin": pin1})                         .eq("id", st.session_state.user_id_temp).execute()
+                    supabase.table("users").update({"app_pin": pin1}) \
+                        .eq("id", st.session_state.user_id_temp).execute()
                     st.session_state.logged_in = True
                     st.session_state.role = st.session_state.role_temp
                     st.session_state.user_id = st.session_state.user_id_temp
                     st.session_state.pin_verified = True
+                    # Persist login across page refresh
+                    st.query_params["uid"] = str(st.session_state.user_id_temp)
+                    st.query_params["role"] = st.session_state.role_temp
                     st.success("PIN set అయింది! Welcome 🎉")
                     st.rerun()
 
@@ -225,6 +254,9 @@ def pin_screen():
                     st.session_state.role = st.session_state.role_temp
                     st.session_state.user_id = st.session_state.user_id_temp
                     st.session_state.pin_verified = True
+                    # Persist login across page refresh
+                    st.query_params["uid"] = str(st.session_state.user_id_temp)
+                    st.query_params["role"] = st.session_state.role_temp
                     st.rerun()
                 else:
                     st.error("❌ Wrong PIN! మళ్ళీ try చేయండి.")
@@ -273,6 +305,7 @@ def admin_dashboard():
     if st.sidebar.button("🚪 Logout", use_container_width=True):
         for key in defaults:
             st.session_state[key] = defaults[key]
+        st.query_params.clear()
         st.rerun()
 
     if "admin_preview_mode" not in st.session_state:
@@ -658,7 +691,8 @@ def admin_dashboard():
                 st.write(f"### Questions in **{selected_exam_title}** ({len(current_questions)} total)")
 
                 # Explain requests లో ఈ exam కి marked questions + student names collect చేయాలి
-                exp_reqs = supabase.table("explain_requests").select("*")                     .eq("exam_id", selected_exam_id).execute().data
+                exp_reqs = supabase.table("explain_requests").select("*") \
+                    .eq("exam_id", selected_exam_id).execute().data
 
                 # question_id → [student names] mapping
                 q_requesters = {}
@@ -872,7 +906,8 @@ def admin_dashboard():
 
         with r_tab4:
             st.title("🔄 Re-Exam Requests")
-            requests_data = supabase.table("exam_retake_requests").select("*")                 .eq("status", "pending").order("requested_at", desc=True).execute().data
+            requests_data = supabase.table("exam_retake_requests").select("*") \
+                .eq("status", "pending").order("requested_at", desc=True).execute().data
 
             if not requests_data:
                 st.info("ఇప్పుడు pending requests లేవు.")
@@ -907,7 +942,8 @@ def admin_dashboard():
             st.title("📌 Explain Requests")
             import json as _json
 
-            exp_requests = supabase.table("explain_requests").select("*")                 .order("created_at", desc=True).execute().data
+            exp_requests = supabase.table("explain_requests").select("*") \
+                .order("created_at", desc=True).execute().data
 
             if not exp_requests:
                 st.info("ఇంకా explain requests లేవు.")
@@ -1162,10 +1198,12 @@ def get_unread_notifications(user_id):
     try:
         uid = str(user_id)
         # అన్ని notifications తీసుకోవాలి
-        all_notifs = supabase.table("notifications").select("*")             .order("created_at", desc=True).execute().data
+        all_notifs = supabase.table("notifications").select("*") \
+            .order("created_at", desc=True).execute().data
 
         # ఈ user చదివిన notification ids తీసుకోవాలి
-        read_data = supabase.table("notification_reads").select("notification_id")             .eq("user_id", uid).execute().data
+        read_data = supabase.table("notification_reads").select("notification_id") \
+            .eq("user_id", uid).execute().data
         read_ids = {r["notification_id"] for r in read_data}
 
         # Unread filter: broadcast (user_id=NULL) OR this user specific, AND not read by this user
@@ -1234,13 +1272,16 @@ def show_notification_banner(user_id):
 def get_unread_count(user_id):
     """Unread messages count తీసుకోవాలి"""
     try:
-        read_data = supabase.table("message_reads").select("last_read_at")             .eq("user_id", str(user_id)).execute().data
+        read_data = supabase.table("message_reads").select("last_read_at") \
+            .eq("user_id", str(user_id)).execute().data
         if not read_data:
             # ఒక్కసారీ chat చూడలేదు — total count
             total = supabase.table("messages").select("id").execute().data
             return len(total)
         last_read = read_data[0]["last_read_at"]
-        unread = supabase.table("messages").select("id")             .gt("created_at", last_read)             .neq("user_id", str(user_id)).execute().data
+        unread = supabase.table("messages").select("id") \
+            .gt("created_at", last_read) \
+            .neq("user_id", str(user_id)).execute().data
         return len(unread)
     except Exception:
         return 0
@@ -1252,7 +1293,8 @@ def group_chat():
     user_id = str(st.session_state.user_id)
 
     # Messages fetch
-    messages = supabase.table("messages").select("*")         .order("created_at", desc=False).limit(50).execute().data
+    messages = supabase.table("messages").select("*") \
+        .order("created_at", desc=False).limit(50).execute().data
 
     # Chat container
     chat_container = st.container(height=450)
@@ -1328,6 +1370,7 @@ def user_dashboard(preview_mode=False):
         if st.sidebar.button("🚪 Logout", use_container_width=True):
             for key in defaults:
                 st.session_state[key] = defaults[key]
+            st.query_params.clear()
             st.rerun()
         st.sidebar.divider()
         if "user_page" not in st.session_state:
@@ -1474,7 +1517,10 @@ def user_dashboard(preview_mode=False):
                                     st.rerun()
 
                                 # Re-exam request status check
-                                retake_req = supabase.table("exam_retake_requests").select("*")                                     .eq("user_id", st.session_state.user_id)                                     .eq("exam_id", exam["id"])                                     .order("requested_at", desc=True).limit(1).execute().data
+                                retake_req = supabase.table("exam_retake_requests").select("*") \
+                                    .eq("user_id", st.session_state.user_id) \
+                                    .eq("exam_id", exam["id"]) \
+                                    .order("requested_at", desc=True).limit(1).execute().data
 
                                 if retake_req:
                                     status = retake_req[0]["status"]
@@ -1503,7 +1549,8 @@ def user_dashboard(preview_mode=False):
                                             if has_password and entered_pwd.strip() != str(exam["password"]).strip():
                                                 st.error("Wrong Password!")
                                             else:
-                                                supabase.table("exam_retake_requests").update({"status": "used"})                                                     .eq("id", retake_req[0]["id"]).execute()
+                                                supabase.table("exam_retake_requests").update({"status": "used"}) \
+                                                    .eq("id", retake_req[0]["id"]).execute()
                                                 q_data = supabase.table("questions").select("*").eq("exam_id", exam["id"]).execute().data
                                                 st.session_state.exam_id = exam["id"]
                                                 st.session_state.exam_title = exam["title"]
@@ -1639,7 +1686,9 @@ def exam_workspace_view():
                         c_ans = q["correct_answer"]
 
                         # Time spent fetch చేయాలి
-                        ua_data = supabase.table("user_answers").select("time_spent_seconds")                             .eq("attempt_id", db_attempt[0]["id"])                             .eq("question_id", q["id"]).execute().data
+                        ua_data = supabase.table("user_answers").select("time_spent_seconds") \
+                            .eq("attempt_id", db_attempt[0]["id"]) \
+                            .eq("question_id", q["id"]).execute().data
                         t_spent = ua_data[0]["time_spent_seconds"] if ua_data else 0
                         if t_spent and t_spent > 0:
                             mins_s, secs_s = divmod(t_spent, 60)
