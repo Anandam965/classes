@@ -88,6 +88,7 @@ defaults = {
     "question_time_log": {},     # question_id -> total seconds spent
     "attendance_marked_date": "",
     "attendance_error": "",
+    "generated_questions_no_ai": [],
 }
 for key, val in defaults.items():
     if key not in st.session_state:
@@ -248,6 +249,52 @@ def extract_question_from_image(image_file):
     except Exception as e:
         st.error(f"Image nundi question extract avvaledu: {e}")
         return None
+
+
+def generate_questions_without_ai(lesson_text, limit=5):
+    """Create simple fill-in-the-blank questions locally without paid AI APIs."""
+    import re
+
+    stop_words = {
+        "about", "after", "also", "because", "before", "between", "could",
+        "every", "their", "there", "these", "those", "through", "under",
+        "using", "which", "while", "would", "with", "from", "that", "this",
+        "into", "when", "where", "what", "have", "were", "will", "they",
+    }
+    sentences = re.split(r"(?<=[.!?])\s+", lesson_text.strip())
+    questions = []
+
+    for sentence in sentences:
+        clean_sentence = " ".join(sentence.split())
+        if len(clean_sentence) < 35:
+            continue
+
+        words = re.findall(r"\b[A-Za-z][A-Za-z0-9\-]{3,}\b", clean_sentence)
+        candidates = [w for w in words if w.lower() not in stop_words]
+        if not candidates:
+            continue
+
+        answer = max(candidates, key=len)
+        question_text = re.sub(
+            r"\b" + re.escape(answer) + r"\b",
+            "_____",
+            clean_sentence,
+            count=1,
+        )
+        questions.append({
+            "question": question_text,
+            "type": "blank",
+            "option_a": "",
+            "option_b": "",
+            "option_c": "",
+            "option_d": "",
+            "correct_answer": answer,
+            "hint": "Fill in the blank",
+        })
+        if len(questions) >= limit:
+            break
+
+    return questions
 
 # =========================
 # LOGIN FUNCTION
@@ -796,22 +843,43 @@ def admin_dashboard():
         with ex_tab5:
             st.subheader("🤖 AI Question Generator")
             lesson_text = st.text_area("Paste your Lesson Content here:")
+            exams_ai = supabase.table("exams").select("id, title").execute().data
+            ai_exam_options = {ex["title"]: ex["id"] for ex in exams_ai} if exams_ai else {}
+            selected_ai_exam = st.selectbox("Generated questions save cheyyalsina exam", list(ai_exam_options.keys()) or ["No exams yet"], key="ai_gen_exam")
             if st.button("✨ Generate Questions"):
                 if not lesson_text.strip():
                     st.warning("దయచేసి పాఠాన్ని పైన పేస్ట్ చేయండి!")
                 else:
+                    generated = generate_questions_without_ai(lesson_text, limit=5)
+                    if generated:
+                        st.session_state.generated_questions_no_ai = generated
+                        st.success("Free local generator tho questions create ayyayi.")
+                    else:
+                        st.warning("Questions generate cheyyadaniki lesson text konchem detailed ga paste cheyyandi.")
+
+            generated_questions = st.session_state.get("generated_questions_no_ai", [])
+            if generated_questions:
+                st.subheader("Generated Questions")
+                st.dataframe(generated_questions, use_container_width=True)
+                if selected_ai_exam in ai_exam_options and st.button("Generated Questions DB lo Save", type="primary", use_container_width=True):
                     try:
-                        prompt = (
-                            "Convert this text into 5 MCQ questions in JSON format. "
-                            "Return ONLY a JSON array. Each item: question, option_a, option_b, "
-                            f"option_c, option_d, correct_answer. Text: {lesson_text}"
-                        )
-                        model = genai.GenerativeModel(model_name="gemini-2.0-flash-lite")
-                        response = model.generate_content(prompt)
-                        st.subheader("Generated Questions:")
-                        st.write(response.text)
+                        for q in generated_questions:
+                            supabase.table("questions").insert({
+                                "exam_id": ai_exam_options[selected_ai_exam],
+                                "question": q["question"],
+                                "type": q["type"],
+                                "option_a": q["option_a"],
+                                "option_b": q["option_b"],
+                                "option_c": q["option_c"],
+                                "option_d": q["option_d"],
+                                "correct_answer": q["correct_answer"],
+                                "hint": q["hint"],
+                            }).execute()
+                        st.session_state.generated_questions_no_ai = []
+                        st.success("Generated questions save ayyayi!")
+                        st.rerun()
                     except Exception as e:
-                        st.error(f"AI Error: {e}")
+                        st.error(f"Save Error: {e}")
 
         with ex_tab3:
             st.subheader("🔍 Review Existing Exam Papers")
