@@ -176,8 +176,34 @@ Rules:
 - correct_answer should be the exact option text if answer is visible; otherwise keep it empty.
 - Do not add markdown, explanation, or code fences.
 """
-        model = genai.GenerativeModel(model_name="gemini-2.0-flash")
-        response = model.generate_content([prompt, image])
+        response = None
+        model_names = [
+            "gemini-2.0-flash-lite",
+            "gemini-1.5-flash",
+            "gemini-2.0-flash",
+        ]
+        quota_errors = []
+        for model_name in model_names:
+            try:
+                model = genai.GenerativeModel(model_name=model_name)
+                response = model.generate_content([prompt, image])
+                break
+            except Exception as model_error:
+                err_text = str(model_error)
+                if "429" in err_text or "quota" in err_text.lower():
+                    quota_errors.append(model_name)
+                    continue
+                raise model_error
+
+        if response is None:
+            st.error(
+                "Gemini free quota aipoyindi. Konchem time taruvatha try cheyyandi "
+                "leda Google AI Studio lo billing/quota enable cheyyandi."
+            )
+            if quota_errors:
+                st.caption("Quota exceeded models: " + ", ".join(quota_errors))
+            return None
+
         raw_text = (response.text or "").strip()
         raw_text = re.sub(r"^```(?:json)?\s*", "", raw_text)
         raw_text = re.sub(r"\s*```$", "", raw_text)
@@ -193,7 +219,14 @@ Rules:
             "hint": str(parsed.get("hint", "")).strip(),
         }
     except Exception as e:
-        st.error(f"Image nundi question extract avvaledu: {e}")
+        err_text = str(e)
+        if "429" in err_text or "quota" in err_text.lower():
+            st.error(
+                "Gemini quota limit valla image extract avvaledu. "
+                "Konchem sepu wait chesi retry cheyyandi, leda billing/quota enable cheyyandi."
+            )
+        else:
+            st.error(f"Image nundi question extract avvaledu: {e}")
         return None
 
 # =========================
