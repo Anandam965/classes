@@ -145,88 +145,108 @@ def evaluate_java_code(user_code, input_data, expected_output):
 
 
 def extract_question_from_image(image_file):
-    """Extract question data from an uploaded question image using Gemini vision."""
-    import io
+    """Extract question text from OCR.space and split it into LMS fields."""
     import re
-    from PIL import Image
+
+    def parse_ocr_question(raw_text):
+        text = raw_text.replace("\r", "\n")
+        lines = [line.strip() for line in text.splitlines() if line.strip()]
+        clean_text = "\n".join(lines)
+
+        option_pattern = re.compile(
+            r"(?im)^\s*(?:option\s*)?([A-D]|[1-4])[\)\].:\-]\s*(.+?)(?=\n\s*(?:option\s*)?(?:[A-D]|[1-4])[\)\].:\-]\s*|\Z)",
+            re.S,
+        )
+        matches = list(option_pattern.finditer(clean_text))
+
+        options = {"A": "", "B": "", "C": "", "D": ""}
+        first_option_start = len(clean_text)
+        for match in matches:
+            label = match.group(1).upper()
+            if label in ["1", "2", "3", "4"]:
+                label = chr(ord("A") + int(label) - 1)
+            if label in options and not options[label]:
+                options[label] = " ".join(match.group(2).split())
+                first_option_start = min(first_option_start, match.start())
+
+        question = clean_text[:first_option_start].strip()
+        answer = ""
+        answer_match = re.search(
+            r"(?im)(?:answer|correct\s*answer|ans)\s*[:\-]\s*([A-D]|[1-4]|.+)$",
+            clean_text,
+        )
+        if answer_match:
+            answer = answer_match.group(1).strip()
+            if answer.upper() in options and options[answer.upper()]:
+                answer = options[answer.upper()]
+            elif answer in ["1", "2", "3", "4"]:
+                mapped = chr(ord("A") + int(answer) - 1)
+                answer = options.get(mapped, answer)
+
+        if not question:
+            question = clean_text
+
+        return {
+            "question": question,
+            "type": "mcq" if any(options.values()) else "blank",
+            "option_a": options["A"],
+            "option_b": options["B"],
+            "option_c": options["C"],
+            "option_d": options["D"],
+            "correct_answer": answer,
+            "hint": "",
+        }
 
     try:
-        if isinstance(image_file, str):
-            image_bytes = requests.get(image_file, timeout=15).content
-        else:
-            image_bytes = image_file.getvalue()
-        image = Image.open(io.BytesIO(image_bytes))
-        prompt = """
-You are helping an LMS admin extract exam data from an image.
-Read the image carefully and return ONLY valid JSON with these keys:
-{
-  "question": "",
-  "type": "mcq",
-  "option_a": "",
-  "option_b": "",
-  "option_c": "",
-  "option_d": "",
-  "correct_answer": "",
-  "hint": ""
-}
-
-Rules:
-- If options are visible, type must be "mcq".
-- If it is fill in the blank with no options, type must be "blank".
-- correct_answer should be the exact option text if answer is visible; otherwise keep it empty.
-- Do not add markdown, explanation, or code fences.
-"""
-        response = None
-        model_names = [
-            "gemini-2.0-flash-lite",
-            "gemini-1.5-flash",
-            "gemini-2.0-flash",
-        ]
-        quota_errors = []
-        for model_name in model_names:
-            try:
-                model = genai.GenerativeModel(model_name=model_name)
-                response = model.generate_content([prompt, image])
-                break
-            except Exception as model_error:
-                err_text = str(model_error)
-                if "429" in err_text or "quota" in err_text.lower():
-                    quota_errors.append(model_name)
-                    continue
-                raise model_error
-
-        if response is None:
-            st.error(
-                "Gemini free quota aipoyindi. Konchem time taruvatha try cheyyandi "
-                "leda Google AI Studio lo billing/quota enable cheyyandi."
-            )
-            if quota_errors:
-                st.caption("Quota exceeded models: " + ", ".join(quota_errors))
+        api_key = st.secrets.get("OCR_SPACE_API_KEY", "")
+        if not api_key:
+            st.error("OCR_SPACE_API_KEY Streamlit secrets lo add cheyyandi.")
             return None
 
-        raw_text = (response.text or "").strip()
-        raw_text = re.sub(r"^```(?:json)?\s*", "", raw_text)
-        raw_text = re.sub(r"\s*```$", "", raw_text)
-        parsed = json.loads(raw_text)
-        return {
-            "question": str(parsed.get("question", "")).strip(),
-            "type": str(parsed.get("type", "mcq")).strip().lower(),
-            "option_a": str(parsed.get("option_a", "")).strip(),
-            "option_b": str(parsed.get("option_b", "")).strip(),
-            "option_c": str(parsed.get("option_c", "")).strip(),
-            "option_d": str(parsed.get("option_d", "")).strip(),
-            "correct_answer": str(parsed.get("correct_answer", "")).strip(),
-            "hint": str(parsed.get("hint", "")).strip(),
+        payload = {
+            "apikey": api_key,
+            "language": "eng",
+            "OCREngine": "2",
+            "isOverlayRequired": "false",
+            "scale": "true",
         }
-    except Exception as e:
-        err_text = str(e)
-        if "429" in err_text or "quota" in err_text.lower():
-            st.error(
-                "Gemini quota limit valla image extract avvaledu. "
-                "Konchem sepu wait chesi retry cheyyandi, leda billing/quota enable cheyyandi."
+
+        if isinstance(image_file, str):
+            response = requests.post(
+                "https://api.ocr.space/parse/image",
+                data={**payload, "url": image_file},
+                timeout=40,
             )
         else:
-            st.error(f"Image nundi question extract avvaledu: {e}")
+            response = requests.post(
+                "https://api.ocr.space/parse/image",
+                data=payload,
+                files={"file": (image_file.name, image_file.getvalue(), image_file.type)},
+                timeout=40,
+            )
+
+        result = response.json()
+        if result.get("IsErroredOnProcessing"):
+            errors = result.get("ErrorMessage") or result.get("ErrorDetails") or "OCR failed"
+            if isinstance(errors, list):
+                errors = " ".join(str(err) for err in errors)
+            st.error(f"OCR.space error: {errors}")
+            return None
+
+        parsed_results = result.get("ParsedResults") or []
+        raw_text = "\n".join(
+            item.get("ParsedText", "") for item in parsed_results if item.get("ParsedText")
+        ).strip()
+
+        if not raw_text:
+            st.error("Image lo text clear ga kanipinchaledu. Clear image upload cheyyandi.")
+            return None
+
+        st.caption("OCR extracted text:")
+        st.code(raw_text)
+        return parse_ocr_question(raw_text)
+    except Exception as e:
+        st.error(f"Image nundi question extract avvaledu: {e}")
         return None
 
 # =========================
