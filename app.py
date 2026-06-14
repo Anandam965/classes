@@ -131,6 +131,35 @@ def evaluate_java_code(user_code, input_data, expected_output):
 def run_java_code(user_code, input_data=""):
     rapidapi_key = st.secrets.get("RAPIDAPI_KEY", "")
     if not rapidapi_key:
+        def run_with_piston():
+            piston_payload = {
+                "language": "java",
+                "version": "15.0.2",
+                "files": [{"name": "Main.java", "content": user_code}],
+                "stdin": input_data or "",
+            }
+            result = requests.post("https://emkc.org/api/v2/piston/execute", json=piston_payload, timeout=40).json()
+            compile_result = result.get("compile") or {}
+            run_result = result.get("run") or {}
+            stdout = run_result.get("stdout") or ""
+            stderr = (
+                compile_result.get("stderr")
+                or compile_result.get("output")
+                or run_result.get("stderr")
+                or run_result.get("output")
+                or result.get("message")
+                or ""
+            )
+            ok = not stderr and run_result.get("code", 0) == 0
+            return {
+                "ok": ok,
+                "status": "Accepted (fallback Java 15)" if ok else "Error (fallback Java 15)",
+                "stdout": stdout,
+                "stderr": stderr,
+                "time": None,
+                "memory": None,
+            }
+
         java8_code = user_code.replace("public class Main", "class Main")
         wandbox_payload = {
             "compiler": "openjdk-jdk-21+35",
@@ -139,7 +168,32 @@ def run_java_code(user_code, input_data=""):
             "stdin": input_data or "",
         }
         try:
-            result = requests.post("https://wandbox.org/api/compile.json", json=wandbox_payload, timeout=40).json()
+            result = {}
+            for attempt in range(2):
+                result = requests.post("https://wandbox.org/api/compile.json", json=wandbox_payload, timeout=40).json()
+                raw_error = " ".join([
+                    str(result.get("compiler_error") or ""),
+                    str(result.get("program_error") or ""),
+                    str(result.get("compiler_message") or ""),
+                    str(result.get("program_message") or ""),
+                ])
+                if "Resource temporarily unavailable" not in raw_error and "OCI runtime error" not in raw_error:
+                    break
+                if attempt == 0:
+                    time.sleep(1)
+            raw_error = " ".join([
+                str(result.get("compiler_error") or ""),
+                str(result.get("program_error") or ""),
+                str(result.get("compiler_message") or ""),
+                str(result.get("program_message") or ""),
+            ])
+            if "Resource temporarily unavailable" in raw_error or "OCI runtime error" in raw_error:
+                fallback = run_with_piston()
+                fallback["stderr"] = (
+                    "Java 8 server busy kabatti fallback Java 15 lo run chesanu.\n"
+                    + (fallback.get("stderr") or "")
+                ).strip()
+                return fallback
             stdout = result.get("program_output") or ""
             status_code = str(result.get("status", ""))
             stderr = ""
@@ -170,7 +224,15 @@ def run_java_code(user_code, input_data=""):
                 "memory": None,
             }
         except Exception as e:
-            return {"ok": False, "status": "Wandbox API Error", "stdout": "", "stderr": str(e)}
+            try:
+                fallback = run_with_piston()
+                fallback["stderr"] = (
+                    "Java 8 API busy/error kabatti fallback Java 15 lo run chesanu.\n"
+                    + (fallback.get("stderr") or "")
+                ).strip()
+                return fallback
+            except Exception:
+                return {"ok": False, "status": "Java API Error", "stdout": "", "stderr": str(e)}
 
     url = "https://judge0-ce.p.rapidapi.com/submissions?base64_encoded=false&fields=*"
     payload = {"source_code": user_code, "language_id": 27, "stdin": input_data or ""}
