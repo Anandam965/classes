@@ -131,40 +131,66 @@ def extract_question_from_image(image_source):
     import re
 
     def parse_ocr_text(raw_text):
-        text = raw_text.replace("\r", "\n")
-        lines = [l.strip() for l in text.splitlines() if l.strip()]
-        clean = "\n".join(lines)
-        opt_pat = re.compile(
-            r"(?im)^\s*(?:option\s*)?([A-D]|[1-4])[\)\].:\-]\s*(.+?)(?=\n\s*(?:option\s*)?(?:[A-D]|[1-4])[\)\].:\-]\s*|\Z)",
-            re.S
-        )
-        matches = list(opt_pat.finditer(clean))
+        # Normalize line endings and clean up
+        lines = [l.strip() for l in raw_text.replace("\r\n", "\n").replace("\r", "\n").splitlines()]
+        lines = [l for l in lines if l]
+
         options = {"A": "", "B": "", "C": "", "D": ""}
-        first_opt_start = len(clean)
-        for m in matches:
-            lbl = m.group(1).upper()
+        question_lines = []
+        option_found_at = None
+
+        # Pattern: line starts with A) / A. / A: / (A) / 1) / 1. etc.
+        opt_line_pat = re.compile(
+            r"^(?:option\s*)?([A-Da-d]|[1-4])\s*[\)\]\.:\-]\s*(.+)", re.IGNORECASE
+        )
+
+        for i, line in enumerate(lines):
+            m = opt_line_pat.match(line)
+            if m:
+                lbl = m.group(1).upper()
+                if lbl in ["1","2","3","4"]:
+                    lbl = chr(ord("A") + int(lbl) - 1)
+                val = m.group(2).strip()
+                if lbl in options and not options[lbl]:
+                    options[lbl] = val
+                    if option_found_at is None:
+                        option_found_at = i
+            else:
+                # Only add to question if we haven't hit options yet
+                if option_found_at is None:
+                    # Skip "Answer:" lines
+                    if not re.match(r"(?i)^(answer|correct\s*answer|ans)\s*[:\-]", line):
+                        question_lines.append(line)
+
+        question = " ".join(question_lines).strip()
+
+        # Try to detect correct answer from text
+        answer = ""
+        full_text = "\n".join(lines)
+        ans_m = re.search(
+            r"(?im)^(?:answer|correct\s*answer|ans)\s*[:\-]\s*([A-D]|[1-4]|.+)$",
+            full_text
+        )
+        if ans_m:
+            raw_ans = ans_m.group(1).strip()
+            lbl = raw_ans.upper()
             if lbl in ["1","2","3","4"]:
                 lbl = chr(ord("A") + int(lbl) - 1)
-            if lbl in options and not options[lbl]:
-                options[lbl] = " ".join(m.group(2).split())
-                first_opt_start = min(first_opt_start, m.start())
-        question = clean[:first_opt_start].strip()
-        answer = ""
-        ans_m = re.search(r"(?im)(?:answer|correct\s*answer|ans)\s*[:\-]\s*([A-D]|[1-4]|.+)$", clean)
-        if ans_m:
-            answer = ans_m.group(1).strip()
-            if answer.upper() in options and options[answer.upper()]:
-                answer = options[answer.upper()]
-            elif answer in ["1","2","3","4"]:
-                answer = options.get(chr(ord("A") + int(answer) - 1), answer)
-        if not question:
-            question = clean
+            if lbl in options:
+                answer = lbl  # store as label A/B/C/D
+            else:
+                answer = raw_ans
+
+        has_options = any(v for v in options.values())
         return {
-            "question": question,
-            "type": "mcq" if any(options.values()) else "blank",
-            "option_a": options["A"], "option_b": options["B"],
-            "option_c": options["C"], "option_d": options["D"],
-            "correct_answer": answer, "hint": "",
+            "question": question if question else full_text[:300],
+            "type": "mcq" if has_options else "blank",
+            "option_a": options["A"],
+            "option_b": options["B"],
+            "option_c": options["C"],
+            "option_d": options["D"],
+            "correct_answer": answer,
+            "hint": "",
         }
 
     try:
@@ -192,8 +218,8 @@ def extract_question_from_image(image_source):
         if not raw_text:
             st.error("Image లో text clear గా కనిపించలేదు.")
             return None
-        st.caption("📄 OCR extracted text:")
-        st.code(raw_text)
+        with st.expander("📄 OCR raw text చూడండి"):
+            st.code(raw_text)
         return parse_ocr_text(raw_text)
     except Exception as e:
         st.error(f"Image నుండి question extract కాలేదు: {e}")
@@ -1042,9 +1068,19 @@ def admin_dashboard():
 
             # Auto-extract trigger
             extract_source = img_file if img_file else (img_url_input.strip() if img_url_input.strip() else None)
+
+            # Show image preview immediately when uploaded
+            if img_file:
+                st.image(img_file, caption="Uploaded Image", width=400)
+            elif img_url_input.strip():
+                try:
+                    st.image(img_url_input.strip(), caption="Image from URL", width=400)
+                except Exception:
+                    pass
+
             if extract_source:
                 if st.button("🔍 Image నుండి Question Extract చేయి", use_container_width=True, key="extract_ocr_btn"):
-                    with st.spinner("OCR processing..."):
+                    with st.spinner("OCR processing... కొంచెం wait చేయండి"):
                         extracted = extract_question_from_image(extract_source)
                     if extracted:
                         st.session_state["ocr_q_text"]   = extracted.get("question", "")
@@ -1055,7 +1091,10 @@ def admin_dashboard():
                         st.session_state["ocr_d"]        = extracted.get("option_d", "")
                         st.session_state["ocr_ans"]      = extracted.get("correct_answer", "")
                         st.session_state["ocr_hint"]     = extracted.get("hint", "")
-                        st.success("✅ Question extract అయింది! Check చేసి Save చేయండి.")
+                        # Pre-set correct label if found
+                        if extracted.get("correct_answer","").upper() in ["A","B","C","D"]:
+                            st.session_state["add_correct_lbl"] = extracted["correct_answer"].upper()
+                        st.success("✅ Question extract అయింది! Fields లో fill అయ్యాయి.")
 
             st.divider()
 
@@ -1791,26 +1830,39 @@ def exam_workspace_view():
                     ("C", question.get("option_c","")),
                     ("D", question.get("option_d","")),
                 ]
+                # Custom CSS for option buttons
+                st.markdown("""
+                <style>
+                div[data-testid="stButton"] > button[kind="primary"] {
+                    background-color: #1a73e8 !important;
+                    color: white !important;
+                    border: 2px solid #1a73e8 !important;
+                    border-radius: 10px !important;
+                    padding: 12px 18px !important;
+                    font-size: 1rem !important;
+                    text-align: left !important;
+                    white-space: normal !important;
+                    height: auto !important;
+                }
+                div[data-testid="stButton"] > button[kind="secondary"] {
+                    background-color: #ffffff !important;
+                    color: #2c3e50 !important;
+                    border: 2px solid #d0d8e8 !important;
+                    border-radius: 10px !important;
+                    padding: 12px 18px !important;
+                    font-size: 1rem !important;
+                    text-align: left !important;
+                    white-space: normal !important;
+                    height: auto !important;
+                }
+                </style>""", unsafe_allow_html=True)
                 st.markdown("")
                 for lbl, otxt in opts:
                     if not otxt:
                         continue
                     is_selected = (stored_ans == lbl or stored_ans == otxt)
-                    if is_selected:
-                        bg, border, col, fw = "#1a73e8", "#1a73e8", "#ffffff", "700"
-                        prefix = "🔵 "
-                    else:
-                        bg, border, col, fw = "#ffffff", "#d0d8e8", "#2c3e50", "400"
-                        prefix = ""
-                    # Full-width clickable button styled as option card
-                    btn_html = (
-                        f"<div style='background:{bg};border:2px solid {border};border-radius:10px;"
-                        f"padding:12px 18px;margin-bottom:8px;color:{col};font-weight:{fw};"
-                        f"font-size:1rem;cursor:pointer;'>{prefix}{lbl}. {otxt}</div>"
-                    )
-                    # Render display card + invisible streamlit button below it
-                    st.markdown(btn_html, unsafe_allow_html=True)
-                    if st.button(f"{lbl}. {otxt}", key=f"opt_{question['id']}_{lbl}",
+                    btn_label = f"{'🔵 ' if is_selected else ''}{lbl}. {otxt}"
+                    if st.button(btn_label, key=f"opt_{question['id']}_{lbl}",
                                  use_container_width=True,
                                  type="primary" if is_selected else "secondary"):
                         st.session_state.answers[question["id"]] = lbl
@@ -1857,8 +1909,6 @@ def exam_workspace_view():
                     st.session_state.question_time_log = {}
                     st.session_state.question_start_time = {}
                     st.session_state.exam_submitted = True; st.rerun()
-
-        if remaining_time <= 0: st.rerun()
 
 # =========================
 # MAIN ROUTING
