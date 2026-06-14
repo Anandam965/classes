@@ -125,6 +125,37 @@ def evaluate_java_code(user_code, input_data, expected_output):
     except Exception:
         return False
 
+def run_java_code(user_code, input_data=""):
+    url = "https://judge0-ce.p.rapidapi.com/submissions?base64_encoded=false&fields=*"
+    payload = {"source_code": user_code, "language_id": 27, "stdin": input_data or ""}
+    headers = {"x-rapidapi-key": st.secrets.get("RAPIDAPI_KEY", ""), "Content-Type": "application/json"}
+    if not headers["x-rapidapi-key"]:
+        return {"ok": False, "status": "Missing RAPIDAPI_KEY", "stdout": "", "stderr": "RAPIDAPI_KEY secrets lo add cheyyandi."}
+    try:
+        response = requests.post(url, json=payload, headers=headers, timeout=30).json()
+        token = response.get("token")
+        if not token:
+            return {"ok": False, "status": "Submission failed", "stdout": "", "stderr": str(response)}
+        time.sleep(2)
+        result = requests.get(
+            f"https://judge0-ce.p.rapidapi.com/submissions/{token}?base64_encoded=false&fields=*",
+            headers=headers,
+            timeout=30
+        ).json()
+        status = (result.get("status") or {}).get("description", "Unknown")
+        stdout = result.get("stdout") or ""
+        stderr = result.get("stderr") or result.get("compile_output") or result.get("message") or ""
+        return {
+            "ok": status == "Accepted",
+            "status": status,
+            "stdout": stdout,
+            "stderr": stderr,
+            "time": result.get("time"),
+            "memory": result.get("memory"),
+        }
+    except Exception as e:
+        return {"ok": False, "status": "API Error", "stdout": "", "stderr": str(e)}
+
 # =========================
 # OCR: IMAGE → QUESTION EXTRACT
 # =========================
@@ -788,6 +819,70 @@ def show_student_progress_tab(user_id):
                 with col_btn:
                     if st.button("Open", key=f"prog_open_exam_{exam['id']}", use_container_width=True, type="primary"):
                         start_student_exam(exam)
+
+def show_java_practice_tab():
+    st.title("☕ Java Practice")
+    default_code = """import java.util.*;
+
+public class Main {
+    public static void main(String[] args) {
+        Scanner sc = new Scanner(System.in);
+        String name = sc.hasNextLine() ? sc.nextLine() : "Student";
+        System.out.println("Hello, " + name + "!");
+    }
+}"""
+    if "java_practice_code" not in st.session_state:
+        st.session_state.java_practice_code = default_code
+    if "java_practice_input" not in st.session_state:
+        st.session_state.java_practice_input = ""
+
+    st.session_state.java_practice_code = st.text_area(
+        "Java Code",
+        value=st.session_state.java_practice_code,
+        height=360,
+        key="java_practice_code_editor"
+    )
+    st.session_state.java_practice_input = st.text_area(
+        "Input",
+        value=st.session_state.java_practice_input,
+        height=120,
+        key="java_practice_input_editor",
+        placeholder="Program ki kavalsina input ikkada type cheyyandi..."
+    )
+
+    col_run, col_reset = st.columns([1, 1])
+    with col_run:
+        run_clicked = st.button("▶️ Run Java", type="primary", use_container_width=True)
+    with col_reset:
+        if st.button("↩️ Reset Sample", use_container_width=True):
+            st.session_state.java_practice_code = default_code
+            st.session_state.java_practice_input = ""
+            st.rerun()
+
+    if run_clicked:
+        if not st.session_state.java_practice_code.strip():
+            st.warning("Java code enter cheyyandi.")
+            return
+        with st.spinner("Java program run avuthundi..."):
+            result = run_java_code(st.session_state.java_practice_code, st.session_state.java_practice_input)
+        st.subheader("Output")
+        if result.get("stdout"):
+            st.code(result["stdout"], language="text")
+        else:
+            st.code("", language="text")
+        if result.get("stderr"):
+            st.subheader("Errors / Compiler Messages")
+            st.code(result["stderr"], language="text")
+        meta = []
+        if result.get("time") is not None:
+            meta.append(f"Time: {result['time']}s")
+        if result.get("memory") is not None:
+            meta.append(f"Memory: {result['memory']} KB")
+        status_text = result.get("status", "Unknown")
+        if result.get("ok"):
+            st.success(f"Status: {status_text}" + (f" | {' | '.join(meta)}" if meta else ""))
+        else:
+            st.error(f"Status: {status_text}" + (f" | {' | '.join(meta)}" if meta else ""))
 
 # =========================
 # REVIEW SHEET (styled like screenshot)
@@ -1759,7 +1854,7 @@ def user_dashboard(preview_mode=False):
             st.query_params.clear()
             st.rerun()
         st.sidebar.divider()
-        pages = ["📚 My Classes", "📊 Progress", "💬 Group Chat", "📅 Attendance"]
+        pages = ["📚 My Classes", "📊 Progress", "☕ Java Practice", "💬 Group Chat", "📅 Attendance"]
         for pg in pages:
             if pg == "💬 Group Chat":
                 unread = get_unread_count(st.session_state.user_id)
@@ -1785,6 +1880,8 @@ def user_dashboard(preview_mode=False):
         group_chat(); return
     if user_page == "📊 Progress":
         show_student_progress_tab(st.session_state.user_id); return
+    if user_page == "☕ Java Practice":
+        show_java_practice_tab(); return
     if user_page == "📅 Attendance":
         show_attendance_tab(st.session_state.user_id); return
 
