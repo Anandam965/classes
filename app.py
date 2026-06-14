@@ -1031,7 +1031,6 @@ def admin_dashboard():
             ex_options = {e["title"]: e["id"] for e in exams_q} if exams_q else {}
             st.markdown("#### ➕ Add Question")
             sel_ex = st.selectbox("Select Exam", list(ex_options.keys()) or ["No exams yet"], key="add_q_exam")
-            q_type = st.selectbox("Question Type", ["mcq", "blank", "programming"], key="add_q_type")
 
             # ── Image upload / URL → auto OCR extract ──────────────────────
             st.caption("📷 Image upload చేస్తే automatically question + options extract అవుతాయి")
@@ -1048,50 +1047,63 @@ def admin_dashboard():
                     with st.spinner("OCR processing..."):
                         extracted = extract_question_from_image(extract_source)
                     if extracted:
-                        st.session_state.add_q_text   = extracted.get("question", "")
-                        st.session_state.add_q_type   = extracted.get("type", "mcq")
-                        st.session_state.add_a         = extracted.get("option_a", "")
-                        st.session_state.add_b         = extracted.get("option_b", "")
-                        st.session_state.add_c         = extracted.get("option_c", "")
-                        st.session_state.add_d         = extracted.get("option_d", "")
-                        st.session_state.add_ans       = extracted.get("correct_answer", "")
-                        st.session_state.add_hint      = extracted.get("hint", "")
-                        st.success("✅ Question fields fill అయ్యాయి! Check చేసి Save చేయండి.")
-                        st.rerun()
+                        st.session_state["ocr_q_text"]   = extracted.get("question", "")
+                        st.session_state["ocr_q_type"]   = extracted.get("type", "mcq")
+                        st.session_state["ocr_a"]        = extracted.get("option_a", "")
+                        st.session_state["ocr_b"]        = extracted.get("option_b", "")
+                        st.session_state["ocr_c"]        = extracted.get("option_c", "")
+                        st.session_state["ocr_d"]        = extracted.get("option_d", "")
+                        st.session_state["ocr_ans"]      = extracted.get("correct_answer", "")
+                        st.session_state["ocr_hint"]     = extracted.get("hint", "")
+                        st.success("✅ Question extract అయింది! Check చేసి Save చేయండి.")
 
             st.divider()
-            q_text = st.text_area("Question Text", key="add_q_text")
+
+            # Use OCR values as defaults if available
+            default_q_text = st.session_state.get("ocr_q_text", "")
+            default_q_type = st.session_state.get("ocr_q_type", "mcq")
+            default_a      = st.session_state.get("ocr_a", "")
+            default_b      = st.session_state.get("ocr_b", "")
+            default_c      = st.session_state.get("ocr_c", "")
+            default_d      = st.session_state.get("ocr_d", "")
+            default_ans    = st.session_state.get("ocr_ans", "")
+            default_hint   = st.session_state.get("ocr_hint", "")
+
+            type_options = ["mcq", "blank", "programming"]
+            type_idx = type_options.index(default_q_type) if default_q_type in type_options else 0
+            q_type = st.selectbox("Question Type", type_options, index=type_idx, key="add_q_type")
+            q_text = st.text_area("Question Text", value=default_q_text, key="add_q_text")
 
             # ── 4 Options with ✓ Set Correct button ──────────────────────
             st.markdown("**Options** — సరైన option పక్కన **✓ Set Correct** నొక్కండి")
 
-            opt_keys = [("add_a","A"), ("add_b","B"), ("add_c","C"), ("add_d","D")]
-            for sess_key, lbl in opt_keys:
+            opt_defaults = {"A": default_a, "B": default_b, "C": default_c, "D": default_d}
+            opt_vals = {}
+            for lbl in ["A","B","C","D"]:
                 oc1, oc2, oc3 = st.columns([1, 6, 2])
                 with oc1:
                     st.markdown(f"<div style='padding-top:8px;font-weight:700;'>{lbl}.</div>", unsafe_allow_html=True)
                 with oc2:
-                    st.text_input(f"Option {lbl}", key=sess_key, label_visibility="collapsed")
+                    val = st.text_input(f"Option {lbl}", value=opt_defaults[lbl],
+                                        key=f"add_opt_{lbl}", label_visibility="collapsed")
+                    opt_vals[lbl] = val
                 with oc3:
-                    # Highlight button if already selected as correct
-                    cur_correct = st.session_state.get("add_ans", "")
-                    cur_opt_val = st.session_state.get(sess_key, "")
-                    already_correct = (cur_correct == lbl or
-                                       (cur_opt_val and cur_correct.strip().lower() == cur_opt_val.strip().lower()))
-                    btn_type = "primary" if already_correct else "secondary"
-                    btn_label = "✅ Correct" if already_correct else "✓ Set Correct"
+                    cur_correct = st.session_state.get("add_correct_lbl", default_ans)
+                    already = (cur_correct.upper() == lbl)
+                    btn_type  = "primary"   if already else "secondary"
+                    btn_label = "✅ Correct" if already else "✓ Set Correct"
                     if st.button(btn_label, key=f"setcor_{lbl}", use_container_width=True, type=btn_type):
-                        # Set correct_answer to the LABEL (A/B/C/D) so it's unambiguous
-                        st.session_state.add_ans = lbl
+                        st.session_state["add_correct_lbl"] = lbl
                         st.rerun()
 
-            h_text = st.text_input("💡 Hint", key="add_hint")
-            # Show currently selected correct answer
-            cur_ans_val = st.session_state.get("add_ans","")
-            if cur_ans_val:
-                st.info(f"🎯 Correct Answer set to: **{cur_ans_val}**")
-            c_ans_text = st.text_input("Correct Answer (manual override)", key="add_ans",
-                                        placeholder="A / B / C / D  లేదా exact text")
+            # Final correct answer label
+            correct_lbl = st.session_state.get("add_correct_lbl", default_ans)
+            if correct_lbl:
+                opt_text = opt_vals.get(correct_lbl.upper(), "")
+                disp = f"{correct_lbl}. {opt_text}" if opt_text else correct_lbl
+                st.info(f"🎯 Correct Answer: **{disp}**")
+
+            h_text   = st.text_input("💡 Hint", value=default_hint, key="add_hint")
             exp_text = st.text_area("📖 Answer Explanation (optional)", key="add_explanation",
                                      placeholder="ఈ సమాధానం ఎందుకు correct అో వివరించండి...")
 
@@ -1102,20 +1114,22 @@ def admin_dashboard():
                         final_img_url = upload_image_to_imgbb(img_file)
                     elif img_url_input.strip():
                         final_img_url = img_url_input.strip()
+                    # Save correct answer as label if available, else fallback
+                    save_ans = correct_lbl if correct_lbl else ""
                     supabase.table("questions").insert({
                         "exam_id": ex_options[sel_ex], "question": q_text, "type": q_type,
-                        "option_a": st.session_state.get("add_a",""),
-                        "option_b": st.session_state.get("add_b",""),
-                        "option_c": st.session_state.get("add_c",""),
-                        "option_d": st.session_state.get("add_d",""),
-                        "correct_answer": c_ans_text if c_ans_text.strip() else st.session_state.get("add_ans",""),
+                        "option_a": opt_vals.get("A",""),
+                        "option_b": opt_vals.get("B",""),
+                        "option_c": opt_vals.get("C",""),
+                        "option_d": opt_vals.get("D",""),
+                        "correct_answer": save_ans,
                         "hint": h_text, "image_url": final_img_url,
                         "explanation": exp_text.strip() if exp_text.strip() else None
                     }).execute()
-                    # Clear fields after save
-                    for k in ["add_q_text","add_a","add_b","add_c","add_d","add_ans","add_hint","add_explanation","add_img_url"]:
-                        if k in st.session_state:
-                            st.session_state[k] = ""
+                    # Clear OCR + correct label state
+                    for k in ["ocr_q_text","ocr_q_type","ocr_a","ocr_b","ocr_c","ocr_d",
+                              "ocr_ans","ocr_hint","add_correct_lbl"]:
+                        st.session_state.pop(k, None)
                     st.success("✅ Question Added!")
                     st.rerun()
                 else:
