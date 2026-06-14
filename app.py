@@ -75,6 +75,8 @@ defaults = {
     "user_id_temp": "",
     "role_temp": "",
     "user_page": "📚 My Classes",
+    "focus_class_id": "",
+    "focus_exam_id": "",
     "question_start_time": {},
     "question_time_log": {},
     "attendance_marked_date": "",
@@ -589,6 +591,203 @@ CREATE TABLE IF NOT EXISTS attendance (
         """,
         unsafe_allow_html=True
     )
+
+# =========================
+# STUDENT PROGRESS
+# =========================
+def get_student_completed_ids(user_id):
+    if st.session_state.completed_ids is None:
+        try:
+            rows = supabase.table("class_completions").select("class_id").eq("user_id", user_id).execute().data
+            st.session_state.completed_ids = {str(r["class_id"]) for r in rows}
+        except Exception:
+            st.session_state.completed_ids = set()
+    return st.session_state.completed_ids
+
+def focus_student_class(class_id, exam_id=""):
+    st.session_state.focus_class_id = str(class_id) if class_id else ""
+    st.session_state.focus_exam_id = str(exam_id) if exam_id else ""
+    st.session_state.user_page = "📚 My Classes"
+    st.rerun()
+
+def start_student_exam(exam):
+    has_pwd = exam.get("password") and str(exam["password"]).strip()
+    if has_pwd:
+        focus_student_class(exam.get("class_id"), exam.get("id"))
+        return
+    q_data = supabase.table("questions").select("*").eq("exam_id", exam["id"]).execute().data
+    st.session_state.update({
+        "exam_id": exam["id"],
+        "exam_title": exam["title"],
+        "start_exam": True,
+        "exam_submitted": False,
+        "answers": {},
+        "question_index": 0,
+        "current_questions": q_data,
+        "exam_end_time": time.time() + (int(exam.get("duration_mins", 30)) * 60),
+    })
+    st.rerun()
+
+def collect_student_progress(user_id):
+    completed_ids = get_student_completed_ids(user_id)
+    modules = supabase.table("modules").select("*").execute().data or []
+    submodules = supabase.table("submodules").select("*").execute().data or []
+    classes = supabase.table("classes").select("*").execute().data or []
+    exams = supabase.table("exams").select("*").execute().data or []
+    attempts = supabase.table("exam_attempts").select("*").eq("user_id", user_id).execute().data or []
+
+    sub_by_module = {}
+    for sub in submodules:
+        sub_by_module.setdefault(str(sub.get("module_id")), []).append(sub)
+
+    classes_by_sub = {}
+    class_module = {}
+    for cls in classes:
+        sid = str(cls.get("submodule_id"))
+        classes_by_sub.setdefault(sid, []).append(cls)
+
+    sub_module = {str(s.get("id")): str(s.get("module_id")) for s in submodules}
+    for cls in classes:
+        class_module[str(cls.get("id"))] = sub_module.get(str(cls.get("submodule_id")), "")
+
+    best_scores = {}
+    for att in attempts:
+        eid = str(att.get("exam_id"))
+        score = int(att.get("score") or 0)
+        if eid not in best_scores or score > best_scores[eid]:
+            best_scores[eid] = score
+
+    active_exams = [e for e in exams if e.get("enabled")]
+    question_counts = {}
+    for exam in active_exams:
+        try:
+            q_rows = supabase.table("questions").select("id").eq("exam_id", exam["id"]).execute().data
+            question_counts[str(exam["id"])] = len(q_rows)
+        except Exception:
+            question_counts[str(exam["id"])] = 0
+
+    modules_data = []
+    overall_total_classes = len(classes)
+    overall_done_classes = sum(1 for cls in classes if str(cls.get("id")) in completed_ids)
+    overall_marks_scored = 0
+    overall_marks_total = 0
+    pending_classes = []
+    pending_exams = []
+
+    for module in modules:
+        mid = str(module.get("id"))
+        module_classes = []
+        for sub in sub_by_module.get(mid, []):
+            for cls in classes_by_sub.get(str(sub.get("id")), []):
+                cls["_submodule_title"] = sub.get("title", "")
+                module_classes.append(cls)
+
+        module_exam_rows = [e for e in active_exams if class_module.get(str(e.get("class_id"))) == mid]
+        module_done = sum(1 for cls in module_classes if str(cls.get("id")) in completed_ids)
+        module_total = len(module_classes)
+        module_scored = 0
+        module_total_marks = 0
+
+        for exam in module_exam_rows:
+            eid = str(exam.get("id"))
+            total_q = question_counts.get(eid, 0)
+            if total_q > 0:
+                module_total_marks += total_q
+                overall_marks_total += total_q
+                best = best_scores.get(eid, 0)
+                module_scored += best
+                overall_marks_scored += best
+            if eid not in best_scores:
+                pending_exams.append({"exam": exam, "total_q": total_q})
+
+        for cls in module_classes:
+            if str(cls.get("id")) not in completed_ids:
+                pending_classes.append(cls)
+
+        modules_data.append({
+            "module": module,
+            "class_done": module_done,
+            "class_total": module_total,
+            "class_pct": int(module_done / module_total * 100) if module_total else 0,
+            "marks_scored": module_scored,
+            "marks_total": module_total_marks,
+            "marks_pct": int(module_scored / module_total_marks * 100) if module_total_marks else 0,
+        })
+
+    return {
+        "modules": modules_data,
+        "overall_class_pct": int(overall_done_classes / overall_total_classes * 100) if overall_total_classes else 0,
+        "overall_done_classes": overall_done_classes,
+        "overall_total_classes": overall_total_classes,
+        "overall_marks_pct": int(overall_marks_scored / overall_marks_total * 100) if overall_marks_total else 0,
+        "overall_marks_scored": overall_marks_scored,
+        "overall_marks_total": overall_marks_total,
+        "pending_classes": pending_classes,
+        "pending_exams": pending_exams,
+        "best_scores": best_scores,
+        "question_counts": question_counts,
+        "active_exams": active_exams,
+    }
+
+def show_student_progress_tab(user_id):
+    st.title("📊 My Progress")
+    try:
+        progress = collect_student_progress(user_id)
+    except Exception as e:
+        st.error(f"Progress load avvaledu: {e}")
+        return
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Overall Marks", f"{progress['overall_marks_pct']}%")
+    c2.metric("Marks", f"{progress['overall_marks_scored']}/{progress['overall_marks_total']}")
+    c3.metric("Class Progress", f"{progress['overall_class_pct']}%")
+    c4.metric("Pending", f"{len(progress['pending_classes'])} classes / {len(progress['pending_exams'])} exams")
+
+    st.progress(progress["overall_marks_pct"] / 100, text=f"Overall marks: {progress['overall_marks_pct']}%")
+    st.progress(progress["overall_class_pct"] / 100, text=f"Classes completed: {progress['overall_done_classes']}/{progress['overall_total_classes']}")
+
+    st.subheader("Module-wise Progress")
+    for item in progress["modules"]:
+        module = item["module"]
+        with st.container(border=True):
+            st.markdown(f"#### {module.get('title', 'Module')}")
+            m1, m2 = st.columns(2)
+            with m1:
+                st.caption(f"Marks: {item['marks_scored']}/{item['marks_total']} ({item['marks_pct']}%)")
+                st.progress(item["marks_pct"] / 100)
+            with m2:
+                st.caption(f"Classes: {item['class_done']}/{item['class_total']} ({item['class_pct']}%)")
+                st.progress(item["class_pct"] / 100)
+
+    st.subheader("Pending Classes")
+    if not progress["pending_classes"]:
+        st.success("All classes complete ayyayi!")
+    else:
+        for cls in progress["pending_classes"]:
+            with st.container(border=True):
+                col_info, col_btn = st.columns([4, 1])
+                with col_info:
+                    st.markdown(f"**{cls.get('title', 'Class')}**")
+                    if cls.get("_submodule_title"):
+                        st.caption(cls["_submodule_title"])
+                with col_btn:
+                    if st.button("Open", key=f"prog_open_cls_{cls['id']}", use_container_width=True):
+                        focus_student_class(cls.get("id"))
+
+    st.subheader("Pending Exams")
+    if not progress["pending_exams"]:
+        st.success("Pending exams levu.")
+    else:
+        for row in progress["pending_exams"]:
+            exam = row["exam"]
+            with st.container(border=True):
+                col_info, col_btn = st.columns([4, 1])
+                with col_info:
+                    st.markdown(f"**{exam.get('title', 'Exam')}**")
+                    st.caption(f"{row['total_q']} questions • {exam.get('duration_mins', 30)} mins")
+                with col_btn:
+                    if st.button("Open", key=f"prog_open_exam_{exam['id']}", use_container_width=True, type="primary"):
+                        start_student_exam(exam)
 
 # =========================
 # REVIEW SHEET (styled like screenshot)
@@ -1560,7 +1759,7 @@ def user_dashboard(preview_mode=False):
             st.query_params.clear()
             st.rerun()
         st.sidebar.divider()
-        pages = ["📚 My Classes", "💬 Group Chat", "📅 Attendance"]
+        pages = ["📚 My Classes", "📊 Progress", "💬 Group Chat", "📅 Attendance"]
         for pg in pages:
             if pg == "💬 Group Chat":
                 unread = get_unread_count(st.session_state.user_id)
@@ -1584,6 +1783,8 @@ def user_dashboard(preview_mode=False):
 
     if user_page == "💬 Group Chat":
         group_chat(); return
+    if user_page == "📊 Progress":
+        show_student_progress_tab(st.session_state.user_id); return
     if user_page == "📅 Attendance":
         show_attendance_tab(st.session_state.user_id); return
 
@@ -1593,18 +1794,23 @@ def user_dashboard(preview_mode=False):
         all_completions = supabase.table("class_completions").select("class_id").eq("user_id", st.session_state.user_id).execute().data
         st.session_state.completed_ids = {str(c["class_id"]) for c in all_completions}
     completed_ids = st.session_state.completed_ids
+    focus_class_id = str(st.session_state.get("focus_class_id", ""))
+    focus_exam_id = str(st.session_state.get("focus_exam_id", ""))
 
     for module in modules:
         module_submodules = supabase.table("submodules").select("id").eq("module_id", module["id"]).execute().data
         sub_ids = [s["id"] for s in module_submodules]
+        module_has_focus = False
         module_total = 0; module_done = 0
         for sid in sub_ids:
             cls_list = supabase.table("classes").select("id").eq("submodule_id", sid).execute().data
             module_total += len(cls_list)
             module_done += sum(1 for c in cls_list if str(c["id"]) in completed_ids)
+            if focus_class_id and any(str(c["id"]) == focus_class_id for c in cls_list):
+                module_has_focus = True
         pct = int((module_done / module_total * 100)) if module_total > 0 else 0
 
-        with st.expander(f"{module['title']}  —  {module_done}/{module_total} classes  ({pct}%)"):
+        with st.expander(f"{module['title']}  —  {module_done}/{module_total} classes  ({pct}%)", expanded=module_has_focus):
             if module_total > 0:
                 st.progress(pct / 100, text=f"Module Progress: {pct}%")
             submodules = supabase.table("submodules").select("*").eq("module_id", module["id"]).execute().data
@@ -1618,7 +1824,10 @@ def user_dashboard(preview_mode=False):
                 classes = supabase.table("classes").select("*").eq("submodule_id", sub["id"]).execute().data
                 for cls in classes:
                     is_done = str(cls.get("id")) in completed_ids
+                    is_focused_class = focus_class_id and str(cls.get("id")) == focus_class_id
                     st.markdown(f"### {'✅' if is_done else '🔲'} {cls['title']}")
+                    if is_focused_class:
+                        st.info("Progress tab nundi open chesina class idi.")
                     col_link1, col_link2, col_link3 = st.columns(3)
                     with col_link1:
                         if cls.get("class_link"): st.link_button("Join Class", cls["class_link"], use_container_width=True)
@@ -1646,7 +1855,10 @@ def user_dashboard(preview_mode=False):
                     for exam in exams:
                         if not exam["enabled"]: continue
                         exam_dur = exam.get("duration_mins", 30)
+                        is_focused_exam = focus_exam_id and str(exam.get("id")) == focus_exam_id
                         st.write(f"📝 **Exam: {exam['title']}** ({exam_dur} Mins)")
+                        if is_focused_exam:
+                            st.info("Progress tab nundi open chesina exam idi. Password unte access code enter చేసి start cheyyandi.")
                         btn_col, lb_col = st.columns([2, 2])
                         with lb_col:
                             board = get_exam_leaderboard(exam["id"])
