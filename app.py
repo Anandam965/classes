@@ -134,7 +134,7 @@ def run_java_code(user_code, input_data=""):
         java8_code = user_code.replace("public class Main", "class Main")
         wandbox_payload = {
             "compiler": "openjdk-jdk-21+35",
-            "compiler-option-raw": "--release=8 -Xlint:-options",
+            "compiler-option-raw": "--release=8",
             "code": java8_code,
             "stdin": input_data or "",
         }
@@ -150,6 +150,15 @@ def run_java_code(user_code, input_data=""):
                     or result.get("program_error")
                     or result.get("program_message")
                     or ""
+                )
+                warning_lines = [
+                    "warning: [options] source value 8 is obsolete",
+                    "warning: [options] target value 8 is obsolete",
+                    "warning: [options] To suppress warnings about obsolete options",
+                ]
+                stderr = "\n".join(
+                    line for line in stderr.splitlines()
+                    if not any(line.startswith(w) for w in warning_lines) and line.strip() != "3 warnings"
                 )
             status = "Accepted (Java 8 compatible)" if status_code == "0" else "Error"
             return {
