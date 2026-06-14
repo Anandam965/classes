@@ -108,6 +108,9 @@ if not st.session_state.logged_in:
 # JAVA CODE EVALUATOR
 # =========================
 def evaluate_java_code(user_code, input_data, expected_output):
+    if not st.secrets.get("RAPIDAPI_KEY", ""):
+        result = run_java_code(user_code, input_data)
+        return result.get("stdout", "").strip() == expected_output.strip()
     url = "https://judge0-ce.p.rapidapi.com/submissions?base64_encoded=false&fields=*"
     payload = {"source_code": user_code, "language_id": 27, "stdin": input_data}
     headers = {"x-rapidapi-key": st.secrets.get("RAPIDAPI_KEY", ""), "Content-Type": "application/json"}
@@ -126,11 +129,43 @@ def evaluate_java_code(user_code, input_data, expected_output):
         return False
 
 def run_java_code(user_code, input_data=""):
+    rapidapi_key = st.secrets.get("RAPIDAPI_KEY", "")
+    if not rapidapi_key:
+        java8_code = user_code.replace("public class Main", "class Main")
+        wandbox_payload = {
+            "compiler": "openjdk-jdk-21+35",
+            "compiler-option-raw": "--release=8",
+            "code": java8_code,
+            "stdin": input_data or "",
+        }
+        try:
+            result = requests.post("https://wandbox.org/api/compile.json", json=wandbox_payload, timeout=40).json()
+            stdout = result.get("program_output") or ""
+            status_code = str(result.get("status", ""))
+            stderr = ""
+            if status_code != "0":
+                stderr = (
+                    result.get("compiler_error")
+                    or result.get("compiler_message")
+                    or result.get("program_error")
+                    or result.get("program_message")
+                    or ""
+                )
+            status = "Accepted (Java 8 compatible)" if status_code == "0" else "Error"
+            return {
+                "ok": status_code == "0",
+                "status": status,
+                "stdout": stdout,
+                "stderr": stderr,
+                "time": None,
+                "memory": None,
+            }
+        except Exception as e:
+            return {"ok": False, "status": "Wandbox API Error", "stdout": "", "stderr": str(e)}
+
     url = "https://judge0-ce.p.rapidapi.com/submissions?base64_encoded=false&fields=*"
     payload = {"source_code": user_code, "language_id": 27, "stdin": input_data or ""}
-    headers = {"x-rapidapi-key": st.secrets.get("RAPIDAPI_KEY", ""), "Content-Type": "application/json"}
-    if not headers["x-rapidapi-key"]:
-        return {"ok": False, "status": "Missing RAPIDAPI_KEY", "stdout": "", "stderr": "RAPIDAPI_KEY secrets lo add cheyyandi."}
+    headers = {"x-rapidapi-key": rapidapi_key, "Content-Type": "application/json"}
     try:
         response = requests.post(url, json=payload, headers=headers, timeout=30).json()
         token = response.get("token")
