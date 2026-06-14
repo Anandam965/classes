@@ -354,9 +354,11 @@ def score_exam_answers(questions, answers):
 # OCR: IMAGE → QUESTION EXTRACT
 # =========================
 def extract_question_from_image(image_source):
+    """Image nundi OCR.space API use chesi question + options extract cheyyali"""
     import re
 
     def parse_ocr_text(raw_text):
+        # Normalize line endings and clean up
         lines = [l.strip() for l in raw_text.replace("\r\n", "\n").replace("\r", "\n").splitlines()]
         lines = [l for l in lines if l]
 
@@ -364,6 +366,7 @@ def extract_question_from_image(image_source):
         question_lines = []
         option_found_at = None
 
+        # Pattern: line starts with A) / A. / A: / (A) / 1) / 1. etc.
         opt_line_pat = re.compile(
             r"^(?:option\s*)?([A-Da-d]|[1-4])\s*[\)\]\.:\-]\s*(.+)", re.IGNORECASE
         )
@@ -380,12 +383,15 @@ def extract_question_from_image(image_source):
                     if option_found_at is None:
                         option_found_at = i
             else:
+                # Only add to question if we haven't hit options yet
                 if option_found_at is None:
+                    # Skip "Answer:" lines
                     if not re.match(r"(?i)^(answer|correct\s*answer|ans)\s*[:\-]", line):
                         question_lines.append(line)
 
         question = " ".join(question_lines).strip()
 
+        # Try to detect correct answer from text
         answer = ""
         full_text = "\n".join(lines)
         ans_m = re.search(
@@ -398,7 +404,7 @@ def extract_question_from_image(image_source):
             if lbl in ["1","2","3","4"]:
                 lbl = chr(ord("A") + int(lbl) - 1)
             if lbl in options:
-                answer = lbl
+                answer = lbl  # store as label A/B/C/D
             else:
                 answer = raw_ans
 
@@ -723,6 +729,7 @@ CREATE TABLE IF NOT EXISTS attendance (
         streak += 1
         cursor -= timedelta(days=1)
 
+    # Longest streak
     longest = 0
     run = 0
     prev_d = None
@@ -743,11 +750,14 @@ CREATE TABLE IF NOT EXISTS attendance (
 
     st.divider()
 
-    offset = start_day.isoweekday() % 7
+    # Build heatmap — weeks as columns, days as rows (Sun=0 .. Sat=6)
+    # Align start to Sunday
+    offset = start_day.isoweekday() % 7  # Sun=0
     grid_start = start_day - timedelta(days=offset)
     all_days = [grid_start + timedelta(days=i) for i in range((today - grid_start).days + 1)]
     weeks = [all_days[i:i+7] for i in range(0, len(all_days), 7)]
 
+    # Month labels row
     month_labels = []
     last_m = ""
     for week in weeks:
@@ -1081,6 +1091,7 @@ def render_review_sheet(questions, ans_map, db_attempt):
         is_correct = str(u_ans).strip().lower() == c_ans.lower()
 
         with st.container(border=True):
+            # Header row: Q number + badge + 📌 button
             hcol, bcol = st.columns([7, 1])
             with hcol:
                 badge_style = (
@@ -1110,6 +1121,7 @@ def render_review_sheet(questions, ans_map, db_attempt):
                         st.session_state.explain_selected.add(qid)
                         st.rerun()
 
+            # Time spent
             ua_data = supabase.table("user_answers").select("time_spent_seconds") \
                 .eq("attempt_id", db_attempt[0]["id"]).eq("question_id", q["id"]).execute().data
             t_spent = ua_data[0]["time_spent_seconds"] if ua_data and ua_data[0].get("time_spent_seconds") else 0
@@ -1118,16 +1130,19 @@ def render_review_sheet(questions, ans_map, db_attempt):
                 tstr = f"{mins_s}m {secs_s}s" if mins_s > 0 else f"{secs_s}s"
                 st.caption(f"⏱️ Time spent: **{tstr}**")
 
+            # MCQ styled options
             if q["type"] == "mcq":
                 opts = [("A", q.get("option_a","")), ("B", q.get("option_b","")),
                         ("C", q.get("option_c","")), ("D", q.get("option_d",""))]
                 correct_display = c_ans
                 opts_html = ""
                 for lbl, otxt in opts:
+                    # Is this the correct option?
                     is_opt_correct = (
                         c_ans.upper() == lbl
                         or c_ans.lower() == str(otxt).strip().lower()
                     )
+                    # Is this what the user picked?
                     is_user_pick = (
                         str(u_ans).strip().upper() == lbl
                         or str(u_ans).strip().lower() == str(otxt).strip().lower()
@@ -1182,6 +1197,7 @@ def render_review_sheet(questions, ans_map, db_attempt):
                         unsafe_allow_html=True
                     )
 
+            # Answer Explanation box
             explanation = str(q.get("explanation", "") or "").strip()
             if explanation:
                 st.markdown(
@@ -1192,6 +1208,7 @@ def render_review_sheet(questions, ans_map, db_attempt):
                     unsafe_allow_html=True
                 )
 
+            # Report Question link style
             st.markdown(
                 "<div style='margin-top:8px;'>"
                 "<span style='color:#e74c3c;font-size:0.82rem;cursor:pointer;'>⚠️ Report Question</span>"
@@ -1199,6 +1216,7 @@ def render_review_sheet(questions, ans_map, db_attempt):
                 unsafe_allow_html=True
             )
 
+    # Explain request send
     st.divider()
     selected_count = len(st.session_state.explain_selected)
     if selected_count > 0:
@@ -1316,18 +1334,22 @@ def generate_exam_ppt(questions, exam_title, q_requesters=None):
     return buf.read()
 
 def check_mcq_correct(user_val, q):
+    """MCQ answer check — user_val can be label (A/B/C/D) or full text"""
     correct = str(q.get("correct_answer","")).strip()
     user = str(user_val).strip()
     if not user or not correct:
         return False
+    # Direct match
     if user.lower() == correct.lower():
         return True
+    # User answered as label, correct stored as text
     label_map = {
         "A": str(q.get("option_a","")), "B": str(q.get("option_b","")),
         "C": str(q.get("option_c","")), "D": str(q.get("option_d","")),
     }
     if user.upper() in label_map:
         return label_map[user.upper()].strip().lower() == correct.lower()
+    # User answered as text, correct stored as label
     if correct.upper() in label_map:
         return label_map[correct.upper()].strip().lower() == user.lower()
     return False
@@ -1532,6 +1554,7 @@ def admin_dashboard():
             st.markdown("#### ➕ Add Question")
             sel_ex = st.selectbox("Select Exam", list(ex_options.keys()) or ["No exams yet"], key="add_q_exam")
 
+            # ── Image upload / URL ──
             st.caption("📷 Image upload చేస్తే automatically question + options extract అవుతాయి")
             img_col1, img_col2 = st.columns(2)
             with img_col1:
@@ -1539,6 +1562,7 @@ def admin_dashboard():
             with img_col2:
                 img_file = st.file_uploader("Image upload", type=["jpg","jpeg","png","gif","webp"], key="add_img_file")
 
+            # Image preview
             if img_file:
                 st.image(img_file, width=380)
             elif img_url_input.strip():
@@ -1551,6 +1575,7 @@ def admin_dashboard():
                     with st.spinner("OCR processing..."):
                         extracted = extract_question_from_image(extract_source)
                     if extracted:
+                        # Set widget keys DIRECTLY before they render — widgets not yet on screen
                         st.session_state["aq_q_text"] = extracted.get("question", "")
                         st.session_state["aq_opt_A"]  = extracted.get("option_a", "")
                         st.session_state["aq_opt_B"]  = extracted.get("option_b", "")
@@ -1562,14 +1587,16 @@ def admin_dashboard():
                             st.session_state["aq_correct_lbl"] = ans
                         q_type_ocr = extracted.get("type","mcq")
                         st.session_state["aq_q_type_idx"] = ["mcq","blank","programming"].index(q_type_ocr) if q_type_ocr in ["mcq","blank","programming"] else 0
-                        st.rerun()
+                        st.rerun()  # ONE rerun — widgets will now render with pre-filled values
 
             st.divider()
 
+            # ── Question Type ──
             type_idx_default = st.session_state.get("aq_q_type_idx", 0)
             q_type = st.selectbox("Question Type", ["mcq","blank","programming"],
                                    index=type_idx_default, key="aq_q_type")
 
+            # ── Question Text ──
             q_text = st.text_area("Question / Title", key="aq_q_text")
 
             opt_vals = {"A": "", "B": "", "C": "", "D": ""}
@@ -1601,6 +1628,7 @@ def admin_dashboard():
                         })
                 correct_lbl = "AUTO"
             else:
+                # ── 4 Options + ✓ Set Correct button ──
                 if q_type == "mcq":
                     st.markdown("**Options** — సరైన option పక్కన **✓ Set Correct** నొక్కండి")
                     for lbl in ["A","B","C","D"]:
@@ -1654,6 +1682,7 @@ def admin_dashboard():
                         "image_url": final_img_url,
                         "explanation": explanation_value
                     }).execute()
+                    # Clear all aq_ keys
                     for k in list(st.session_state.keys()):
                         if str(k).startswith("aq_tc_"):
                             st.session_state.pop(k, None)
@@ -2074,6 +2103,7 @@ def user_dashboard(preview_mode=False):
                 st.session_state.user_page = pg
                 st.rerun()
         user_page = st.session_state.user_page
+        # Mark today's attendance on every login
         mark_today_attendance(st.session_state.user_id)
     else:
         st.info("👁️ Student Preview Mode")
@@ -2091,6 +2121,7 @@ def user_dashboard(preview_mode=False):
     if user_page == "📅 Attendance":
         show_attendance_tab(st.session_state.user_id); return
 
+    # My Classes
     modules = supabase.table("modules").select("*").execute().data
     if st.session_state.completed_ids is None:
         all_completions = supabase.table("class_completions").select("class_id").eq("user_id", st.session_state.user_id).execute().data
@@ -2335,6 +2366,7 @@ def exam_workspace_view():
                     ("C", question.get("option_c","")),
                     ("D", question.get("option_d","")),
                 ]
+                # Custom CSS for option buttons
                 st.markdown("""
                 <style>
                 div[data-testid="stButton"] > button[kind="primary"] {
@@ -2376,109 +2408,21 @@ def exam_workspace_view():
                 answer = st.text_input("Your Answer", value=stored_ans, key=f"text_{question['id']}")
                 if answer != stored_ans:
                     st.session_state.answers[question["id"]] = answer
-
             else:
-                # ══════════════════════════════════════════════════════════════
-                # PROGRAMMING QUESTION UI — Screenshot style
-                # ══════════════════════════════════════════════════════════════
                 meta = get_programming_meta(question)
                 max_marks = get_question_max_marks(question)
-                run_data = st.session_state.program_run_results.get(str(question["id"]))
-
-                # ── Top info bar ──────────────────────────────────────────────
-                earned_marks = run_data["earned"] if run_data else 0
-                total_elapsed = int(time.time() - st.session_state.question_start_time.get(qid, time.time()))
-                total_elapsed += st.session_state.question_time_log.get(qid, 0)
-                elapsed_h, elapsed_rem = divmod(total_elapsed, 3600)
-                elapsed_m, elapsed_s = divmod(elapsed_rem, 60)
-                time_str = f"{elapsed_h} hour, {elapsed_m} Mins, {elapsed_s} Sec" if elapsed_h else f"{elapsed_m} Mins, {elapsed_s} Sec"
-
-                st.markdown(f"""
-                <style>
-                .prog-topbar {{
-                    display:flex; align-items:center; gap:12px; flex-wrap:wrap;
-                    background:#f8f9fb; border:1px solid #e0e4ea;
-                    border-radius:10px; padding:10px 18px; margin-bottom:14px;
-                }}
-                .prog-section-tag {{
-                    background:#1a73e8; color:#fff; font-weight:700;
-                    border-radius:6px; padding:4px 16px; font-size:0.93rem; letter-spacing:0.3px;
-                }}
-                .prog-time-label {{
-                    margin-left:auto; color:#555; font-size:0.88rem; font-weight:600;
-                }}
-                .prog-mark-pos {{
-                    background:#27ae60; color:#fff; font-weight:800;
-                    border-radius:6px; padding:3px 14px; font-size:1rem;
-                }}
-                .prog-mark-neg {{
-                    background:#e74c3c; color:#fff; font-weight:800;
-                    border-radius:6px; padding:3px 14px; font-size:1rem;
-                }}
-                .prog-marks-label {{
-                    font-weight:600; color:#444; font-size:0.93rem;
-                }}
-                .prog-report-btn {{
-                    margin-left:auto; background:#fff; border:1.5px solid #e74c3c;
-                    color:#e74c3c; border-radius:6px; padding:3px 12px;
-                    font-size:0.82rem; font-weight:600; cursor:pointer;
-                }}
-                </style>
-                <div class="prog-topbar">
-                    <span class="prog-section-tag">{st.session_state.exam_title[:20]}</span>
-                    <span style="color:#888;font-size:0.82rem;">Time Spent: <b>{time_str}</b></span>
-                    <span class="prog-marks-label" style="margin-left:auto;">Marks:</span>
-                    <span class="prog-mark-pos">+{earned_marks}</span>
-                    <span class="prog-mark-neg">-0</span>
-                    <span class="prog-report-btn">Report</span>
-                </div>
-                """, unsafe_allow_html=True)
-
-                # ── Section label row ─────────────────────────────────────────
-                st.markdown(f"""
-                <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
-                    <span style="background:#eef2fb;border:1px solid #c5d4f0;border-radius:6px;
-                        padding:3px 14px;font-weight:700;font-size:0.88rem;color:#1a73e8;">
-                        Sections:
-                    </span>
-                    <span style="background:#1a73e8;color:#fff;border-radius:6px;
-                        padding:3px 14px;font-weight:700;font-size:0.88rem;">
-                        {st.session_state.exam_title[:12]}
-                    </span>
-                </div>
-                """, unsafe_allow_html=True)
-
-                # ── Main two-column layout ─────────────────────────────────────
-                p_left, p_right = st.columns([1, 1], gap="medium")
-
+                p_left, p_right = st.columns([1, 1])
                 with p_left:
-                    st.markdown(f"#### Description:")
+                    st.markdown("#### Problem")
                     st.markdown(f"**{question['question']}**")
                     if meta.get("description"):
                         st.markdown(meta["description"])
-
-                    if meta.get("test_cases"):
-                        with st.expander("📋 Test Cases & Constraints", expanded=False):
-                            for idx, tc in enumerate(meta["test_cases"], start=1):
-                                st.markdown(f"**TC {idx}** • `{tc.get('marks', 0)} marks`")
-                                tc1, tc2 = st.columns(2)
-                                with tc1:
-                                    st.caption("Input")
-                                    st.code(tc.get("input", "—"), language="text")
-                                with tc2:
-                                    st.caption("Expected Output")
-                                    st.code(tc.get("expected_output", "—"), language="text")
-
+                    st.caption(f"Total Marks: {max_marks}")
+                    with st.expander("Test cases"):
+                        for idx, tc in enumerate(meta.get("test_cases", []), start=1):
+                            st.markdown(f"**Case {idx}** • {tc.get('marks', 0)} marks")
+                            st.code(f"Input:\n{tc.get('input','')}\n\nExpected Output:\n{tc.get('expected_output','')}", language="text")
                 with p_right:
-                    # Java language badge
-                    st.markdown("""
-                    <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
-                        <span style="font-weight:600;color:#333;font-size:0.92rem;">Your Code:</span>
-                        <span style="background:#1a73e8;color:#fff;font-size:0.78rem;
-                            font-weight:700;border-radius:5px;padding:2px 10px;">java</span>
-                    </div>
-                    """, unsafe_allow_html=True)
-
                     default_java = """import java.util.*;
 
 public class Main {
@@ -2488,91 +2432,31 @@ public class Main {
     }
 }"""
                     editor_value = stored_ans if stored_ans else default_java
-                    answer = st.text_area(
-                        "code_editor",
-                        value=editor_value,
-                        key=f"code_{question['id']}",
-                        height=340,
-                        label_visibility="collapsed"
-                    )
+                    answer = st.text_area("Java Program", value=editor_value, key=f"code_{question['id']}", height=360)
                     st.session_state.answers[question["id"]] = answer
+                    if st.button("▶️ Run Test Cases", key=f"run_prog_{question['id']}", type="primary", use_container_width=True):
+                        with st.spinner("Program run avuthundi..."):
+                            st.session_state.program_run_results[str(question["id"])] = run_programming_test_cases(question, answer)
 
-                    if st.button("▶️ Run & Test Cases", key=f"run_prog_{question['id']}",
-                                 type="primary", use_container_width=True):
-                        with st.spinner("Running test cases..."):
-                            st.session_state.program_run_results[str(question["id"])] = \
-                                run_programming_test_cases(question, answer)
-                        st.rerun()
-
-                # ── Testcases Output table ─────────────────────────────────────
-                if run_data:
-                    earned  = run_data["earned"]
-                    total_m = run_data["total"]
-                    pct     = run_data["percentage"]
-
-                    # Build rows HTML
-                    rows_html = ""
-                    for res in run_data["results"]:
-                        pass_color = "#27ae60" if res["passed"] else "#e74c3c"
-                        status_txt = "Passed" if res["passed"] else "Failed"
-                        pts = res["marks"] if res["passed"] else 0
-
-                        rows_html += f"""
-                        <tr style="border-bottom:1px solid #eef0f4;">
-                            <td style="padding:10px 16px;font-weight:600;color:#333;">TC {res['case']}</td>
-                            <td style="padding:10px 16px;font-weight:700;color:{pass_color};">{status_txt}</td>
-                            <td style="padding:10px 16px;font-weight:700;color:{pass_color};">{pts}</td>
-                        </tr>"""
-                        if not res["passed"]:
-                            rows_html += f"""
-                        <tr style="background:#fafbfc;">
-                            <td colspan="3" style="padding:4px 16px 10px 32px;">
-                                <details>
-                                    <summary style="font-size:0.82rem;color:#888;cursor:pointer;">Show details</summary>
-                                    <div style="display:flex;gap:24px;margin-top:6px;font-size:0.82rem;">
-                                        <div><span style="color:#888;">Expected:</span>
-                                            <code style="margin-left:4px;">{res.get('expected_output','')}</code></div>
-                                        <div><span style="color:#888;">Got:</span>
-                                            <code style="margin-left:4px;">{res.get('actual_output','')}</code></div>
-                                    </div>
-                                    {"<div style='color:#e74c3c;font-size:0.8rem;margin-top:4px;'>" + res.get('error','') + "</div>" if res.get('error') else ""}
-                                </details>
-                            </td>
-                        </tr>"""
-
-                    st.markdown(f"""
-                    <div style="background:#fff;border:1px solid #e0e4ea;border-radius:10px;
-                        margin-top:16px;overflow:hidden;">
-                        <div style="padding:12px 16px;border-bottom:1px solid #e0e4ea;
-                            display:flex;align-items:center;gap:10px;">
-                            <span style="font-weight:700;font-size:0.97rem;color:#1a1a2e;">
-                                Testcases Output:
-                            </span>
-                            <span style="font-size:0.88rem;color:#27ae60;font-weight:600;margin-left:auto;">
-                                {earned}/{total_m} marks ({pct}%)
-                            </span>
-                        </div>
-                        <table style="width:100%;border-collapse:collapse;">
-                            <thead>
-                                <tr style="background:#f4f6fb;">
-                                    <th style="padding:9px 16px;text-align:left;font-size:0.82rem;
-                                        color:#777;font-weight:700;border-bottom:2px solid #e0e4ea;
-                                        letter-spacing:0.5px;">#</th>
-                                    <th style="padding:9px 16px;text-align:left;font-size:0.82rem;
-                                        color:#777;font-weight:700;border-bottom:2px solid #e0e4ea;
-                                        letter-spacing:0.5px;">STATUS</th>
-                                    <th style="padding:9px 16px;text-align:left;font-size:0.82rem;
-                                        color:#777;font-weight:700;border-bottom:2px solid #e0e4ea;
-                                        letter-spacing:0.5px;">POINTS</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {rows_html}
-                            </tbody>
-                        </table>
-                    </div>
-                    """, unsafe_allow_html=True)
-                # ══════════════════════════════════════════════════════════════
+                    run_data = st.session_state.program_run_results.get(str(question["id"]))
+                    if run_data:
+                        st.markdown(f"#### Result: {run_data['earned']}/{run_data['total']} marks ({run_data['percentage']}%)")
+                        for res in run_data["results"]:
+                            with st.container(border=True):
+                                badge = "✅ Passed" if res["passed"] else "❌ Failed"
+                                st.markdown(f"**Test Case {res['case']}** — {badge} — {res['marks']} marks")
+                                if not res["passed"]:
+                                    st.caption(f"Status: {res.get('status','')}")
+                                    c_exp, c_act = st.columns(2)
+                                    with c_exp:
+                                        st.caption("Expected")
+                                        st.code(res.get("expected_output", ""), language="text")
+                                    with c_act:
+                                        st.caption("Your Output")
+                                        st.code(res.get("actual_output", ""), language="text")
+                                    if res.get("error"):
+                                        st.caption("Error")
+                                        st.code(res["error"], language="text")
 
             def save_current_q_time():
                 qid_cur = question["id"]
