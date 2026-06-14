@@ -79,6 +79,7 @@ defaults = {
     "focus_exam_id": "",
     "question_start_time": {},
     "question_time_log": {},
+    "program_run_results": {},
     "attendance_marked_date": "",
     "ai_generated_qs": None,
 }
@@ -261,6 +262,93 @@ def run_java_code(user_code, input_data=""):
         }
     except Exception as e:
         return {"ok": False, "status": "API Error", "stdout": "", "stderr": str(e)}
+
+PROGRAMMING_META_PREFIX = "__PROGRAMMING_META__"
+
+def make_programming_meta(description, test_cases):
+    return PROGRAMMING_META_PREFIX + json.dumps({
+        "description": description or "",
+        "test_cases": test_cases or [],
+    }, ensure_ascii=False)
+
+def get_programming_meta(question):
+    raw = question.get("explanation") or ""
+    if isinstance(raw, str) and raw.startswith(PROGRAMMING_META_PREFIX):
+        try:
+            data = json.loads(raw[len(PROGRAMMING_META_PREFIX):])
+            data["test_cases"] = data.get("test_cases") or []
+            return data
+        except Exception:
+            return {"description": "", "test_cases": []}
+    return {"description": raw if question.get("type") == "programming" else "", "test_cases": []}
+
+def get_question_max_marks(question):
+    if question.get("type") == "programming":
+        meta = get_programming_meta(question)
+        total = 0
+        for tc in meta.get("test_cases", []):
+            try:
+                total += int(tc.get("marks", 0) or 0)
+            except Exception:
+                pass
+        return total if total > 0 else 1
+    return 1
+
+def get_exam_max_marks(questions):
+    return sum(get_question_max_marks(q) for q in questions)
+
+def run_programming_test_cases(question, code):
+    meta = get_programming_meta(question)
+    results = []
+    total_marks = get_question_max_marks(question)
+    earned = 0
+    for idx, tc in enumerate(meta.get("test_cases", []), start=1):
+        inp = tc.get("input", "")
+        expected = str(tc.get("expected_output", "")).strip()
+        try:
+            marks = int(tc.get("marks", 0) or 0)
+        except Exception:
+            marks = 0
+        result = run_java_code(code, inp)
+        actual = str(result.get("stdout", "")).strip()
+        passed = result.get("ok") and actual == expected
+        if passed:
+            earned += marks
+        results.append({
+            "case": idx,
+            "input": inp,
+            "expected_output": expected,
+            "actual_output": actual,
+            "marks": marks,
+            "passed": bool(passed),
+            "status": result.get("status", "Unknown"),
+            "error": result.get("stderr", ""),
+        })
+    pct = int((earned / total_marks) * 100) if total_marks else 0
+    return {"earned": earned, "total": total_marks, "percentage": pct, "results": results}
+
+def score_exam_answers(questions, answers):
+    total_marks = get_exam_max_marks(questions)
+    earned_marks = 0
+    answer_payloads = {}
+    for q in questions:
+        qid = q["id"]
+        user_val = answers.get(qid, "")
+        if q.get("type") == "programming":
+            code = user_val if isinstance(user_val, str) else str(user_val)
+            score_data = run_programming_test_cases(q, code)
+            earned_marks += score_data["earned"]
+            answer_payloads[qid] = json.dumps({"code": code, **score_data}, ensure_ascii=False)
+        elif q.get("type") == "mcq":
+            if check_mcq_correct(user_val, q):
+                earned_marks += 1
+            answer_payloads[qid] = user_val
+        else:
+            if str(user_val).strip().lower() == str(q.get("correct_answer", "")).strip().lower():
+                earned_marks += 1
+            answer_payloads[qid] = user_val
+    percentage = int((earned_marks / total_marks) * 100) if total_marks else 0
+    return earned_marks, total_marks, percentage, answer_payloads
 
 # =========================
 # OCR: IMAGE → QUESTION EXTRACT
@@ -798,8 +886,8 @@ def collect_student_progress(user_id):
     question_counts = {}
     for exam in active_exams:
         try:
-            q_rows = supabase.table("questions").select("id").eq("exam_id", exam["id"]).execute().data
-            question_counts[str(exam["id"])] = len(q_rows)
+            q_rows = supabase.table("questions").select("*").eq("exam_id", exam["id"]).execute().data
+            question_counts[str(exam["id"])] = get_exam_max_marks(q_rows)
         except Exception:
             question_counts[str(exam["id"])] = 0
 
@@ -1080,7 +1168,15 @@ def render_review_sheet(questions, ans_map, db_attempt):
                 )
 
             elif q["type"] == "programming":
-                st.code(u_ans, language="java")
+                try:
+                    prog_ans = json.loads(u_ans) if isinstance(u_ans, str) and u_ans.strip().startswith("{") else {"code": u_ans}
+                except Exception:
+                    prog_ans = {"code": u_ans}
+                st.caption(f"Score: {prog_ans.get('earned', 0)}/{prog_ans.get('total', get_question_max_marks(q))} ({prog_ans.get('percentage', 0)}%)")
+                st.code(prog_ans.get("code", ""), language="java")
+                for res in prog_ans.get("results", []):
+                    badge = "✅ Passed" if res.get("passed") else "❌ Failed"
+                    st.caption(f"Test Case {res.get('case')}: {badge} • {res.get('marks', 0)} marks")
 
             else:
                 ans_bg = "#eafaf0" if is_correct else "#fdecea"
@@ -1501,39 +1597,69 @@ def admin_dashboard():
                                    index=type_idx_default, key="aq_q_type")
 
             # ── Question Text ──
-            q_text = st.text_area("Question Text", key="aq_q_text")
+            q_text = st.text_area("Question / Title", key="aq_q_text")
 
-            # ── 4 Options + ✓ Set Correct button ──
-            st.markdown("**Options** — సరైన option పక్కన **✓ Set Correct** నొక్కండి")
-            opt_vals = {}
-            for lbl in ["A","B","C","D"]:
-                c1, c2, c3 = st.columns([1, 6, 2])
-                with c1:
-                    st.markdown(f"<div style='padding-top:8px;font-weight:700;font-size:1rem;'>{lbl}.</div>",
-                                unsafe_allow_html=True)
-                with c2:
-                    v = st.text_input(f"Option {lbl}", key=f"aq_opt_{lbl}", label_visibility="collapsed")
-                    opt_vals[lbl] = v
-                with c3:
-                    cur_correct = st.session_state.get("aq_correct_lbl", "")
-                    is_correct = cur_correct == lbl
-                    if st.button(
-                        "✅ Correct" if is_correct else "✓ Set Correct",
-                        key=f"aq_setcor_{lbl}",
-                        use_container_width=True,
-                        type="primary" if is_correct else "secondary"
-                    ):
-                        st.session_state["aq_correct_lbl"] = lbl
-                        st.rerun()
-
+            opt_vals = {"A": "", "B": "", "C": "", "D": ""}
             correct_lbl = st.session_state.get("aq_correct_lbl", "")
-            if correct_lbl:
-                opt_text = opt_vals.get(correct_lbl, "")
-                st.info(f"🎯 Correct Answer: **{correct_lbl}. {opt_text}**")
+            h_text = st.text_input("💡 Hint", key="aq_hint")
+            exp_text = ""
+            prog_description = ""
+            prog_test_cases = []
 
-            h_text   = st.text_input("💡 Hint", key="aq_hint")
-            exp_text = st.text_area("📖 Answer Explanation (optional)", key="aq_explanation",
-                                     placeholder="ఈ సమాధానం ఎందుకు correct అో వివరించండి...")
+            if q_type == "programming":
+                prog_description = st.text_area("Programming Description", key="aq_prog_desc",
+                    placeholder="Problem statement, constraints, input/output format ikkada rayandi...")
+                st.markdown("**Test Cases & Marks**")
+                tc_count = st.number_input("Number of test cases", min_value=1, max_value=10, value=3, step=1, key="aq_tc_count")
+                for idx in range(int(tc_count)):
+                    with st.container(border=True):
+                        st.markdown(f"##### Test Case {idx + 1}")
+                        c_in, c_out, c_marks = st.columns([3, 3, 1])
+                        with c_in:
+                            tc_input = st.text_area("Input", key=f"aq_tc_input_{idx}", height=90)
+                        with c_out:
+                            tc_output = st.text_area("Expected Output", key=f"aq_tc_output_{idx}", height=90)
+                        with c_marks:
+                            tc_marks = st.number_input("Marks", min_value=1, max_value=100, value=1, step=1, key=f"aq_tc_marks_{idx}")
+                        prog_test_cases.append({
+                            "input": tc_input,
+                            "expected_output": tc_output,
+                            "marks": int(tc_marks),
+                        })
+                correct_lbl = "AUTO"
+            else:
+                # ── 4 Options + ✓ Set Correct button ──
+                if q_type == "mcq":
+                    st.markdown("**Options** — సరైన option పక్కన **✓ Set Correct** నొక్కండి")
+                    for lbl in ["A","B","C","D"]:
+                        c1, c2, c3 = st.columns([1, 6, 2])
+                        with c1:
+                            st.markdown(f"<div style='padding-top:8px;font-weight:700;font-size:1rem;'>{lbl}.</div>",
+                                        unsafe_allow_html=True)
+                        with c2:
+                            v = st.text_input(f"Option {lbl}", key=f"aq_opt_{lbl}", label_visibility="collapsed")
+                            opt_vals[lbl] = v
+                        with c3:
+                            cur_correct = st.session_state.get("aq_correct_lbl", "")
+                            is_correct = cur_correct == lbl
+                            if st.button(
+                                "✅ Correct" if is_correct else "✓ Set Correct",
+                                key=f"aq_setcor_{lbl}",
+                                use_container_width=True,
+                                type="primary" if is_correct else "secondary"
+                            ):
+                                st.session_state["aq_correct_lbl"] = lbl
+                                st.rerun()
+
+                    correct_lbl = st.session_state.get("aq_correct_lbl", "")
+                    if correct_lbl:
+                        opt_text = opt_vals.get(correct_lbl, "")
+                        st.info(f"🎯 Correct Answer: **{correct_lbl}. {opt_text}**")
+                else:
+                    correct_lbl = st.text_input("Correct Answer", key="aq_blank_correct")
+
+                exp_text = st.text_area("📖 Answer Explanation (optional)", key="aq_explanation",
+                                         placeholder="ఈ సమాధానం ఎందుకు correct అో వివరించండి...")
 
             if st.button("➕ Add Question", type="primary", key="add_q_btn", use_container_width=True):
                 if sel_ex in ex_options and q_text.strip():
@@ -1542,6 +1668,7 @@ def admin_dashboard():
                         final_img_url = upload_image_to_imgbb(img_file)
                     elif img_url_input.strip():
                         final_img_url = img_url_input.strip()
+                    explanation_value = make_programming_meta(prog_description, prog_test_cases) if q_type == "programming" else (exp_text.strip() if exp_text.strip() else None)
                     supabase.table("questions").insert({
                         "exam_id": ex_options[sel_ex],
                         "question": q_text,
@@ -1553,11 +1680,14 @@ def admin_dashboard():
                         "correct_answer": correct_lbl,
                         "hint": h_text,
                         "image_url": final_img_url,
-                        "explanation": exp_text.strip() if exp_text.strip() else None
+                        "explanation": explanation_value
                     }).execute()
                     # Clear all aq_ keys
+                    for k in list(st.session_state.keys()):
+                        if str(k).startswith("aq_tc_"):
+                            st.session_state.pop(k, None)
                     for k in ["aq_q_text","aq_opt_A","aq_opt_B","aq_opt_C","aq_opt_D",
-                              "aq_hint","aq_explanation","aq_correct_lbl","aq_q_type_idx"]:
+                              "aq_hint","aq_explanation","aq_prog_desc","aq_blank_correct","aq_correct_lbl","aq_q_type_idx"]:
                         st.session_state.pop(k, None)
                     st.success("✅ Question Added!")
                     st.rerun()
@@ -2075,11 +2205,12 @@ def user_dashboard(preview_mode=False):
                         with btn_col:
                             check_attempt = supabase.table("exam_attempts").select("*").eq("user_id", st.session_state.user_id).eq("exam_id", exam["id"]).execute().data
                             if check_attempt:
-                                q_count = supabase.table("questions").select("id").eq("exam_id", exam["id"]).execute().data
-                                total_q = len(q_count)
+                                q_count = supabase.table("questions").select("*").eq("exam_id", exam["id"]).execute().data
+                                total_q = get_exam_max_marks(q_count)
                                 st.markdown("**📊 మీ Attempts:**")
                                 for idx, att in enumerate(check_attempt):
-                                    st.caption(f"Attempt {idx+1}: **{att['score']}/{total_q}**")
+                                    pct = int((int(att.get("score") or 0) / total_q) * 100) if total_q else 0
+                                    st.caption(f"Attempt {idx+1}: **{att['score']}/{total_q}** ({pct}%)")
                                 if st.button("🔍 Show Answers", key=f"view_{exam['id']}", use_container_width=True):
                                     st.session_state.exam_id = exam["id"]
                                     st.session_state.exam_title = exam["title"]
@@ -2142,27 +2273,26 @@ def exam_workspace_view():
         if remaining_time <= 0:
             st.error("⏰ Time Out! Submitting exam...")
             time.sleep(1)
-            final_score = 0
             attempt_uuid = str(uuid.uuid4())
-            for q in questions:
-                user_val = st.session_state.answers.get(q["id"],"")
-                if q["type"] != "programming" and check_mcq_correct(user_val, q) if q["type"] == "mcq" else str(user_val).strip().lower() == str(q.get("correct_answer","")).strip().lower():
-                    final_score += 1
+            final_score, total_marks, final_percentage, answer_payloads = score_exam_answers(questions, st.session_state.answers)
             supabase.table("exam_attempts").insert({"id":attempt_uuid,"user_id":st.session_state.user_id,"exam_id":st.session_state.exam_id,"score":final_score}).execute()
             for q in questions:
-                supabase.table("user_answers").insert({"attempt_id":attempt_uuid,"question_id":q["id"],"answer":st.session_state.answers.get(q["id"],"")}).execute()
+                supabase.table("user_answers").insert({"attempt_id":attempt_uuid,"question_id":q["id"],"answer":answer_payloads.get(q["id"],"")}).execute()
             st.session_state.exam_submitted = True; st.rerun()
 
     if st.session_state.exam_submitted:
         st.title(f"📊 Results: {st.session_state.exam_title}")
         db_attempt = supabase.table("exam_attempts").select("*").eq("user_id", st.session_state.user_id).eq("exam_id", st.session_state.exam_id).execute().data
         if db_attempt:
+            max_marks = get_exam_max_marks(questions)
             st.markdown("### 📊 మీ అన్ని Attempts")
             for idx, att in enumerate(reversed(db_attempt)):
-                st.info(f"Attempt {idx+1}: **{att['score']}/{total_questions}**")
+                pct = int((int(att.get("score") or 0) / max_marks) * 100) if max_marks else 0
+                st.info(f"Attempt {idx+1}: **{att['score']}/{max_marks}** ({pct}%)")
             st.divider()
             latest = db_attempt[0]
-            st.success(f"🎉 Latest Score: {latest['score']}/{total_questions}")
+            latest_pct = int((int(latest.get("score") or 0) / max_marks) * 100) if max_marks else 0
+            st.success(f"🎉 Latest Score: {latest['score']}/{max_marks} ({latest_pct}%)")
             db_answers = supabase.table("user_answers").select("*").eq("attempt_id", latest["id"]).execute().data
             ans_map = {a["question_id"]: a["answer"] for a in db_answers}
             exam_data = supabase.table("exams").select("*").eq("id", st.session_state.exam_id).execute().data
@@ -2222,7 +2352,8 @@ def exam_workspace_view():
                     function qtick(){{elapsed++;var m=Math.floor(elapsed/60).toString().padStart(2,'0');var s=(elapsed%60).toString().padStart(2,'0');qtimer.innerText=m+':'+s;}}
                     setInterval(qtick,1000);</script>""", height=55)
 
-            st.write(question["question"])
+            if question["type"] != "programming":
+                st.write(question["question"])
             if question.get("image_url"): st.image(question["image_url"], width=350)
             if qid not in st.session_state.question_start_time:
                 st.session_state.question_start_time[qid] = time.time()
@@ -2278,9 +2409,54 @@ def exam_workspace_view():
                 if answer != stored_ans:
                     st.session_state.answers[question["id"]] = answer
             else:
-                answer = st.text_area("Write your Code/Answer:", value=stored_ans, key=f"code_{question['id']}", height=250)
-                if answer != stored_ans:
+                meta = get_programming_meta(question)
+                max_marks = get_question_max_marks(question)
+                p_left, p_right = st.columns([1, 1])
+                with p_left:
+                    st.markdown("#### Problem")
+                    st.markdown(f"**{question['question']}**")
+                    if meta.get("description"):
+                        st.markdown(meta["description"])
+                    st.caption(f"Total Marks: {max_marks}")
+                    with st.expander("Test cases"):
+                        for idx, tc in enumerate(meta.get("test_cases", []), start=1):
+                            st.markdown(f"**Case {idx}** • {tc.get('marks', 0)} marks")
+                            st.code(f"Input:\n{tc.get('input','')}\n\nExpected Output:\n{tc.get('expected_output','')}", language="text")
+                with p_right:
+                    default_java = """import java.util.*;
+
+public class Main {
+    public static void main(String[] args) {
+        Scanner sc = new Scanner(System.in);
+        // Write your code here
+    }
+}"""
+                    editor_value = stored_ans if stored_ans else default_java
+                    answer = st.text_area("Java Program", value=editor_value, key=f"code_{question['id']}", height=360)
                     st.session_state.answers[question["id"]] = answer
+                    if st.button("▶️ Run Test Cases", key=f"run_prog_{question['id']}", type="primary", use_container_width=True):
+                        with st.spinner("Program run avuthundi..."):
+                            st.session_state.program_run_results[str(question["id"])] = run_programming_test_cases(question, answer)
+
+                    run_data = st.session_state.program_run_results.get(str(question["id"]))
+                    if run_data:
+                        st.markdown(f"#### Result: {run_data['earned']}/{run_data['total']} marks ({run_data['percentage']}%)")
+                        for res in run_data["results"]:
+                            with st.container(border=True):
+                                badge = "✅ Passed" if res["passed"] else "❌ Failed"
+                                st.markdown(f"**Test Case {res['case']}** — {badge} — {res['marks']} marks")
+                                if not res["passed"]:
+                                    st.caption(f"Status: {res.get('status','')}")
+                                    c_exp, c_act = st.columns(2)
+                                    with c_exp:
+                                        st.caption("Expected")
+                                        st.code(res.get("expected_output", ""), language="text")
+                                    with c_act:
+                                        st.caption("Your Output")
+                                        st.code(res.get("actual_output", ""), language="text")
+                                    if res.get("error"):
+                                        st.caption("Error")
+                                        st.code(res["error"], language="text")
 
             def save_current_q_time():
                 qid_cur = question["id"]
@@ -2300,19 +2476,15 @@ def exam_workspace_view():
             with submit_col:
                 if st.button("🚀 Submit Exam", type="primary", use_container_width=True):
                     save_current_q_time()
-                    final_score = 0
                     attempt_uuid = str(uuid.uuid4())
-                    for q in questions:
-                        user_val = st.session_state.answers.get(q["id"],"")
-                        if q["type"] != "programming" and check_mcq_correct(user_val, q) if q["type"] == "mcq" else str(user_val).strip().lower() == str(q.get("correct_answer","")).strip().lower():
-                            final_score += 1
+                    final_score, total_marks, final_percentage, answer_payloads = score_exam_answers(questions, st.session_state.answers)
                     supabase.table("exam_attempts").insert({"id":attempt_uuid,"user_id":st.session_state.user_id,"exam_id":st.session_state.exam_id,"score":final_score}).execute()
                     for q in questions:
-                        user_val = st.session_state.answers.get(q["id"],"")
                         t_spent = st.session_state.question_time_log.get(q["id"],0)
-                        supabase.table("user_answers").insert({"attempt_id":attempt_uuid,"question_id":q["id"],"answer":user_val,"time_spent_seconds":t_spent}).execute()
+                        supabase.table("user_answers").insert({"attempt_id":attempt_uuid,"question_id":q["id"],"answer":answer_payloads.get(q["id"],""),"time_spent_seconds":t_spent}).execute()
                     st.session_state.question_time_log = {}
                     st.session_state.question_start_time = {}
+                    st.session_state.program_run_results = {}
                     st.session_state.exam_submitted = True; st.rerun()
 
 # =========================
