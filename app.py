@@ -124,8 +124,82 @@ def evaluate_java_code(user_code, input_data, expected_output):
         return False
 
 # =========================
-# LOGIN
+# OCR: IMAGE → QUESTION EXTRACT
 # =========================
+def extract_question_from_image(image_source):
+    """Image nundi OCR.space API use chesi question + options extract cheyyali"""
+    import re
+
+    def parse_ocr_text(raw_text):
+        text = raw_text.replace("\r", "\n")
+        lines = [l.strip() for l in text.splitlines() if l.strip()]
+        clean = "\n".join(lines)
+        opt_pat = re.compile(
+            r"(?im)^\s*(?:option\s*)?([A-D]|[1-4])[\)\].:\-]\s*(.+?)(?=\n\s*(?:option\s*)?(?:[A-D]|[1-4])[\)\].:\-]\s*|\Z)",
+            re.S
+        )
+        matches = list(opt_pat.finditer(clean))
+        options = {"A": "", "B": "", "C": "", "D": ""}
+        first_opt_start = len(clean)
+        for m in matches:
+            lbl = m.group(1).upper()
+            if lbl in ["1","2","3","4"]:
+                lbl = chr(ord("A") + int(lbl) - 1)
+            if lbl in options and not options[lbl]:
+                options[lbl] = " ".join(m.group(2).split())
+                first_opt_start = min(first_opt_start, m.start())
+        question = clean[:first_opt_start].strip()
+        answer = ""
+        ans_m = re.search(r"(?im)(?:answer|correct\s*answer|ans)\s*[:\-]\s*([A-D]|[1-4]|.+)$", clean)
+        if ans_m:
+            answer = ans_m.group(1).strip()
+            if answer.upper() in options and options[answer.upper()]:
+                answer = options[answer.upper()]
+            elif answer in ["1","2","3","4"]:
+                answer = options.get(chr(ord("A") + int(answer) - 1), answer)
+        if not question:
+            question = clean
+        return {
+            "question": question,
+            "type": "mcq" if any(options.values()) else "blank",
+            "option_a": options["A"], "option_b": options["B"],
+            "option_c": options["C"], "option_d": options["D"],
+            "correct_answer": answer, "hint": "",
+        }
+
+    try:
+        api_key = st.secrets.get("OCR_SPACE_API_KEY", "")
+        if not api_key:
+            st.error("OCR_SPACE_API_KEY Streamlit secrets లో add చేయండి.")
+            return None
+        payload = {"apikey": api_key, "language": "eng", "OCREngine": "2",
+                   "isOverlayRequired": "false", "scale": "true"}
+        if isinstance(image_source, str):
+            resp = requests.post("https://api.ocr.space/parse/image",
+                                 data={**payload, "url": image_source}, timeout=40)
+        else:
+            resp = requests.post("https://api.ocr.space/parse/image", data=payload,
+                                 files={"file": (image_source.name, image_source.getvalue(), image_source.type)},
+                                 timeout=40)
+        result = resp.json()
+        if result.get("IsErroredOnProcessing"):
+            errs = result.get("ErrorMessage") or result.get("ErrorDetails") or "OCR failed"
+            if isinstance(errs, list): errs = " ".join(str(e) for e in errs)
+            st.error(f"OCR error: {errs}")
+            return None
+        parsed = result.get("ParsedResults") or []
+        raw_text = "\n".join(p.get("ParsedText","") for p in parsed if p.get("ParsedText")).strip()
+        if not raw_text:
+            st.error("Image లో text clear గా కనిపించలేదు.")
+            return None
+        st.caption("📄 OCR extracted text:")
+        st.code(raw_text)
+        return parse_ocr_text(raw_text)
+    except Exception as e:
+        st.error(f"Image నుండి question extract కాలేదు: {e}")
+        return None
+
+
 def login():
     st.title("📚 LMS Login")
     login_method = st.radio("Login method:", ["📧 Email & Password", "🔑 PIN తో Login"], horizontal=True, key="login_method_radio")
@@ -549,8 +623,16 @@ def render_review_sheet(questions, ans_map, db_attempt):
                 correct_display = c_ans
                 opts_html = ""
                 for lbl, otxt in opts:
-                    is_opt_correct = (c_ans.upper() == lbl or c_ans.lower() == str(otxt).strip().lower())
-                    is_user_pick = (str(u_ans).strip().upper() == lbl or str(u_ans).strip().lower() == str(otxt).strip().lower())
+                    # Is this the correct option?
+                    is_opt_correct = (
+                        c_ans.upper() == lbl
+                        or c_ans.lower() == str(otxt).strip().lower()
+                    )
+                    # Is this what the user picked?
+                    is_user_pick = (
+                        str(u_ans).strip().upper() == lbl
+                        or str(u_ans).strip().lower() == str(otxt).strip().lower()
+                    )
                     if is_opt_correct:
                         correct_display = f"{lbl}. {otxt}"
                         bg, br, col, suffix, fw = "#eafaf0","#27ae60","#1b5e34","  ✓","700"
@@ -729,9 +811,28 @@ def generate_exam_ppt(questions, exam_title, q_requesters=None):
     buf = io.BytesIO(); prs.save(buf); buf.seek(0)
     return buf.read()
 
-# =========================
-# ADMIN DASHBOARD
-# =========================
+def check_mcq_correct(user_val, q):
+    """MCQ answer check — user_val can be label (A/B/C/D) or full text"""
+    correct = str(q.get("correct_answer","")).strip()
+    user = str(user_val).strip()
+    if not user or not correct:
+        return False
+    # Direct match
+    if user.lower() == correct.lower():
+        return True
+    # User answered as label, correct stored as text
+    label_map = {
+        "A": str(q.get("option_a","")), "B": str(q.get("option_b","")),
+        "C": str(q.get("option_c","")), "D": str(q.get("option_d","")),
+    }
+    if user.upper() in label_map:
+        return label_map[user.upper()].strip().lower() == correct.lower()
+    # User answered as text, correct stored as label
+    if correct.upper() in label_map:
+        return label_map[correct.upper()].strip().lower() == user.lower()
+    return False
+
+
 def admin_dashboard():
     st.sidebar.title("🛡️ Admin Workspace")
     if st.sidebar.button("🚪 Logout", use_container_width=True):
@@ -931,25 +1032,70 @@ def admin_dashboard():
             st.markdown("#### ➕ Add Question")
             sel_ex = st.selectbox("Select Exam", list(ex_options.keys()) or ["No exams yet"], key="add_q_exam")
             q_type = st.selectbox("Question Type", ["mcq", "blank", "programming"], key="add_q_type")
-            q_text = st.text_area("Question Text", key="add_q_text")
-            st.caption("📷 Image (optional)")
+
+            # ── Image upload / URL → auto OCR extract ──────────────────────
+            st.caption("📷 Image upload చేస్తే automatically question + options extract అవుతాయి")
             img_col1, img_col2 = st.columns(2)
             with img_col1:
                 img_url_input = st.text_input("Image URL", key="add_img_url", placeholder="https://...")
             with img_col2:
-                img_file = st.file_uploader("Image upload", type=["jpg","jpeg","png","gif"], key="add_img_file")
-            col_ab, col_cd = st.columns(2)
-            with col_ab:
-                a = st.text_input("Choice A", key="add_a")
-                b = st.text_input("Choice B", key="add_b")
-            with col_cd:
-                c = st.text_input("Choice C", key="add_c")
-                d = st.text_input("Choice D", key="add_d")
-            h_text = st.text_input("Hint", key="add_hint")
-            c_ans_text = st.text_input("Correct Answer", key="add_ans")
+                img_file = st.file_uploader("Image upload", type=["jpg","jpeg","png","gif","webp"], key="add_img_file")
+
+            # Auto-extract trigger
+            extract_source = img_file if img_file else (img_url_input.strip() if img_url_input.strip() else None)
+            if extract_source:
+                if st.button("🔍 Image నుండి Question Extract చేయి", use_container_width=True, key="extract_ocr_btn"):
+                    with st.spinner("OCR processing..."):
+                        extracted = extract_question_from_image(extract_source)
+                    if extracted:
+                        st.session_state.add_q_text   = extracted.get("question", "")
+                        st.session_state.add_q_type   = extracted.get("type", "mcq")
+                        st.session_state.add_a         = extracted.get("option_a", "")
+                        st.session_state.add_b         = extracted.get("option_b", "")
+                        st.session_state.add_c         = extracted.get("option_c", "")
+                        st.session_state.add_d         = extracted.get("option_d", "")
+                        st.session_state.add_ans       = extracted.get("correct_answer", "")
+                        st.session_state.add_hint      = extracted.get("hint", "")
+                        st.success("✅ Question fields fill అయ్యాయి! Check చేసి Save చేయండి.")
+                        st.rerun()
+
+            st.divider()
+            q_text = st.text_area("Question Text", key="add_q_text")
+
+            # ── 4 Options with ✓ Set Correct button ──────────────────────
+            st.markdown("**Options** — సరైన option పక్కన **✓ Set Correct** నొక్కండి")
+
+            opt_keys = [("add_a","A"), ("add_b","B"), ("add_c","C"), ("add_d","D")]
+            for sess_key, lbl in opt_keys:
+                oc1, oc2, oc3 = st.columns([1, 6, 2])
+                with oc1:
+                    st.markdown(f"<div style='padding-top:8px;font-weight:700;'>{lbl}.</div>", unsafe_allow_html=True)
+                with oc2:
+                    st.text_input(f"Option {lbl}", key=sess_key, label_visibility="collapsed")
+                with oc3:
+                    # Highlight button if already selected as correct
+                    cur_correct = st.session_state.get("add_ans", "")
+                    cur_opt_val = st.session_state.get(sess_key, "")
+                    already_correct = (cur_correct == lbl or
+                                       (cur_opt_val and cur_correct.strip().lower() == cur_opt_val.strip().lower()))
+                    btn_type = "primary" if already_correct else "secondary"
+                    btn_label = "✅ Correct" if already_correct else "✓ Set Correct"
+                    if st.button(btn_label, key=f"setcor_{lbl}", use_container_width=True, type=btn_type):
+                        # Set correct_answer to the LABEL (A/B/C/D) so it's unambiguous
+                        st.session_state.add_ans = lbl
+                        st.rerun()
+
+            h_text = st.text_input("💡 Hint", key="add_hint")
+            # Show currently selected correct answer
+            cur_ans_val = st.session_state.get("add_ans","")
+            if cur_ans_val:
+                st.info(f"🎯 Correct Answer set to: **{cur_ans_val}**")
+            c_ans_text = st.text_input("Correct Answer (manual override)", key="add_ans",
+                                        placeholder="A / B / C / D  లేదా exact text")
             exp_text = st.text_area("📖 Answer Explanation (optional)", key="add_explanation",
                                      placeholder="ఈ సమాధానం ఎందుకు correct అో వివరించండి...")
-            if st.button("➕ Add Question", type="primary", key="add_q_btn"):
+
+            if st.button("➕ Add Question", type="primary", key="add_q_btn", use_container_width=True):
                 if sel_ex in ex_options and q_text.strip():
                     final_img_url = None
                     if img_file:
@@ -958,12 +1104,22 @@ def admin_dashboard():
                         final_img_url = img_url_input.strip()
                     supabase.table("questions").insert({
                         "exam_id": ex_options[sel_ex], "question": q_text, "type": q_type,
-                        "option_a": a, "option_b": b, "option_c": c, "option_d": d,
-                        "correct_answer": c_ans_text if q_type != "programming" else "Manual Review Required",
+                        "option_a": st.session_state.get("add_a",""),
+                        "option_b": st.session_state.get("add_b",""),
+                        "option_c": st.session_state.get("add_c",""),
+                        "option_d": st.session_state.get("add_d",""),
+                        "correct_answer": c_ans_text if c_ans_text.strip() else st.session_state.get("add_ans",""),
                         "hint": h_text, "image_url": final_img_url,
                         "explanation": exp_text.strip() if exp_text.strip() else None
                     }).execute()
-                    st.success("Question Added!"); st.rerun()
+                    # Clear fields after save
+                    for k in ["add_q_text","add_a","add_b","add_c","add_d","add_ans","add_hint","add_explanation","add_img_url"]:
+                        if k in st.session_state:
+                            st.session_state[k] = ""
+                    st.success("✅ Question Added!")
+                    st.rerun()
+                else:
+                    st.error("Exam select చేయండి మరియు question text enter చేయండి.")
 
         with ex_tab4:
             st.subheader("📁 Bulk Upload Questions (CSV)")
@@ -1532,7 +1688,7 @@ def exam_workspace_view():
             attempt_uuid = str(uuid.uuid4())
             for q in questions:
                 user_val = st.session_state.answers.get(q["id"],"")
-                if q["type"] != "programming" and str(user_val).strip().lower() == str(q["correct_answer"]).strip().lower():
+                if q["type"] != "programming" and check_mcq_correct(user_val, q) if q["type"] == "mcq" else str(user_val).strip().lower() == str(q.get("correct_answer","")).strip().lower():
                     final_score += 1
             supabase.table("exam_attempts").insert({"id":attempt_uuid,"user_id":st.session_state.user_id,"exam_id":st.session_state.exam_id,"score":final_score}).execute()
             for q in questions:
@@ -1615,16 +1771,45 @@ def exam_workspace_view():
             stored_ans = st.session_state.answers.get(question["id"],"")
 
             if question["type"] == "mcq":
-                opts = [question["option_a"], question["option_b"], question["option_c"], question["option_d"]]
-                default_idx = opts.index(stored_ans) if stored_ans in opts else None
-                answer = st.radio("Choose Answer", opts, index=default_idx, key=f"radio_{question['id']}")
+                opts = [
+                    ("A", question.get("option_a","")),
+                    ("B", question.get("option_b","")),
+                    ("C", question.get("option_c","")),
+                    ("D", question.get("option_d","")),
+                ]
+                st.markdown("")
+                for lbl, otxt in opts:
+                    if not otxt:
+                        continue
+                    is_selected = (stored_ans == lbl or stored_ans == otxt)
+                    if is_selected:
+                        bg, border, col, fw = "#1a73e8", "#1a73e8", "#ffffff", "700"
+                        prefix = "🔵 "
+                    else:
+                        bg, border, col, fw = "#ffffff", "#d0d8e8", "#2c3e50", "400"
+                        prefix = ""
+                    # Full-width clickable button styled as option card
+                    btn_html = (
+                        f"<div style='background:{bg};border:2px solid {border};border-radius:10px;"
+                        f"padding:12px 18px;margin-bottom:8px;color:{col};font-weight:{fw};"
+                        f"font-size:1rem;cursor:pointer;'>{prefix}{lbl}. {otxt}</div>"
+                    )
+                    # Render display card + invisible streamlit button below it
+                    st.markdown(btn_html, unsafe_allow_html=True)
+                    if st.button(f"{lbl}. {otxt}", key=f"opt_{question['id']}_{lbl}",
+                                 use_container_width=True,
+                                 type="primary" if is_selected else "secondary"):
+                        st.session_state.answers[question["id"]] = lbl
+                        st.rerun()
+
             elif question["type"] == "blank":
                 answer = st.text_input("Your Answer", value=stored_ans, key=f"text_{question['id']}")
+                if answer != stored_ans:
+                    st.session_state.answers[question["id"]] = answer
             else:
                 answer = st.text_area("Write your Code/Answer:", value=stored_ans, key=f"code_{question['id']}", height=250)
-
-            if answer != stored_ans:
-                st.session_state.answers[question["id"]] = answer
+                if answer != stored_ans:
+                    st.session_state.answers[question["id"]] = answer
 
             def save_current_q_time():
                 qid_cur = question["id"]
@@ -1648,7 +1833,7 @@ def exam_workspace_view():
                     attempt_uuid = str(uuid.uuid4())
                     for q in questions:
                         user_val = st.session_state.answers.get(q["id"],"")
-                        if q["type"] != "programming" and str(user_val).strip().lower() == str(q["correct_answer"]).strip().lower():
+                        if q["type"] != "programming" and check_mcq_correct(user_val, q) if q["type"] == "mcq" else str(user_val).strip().lower() == str(q.get("correct_answer","")).strip().lower():
                             final_score += 1
                     supabase.table("exam_attempts").insert({"id":attempt_uuid,"user_id":st.session_state.user_id,"exam_id":st.session_state.exam_id,"score":final_score}).execute()
                     for q in questions:
