@@ -134,7 +134,7 @@ def run_java_code(user_code, input_data=""):
         java8_code = user_code.replace("public class Main", "class Main")
         wandbox_payload = {
             "compiler": "openjdk-jdk-21+35",
-            "compiler-option-raw": "--release=8",
+            "compiler-option-raw": "--release=8 -Xlint:-options",
             "code": java8_code,
             "stdin": input_data or "",
         }
