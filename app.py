@@ -358,6 +358,39 @@ def run_programming_test_cases(question, code):
     pct = int((earned / total_marks) * 100) if total_marks else 0
     return {"earned": earned, "total": total_marks, "percentage": pct, "results": results}
 
+def is_programming_exam(exam_id):
+    try:
+        q_rows = supabase.table("questions").select("type").eq("exam_id", exam_id).execute().data or []
+        return bool(q_rows) and all(q.get("type") == "programming" for q in q_rows)
+    except Exception:
+        return False
+
+def start_exam_with_questions(exam, questions):
+    duration = int(exam.get("duration_mins", 30) or 30)
+    st.session_state.update({
+        "exam_id": exam["id"],
+        "exam_title": exam["title"],
+        "start_exam": True,
+        "exam_submitted": False,
+        "answers": {},
+        "question_index": 0,
+        "current_questions": questions,
+        "exam_end_time": time.time() + (duration * 60),
+        "program_run_results": {},
+        "program_custom_results": {},
+    })
+
+def user_attempted_question(user_id, question_id):
+    try:
+        attempts = supabase.table("exam_attempts").select("id").eq("user_id", user_id).execute().data or []
+        attempt_ids = [a["id"] for a in attempts]
+        if not attempt_ids:
+            return False
+        answers = supabase.table("user_answers").select("id").eq("question_id", question_id).in_("attempt_id", attempt_ids).limit(1).execute().data
+        return bool(answers)
+    except Exception:
+        return False
+
 def score_exam_answers(questions, answers):
     total_marks = get_exam_max_marks(questions)
     earned_marks = 0
@@ -1109,6 +1142,51 @@ public class Main {
         else:
             st.error(f"Status: {status_text}" + (f" | {' | '.join(meta)}" if meta else ""))
 
+def show_programming_questions_tab(user_id):
+    st.title("Programming Questions")
+    exams = supabase.table("exams").select("*").eq("enabled", True).execute().data or []
+    rows = []
+    for exam in exams:
+        q_rows = supabase.table("questions").select("*").eq("exam_id", exam["id"]).eq("type", "programming").execute().data or []
+        for q in q_rows:
+            rows.append({"exam": exam, "question": q})
+
+    if not rows:
+        st.info("Programming questions levu.")
+        return
+
+    h1, h2, h3, h4 = st.columns([1, 5, 2, 2])
+    h1.markdown("**No**")
+    h2.markdown("**Name**")
+    h3.markdown("**Marks**")
+    h4.markdown("**Action**")
+
+    for idx, row in enumerate(rows, start=1):
+        exam = row["exam"]
+        q = row["question"]
+        attempted = user_attempted_question(user_id, q["id"])
+        marks = get_question_max_marks(q)
+        c_no, c_name, c_marks, c_action = st.columns([1, 5, 2, 2])
+        with c_no:
+            st.write(idx)
+        with c_name:
+            st.markdown(f"**{q.get('question', 'Untitled')}**")
+            st.caption(f"Exam: {exam.get('title', '')}")
+        with c_marks:
+            st.write(marks)
+        with c_action:
+            label = "Attempted / Solve Again" if attempted else "Solve"
+            has_pwd = exam.get("password") and str(exam.get("password")).strip()
+            entered_pwd = ""
+            if has_pwd:
+                entered_pwd = st.text_input("Access Code", type="password", key=f"prog_pwd_{q['id']}", label_visibility="collapsed")
+            if st.button(label, key=f"solve_prog_{q['id']}", use_container_width=True, type="primary" if not attempted else "secondary"):
+                if has_pwd and entered_pwd.strip() != str(exam.get("password")).strip():
+                    st.error("Wrong Password!")
+                else:
+                    start_exam_with_questions(exam, [q])
+                    st.rerun()
+
 # =========================
 # REVIEW SHEET (styled like screenshot)
 # =========================
@@ -1546,6 +1624,66 @@ def admin_dashboard():
                             "enabled": c_en, "show_answers": c_ans
                         }).execute()
                         st.success("Exam Created!"); st.rerun()
+            with st.expander("Programming Exam Builder - existing questions nundi create cheyyandi"):
+                st.caption("Already add chesina programming questions select chesi, new exam create cheyyachu.")
+                prog_questions = supabase.table("questions").select("*").eq("type", "programming").execute().data or []
+                if not prog_questions:
+                    st.info("Existing programming questions levu. First Add Questions tab lo programming question add cheyyandi.")
+                else:
+                    builder_cls = st.selectbox("Class select cheyyandi", list(cls_options.keys()) or ["No classes yet"], key="prog_builder_class")
+                    builder_title = st.text_input("Programming Exam Name", key="prog_builder_title")
+                    builder_duration = st.number_input("Duration (Minutes)", min_value=1, max_value=180, value=60, key="prog_builder_duration")
+                    builder_pwd = st.text_input("Password (Optional)", type="password", key="prog_builder_pwd")
+                    builder_enabled = st.checkbox("Turn On Exam", value=True, key="prog_builder_enabled")
+                    builder_show_answers = st.checkbox("Enable Answers Visibility", value=True, key="prog_builder_show_answers")
+
+                    q_options = {}
+                    for q in prog_questions:
+                        marks = get_question_max_marks(q)
+                        label = f"{q.get('question', 'Untitled')}  |  {marks} marks  |  QID: {q.get('id')}"
+                        q_options[label] = q
+                    selected_labels = st.multiselect("Programming Questions select cheyyandi", list(q_options.keys()), key="prog_builder_questions")
+
+                    if st.button("Selected Questions tho Exam Create", type="primary", use_container_width=True, key="prog_builder_create"):
+                        if builder_cls not in cls_options:
+                            st.error("Class select cheyyandi.")
+                        elif not builder_title.strip():
+                            st.error("Exam name enter cheyyandi.")
+                        elif not selected_labels:
+                            st.error("At least one programming question select cheyyandi.")
+                        else:
+                            created = supabase.table("exams").insert({
+                                "class_id": cls_options[builder_cls],
+                                "title": builder_title.strip(),
+                                "duration_mins": int(builder_duration),
+                                "password": builder_pwd.strip() if builder_pwd.strip() else None,
+                                "enabled": builder_enabled,
+                                "show_answers": builder_show_answers,
+                            }).execute().data
+                            new_exam = created[0] if created else None
+                            if not new_exam:
+                                matches = supabase.table("exams").select("*").eq("title", builder_title.strip()).eq("class_id", cls_options[builder_cls]).execute().data or []
+                                new_exam = matches[-1] if matches else None
+                            if not new_exam:
+                                st.error("Exam create ayindi kani id fetch avvaledu. Page refresh chesi check cheyyandi.")
+                            else:
+                                for label in selected_labels:
+                                    src = q_options[label]
+                                    supabase.table("questions").insert({
+                                        "exam_id": new_exam["id"],
+                                        "question": src.get("question", ""),
+                                        "type": "programming",
+                                        "option_a": src.get("option_a", ""),
+                                        "option_b": src.get("option_b", ""),
+                                        "option_c": src.get("option_c", ""),
+                                        "option_d": src.get("option_d", ""),
+                                        "correct_answer": src.get("correct_answer", "AUTO"),
+                                        "hint": src.get("hint", ""),
+                                        "image_url": src.get("image_url"),
+                                        "explanation": src.get("explanation"),
+                                    }).execute()
+                                st.success("Programming exam create ayyindi!")
+                                st.rerun()
             st.divider()
             st.write("### ⚙️ Live Exam Controls")
             exams_all = supabase.table("exams").select("*").execute().data
@@ -2124,7 +2262,7 @@ def user_dashboard(preview_mode=False):
             st.query_params.clear()
             st.rerun()
         st.sidebar.divider()
-        pages = ["📚 My Classes", "📊 Progress", "☕ Java Practice", "💬 Group Chat", "📅 Attendance"]
+        pages = ["📚 My Classes", "Programming", "📊 Progress", "☕ Java Practice", "💬 Group Chat", "📅 Attendance"]
         for pg in pages:
             if pg == "💬 Group Chat":
                 unread = get_unread_count(st.session_state.user_id)
@@ -2152,6 +2290,8 @@ def user_dashboard(preview_mode=False):
         show_student_progress_tab(st.session_state.user_id); return
     if user_page == "☕ Java Practice":
         show_java_practice_tab(); return
+    if user_page == "Programming":
+        show_programming_questions_tab(st.session_state.user_id); return
     if user_page == "📅 Attendance":
         show_attendance_tab(st.session_state.user_id); return
 
