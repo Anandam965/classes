@@ -80,6 +80,7 @@ defaults = {
     "question_start_time": {},
     "question_time_log": {},
     "program_run_results": {},
+    "program_custom_results": {},
     "attendance_marked_date": "",
     "ai_generated_qs": None,
 }
@@ -277,10 +278,39 @@ def get_programming_meta(question):
         try:
             data = json.loads(raw[len(PROGRAMMING_META_PREFIX):])
             data["test_cases"] = data.get("test_cases") or []
+            for tc in data["test_cases"]:
+                tc["hidden"] = bool(tc.get("hidden", False))
             return data
         except Exception:
             return {"description": "", "test_cases": []}
     return {"description": raw if question.get("type") == "programming" else "", "test_cases": []}
+
+def enable_textarea_tab_support():
+    st.components.v1.html(
+        """
+        <script>
+        const attachTabs = () => {
+            const doc = window.parent.document;
+            doc.querySelectorAll('textarea').forEach((ta) => {
+                if (ta.dataset.tabInsertReady === '1') return;
+                ta.dataset.tabInsertReady = '1';
+                ta.addEventListener('keydown', (event) => {
+                    if (event.key !== 'Tab') return;
+                    event.preventDefault();
+                    event.stopPropagation();
+                    const start = ta.selectionStart;
+                    const end = ta.selectionEnd;
+                    ta.setRangeText('    ', start, end, 'end');
+                    ta.dispatchEvent(new Event('input', { bubbles: true }));
+                });
+            });
+        };
+        attachTabs();
+        setInterval(attachTabs, 1000);
+        </script>
+        """,
+        height=0,
+    )
 
 def get_question_max_marks(question):
     if question.get("type") == "programming":
@@ -320,6 +350,7 @@ def run_programming_test_cases(question, code):
             "expected_output": expected,
             "actual_output": actual,
             "marks": marks,
+            "hidden": bool(tc.get("hidden", False)),
             "passed": bool(passed),
             "status": result.get("status", "Unknown"),
             "error": result.get("stderr", ""),
@@ -1614,17 +1645,20 @@ def admin_dashboard():
                 for idx in range(int(tc_count)):
                     with st.container(border=True):
                         st.markdown(f"##### Test Case {idx + 1}")
-                        c_in, c_out, c_marks = st.columns([3, 3, 1])
+                        c_in, c_out, c_marks, c_hidden = st.columns([3, 3, 1, 1])
                         with c_in:
                             tc_input = st.text_area("Input", key=f"aq_tc_input_{idx}", height=90)
                         with c_out:
                             tc_output = st.text_area("Expected Output", key=f"aq_tc_output_{idx}", height=90)
                         with c_marks:
                             tc_marks = st.number_input("Marks", min_value=1, max_value=100, value=1, step=1, key=f"aq_tc_marks_{idx}")
+                        with c_hidden:
+                            tc_hidden = st.checkbox("Hidden", value=(idx > 0), key=f"aq_tc_hidden_{idx}")
                         prog_test_cases.append({
                             "input": tc_input,
                             "expected_output": tc_output,
                             "marks": int(tc_marks),
+                            "hidden": bool(tc_hidden),
                         })
                 correct_lbl = "AUTO"
             else:
@@ -2418,34 +2452,59 @@ def exam_workspace_view():
                     if meta.get("description"):
                         st.markdown(meta["description"])
                     st.caption(f"Total Marks: {max_marks}")
-                    with st.expander("Test cases"):
+                    with st.expander("Sample test cases"):
                         for idx, tc in enumerate(meta.get("test_cases", []), start=1):
+                            if tc.get("hidden", False):
+                                continue
                             st.markdown(f"**Case {idx}** • {tc.get('marks', 0)} marks")
                             st.code(f"Input:\n{tc.get('input','')}\n\nExpected Output:\n{tc.get('expected_output','')}", language="text")
                 with p_right:
-                    default_java = """import java.util.*;
-
-public class Main {
-    public static void main(String[] args) {
-        Scanner sc = new Scanner(System.in);
-        // Write your code here
-    }
-}"""
-                    editor_value = stored_ans if stored_ans else default_java
+                    enable_textarea_tab_support()
+                    editor_value = stored_ans if stored_ans else ""
                     answer = st.text_area("Java Program", value=editor_value, key=f"code_{question['id']}", height=360)
                     st.session_state.answers[question["id"]] = answer
-                    if st.button("▶️ Run Test Cases", key=f"run_prog_{question['id']}", type="primary", use_container_width=True):
+                    custom_input = st.text_area(
+                        "Custom Input",
+                        key=f"custom_input_{question['id']}",
+                        height=110,
+                        placeholder="Mee own input ikkada enter chesi Run Custom Input click cheyyandi..."
+                    )
+                    run_col, custom_col = st.columns(2)
+                    with run_col:
+                        run_tests_clicked = st.button("▶️ Run Test Cases", key=f"run_prog_{question['id']}", type="primary", use_container_width=True)
+                    with custom_col:
+                        run_custom_clicked = st.button("Run Custom Input", key=f"run_custom_{question['id']}", use_container_width=True)
+
+                    if run_tests_clicked:
                         with st.spinner("Program run avuthundi..."):
                             st.session_state.program_run_results[str(question["id"])] = run_programming_test_cases(question, answer)
+
+                    if run_custom_clicked:
+                        with st.spinner("Custom input tho program run avuthundi..."):
+                            st.session_state.program_custom_results[str(question["id"])] = run_java_code(answer, custom_input)
+
+                    custom_data = st.session_state.program_custom_results.get(str(question["id"]))
+                    if custom_data:
+                        st.markdown("#### Custom Output")
+                        st.caption(f"Status: {custom_data.get('status','')}")
+                        if custom_data.get("stdout"):
+                            st.code(custom_data.get("stdout", ""), language="text")
+                        if custom_data.get("stderr"):
+                            st.caption("Error")
+                            st.code(custom_data.get("stderr", ""), language="text")
 
                     run_data = st.session_state.program_run_results.get(str(question["id"]))
                     if run_data:
                         st.markdown(f"#### Result: {run_data['earned']}/{run_data['total']} marks ({run_data['percentage']}%)")
                         for res in run_data["results"]:
                             with st.container(border=True):
+                                is_hidden = bool(res.get("hidden", False))
                                 badge = "✅ Passed" if res["passed"] else "❌ Failed"
-                                st.markdown(f"**Test Case {res['case']}** — {badge} — {res['marks']} marks")
-                                if not res["passed"]:
+                                title = f"Hidden Test Case {res['case']}" if is_hidden else f"Test Case {res['case']}"
+                                st.markdown(f"**{title}** — {badge} — {res['marks']} marks")
+                                if is_hidden:
+                                    st.caption("Input/output hidden. Marks lo count avuthundi.")
+                                elif not res["passed"]:
                                     st.caption(f"Status: {res.get('status','')}")
                                     c_exp, c_act = st.columns(2)
                                     with c_exp:
