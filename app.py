@@ -2200,7 +2200,14 @@ def admin_dashboard():
                                 st.markdown(f"##### 👤 **{u_data[0]['name']}** | 🎯 **{e_data[0]['title']}**")
                                 st.code(att.get("submitted_answers","# No code submitted."), language="python")
                             with col_s2:
-                                new_score = st.number_input("Score", min_value=0, max_value=100, value=int(att["score"]), key=f"score_in_{att['id']}")
+                                current_score = int(att.get("score") or 0)
+                                try:
+                                    exam_questions = supabase.table("questions").select("*").eq("exam_id", att["exam_id"]).execute().data or []
+                                    exam_max_score = get_exam_max_marks(exam_questions)
+                                except Exception:
+                                    exam_max_score = 100
+                                score_max = max(100, int(exam_max_score or 0), current_score)
+                                new_score = st.number_input("Score", min_value=0, max_value=score_max, value=current_score, step=1, key=f"score_in_{att['id']}")
                                 if st.button("💾 Save", key=f"btn_score_{att['id']}", type="primary", use_container_width=True):
                                     supabase.table("exam_attempts").update({"score": new_score}).eq("id", att["id"]).execute()
                                     st.success("Score Saved!"); st.rerun()
