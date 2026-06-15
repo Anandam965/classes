@@ -81,6 +81,7 @@ defaults = {
     "question_time_log": {},
     "program_run_results": {},
     "program_custom_results": {},
+    "program_submissions": {},
     "attendance_marked_date": "",
     "ai_generated_qs": None,
     "last_attempt_id": "",
@@ -379,6 +380,7 @@ def start_exam_with_questions(exam, questions):
         "exam_end_time": time.time() + (duration * 60),
         "program_run_results": {},
         "program_custom_results": {},
+        "program_submissions": {},
     })
 
 def user_attempted_question(user_id, question_id):
@@ -392,7 +394,25 @@ def user_attempted_question(user_id, question_id):
     except Exception:
         return False
 
-def score_exam_answers(questions, answers):
+def get_cached_program_submission(question_id, code):
+    saved = st.session_state.program_submissions.get(str(question_id), {})
+    if saved.get("code") == code and saved.get("score_data"):
+        return saved["score_data"]
+    return None
+
+def get_unsubmitted_program_questions(questions, answers):
+    pending = []
+    for idx, q in enumerate(questions, start=1):
+        if q.get("type") != "programming":
+            continue
+        qid = q["id"]
+        code = answers.get(qid, "")
+        code = code if isinstance(code, str) else str(code)
+        if not get_cached_program_submission(qid, code):
+            pending.append(idx)
+    return pending
+
+def score_exam_answers(questions, answers, use_cached_programming=True):
     total_marks = get_exam_max_marks(questions)
     earned_marks = 0
     answer_payloads = {}
@@ -401,8 +421,18 @@ def score_exam_answers(questions, answers):
         user_val = answers.get(qid, "")
         if q.get("type") == "programming":
             code = user_val if isinstance(user_val, str) else str(user_val)
-            score_data = run_programming_test_cases(q, code)
-            earned_marks += score_data["earned"]
+            score_data = get_cached_program_submission(qid, code) if use_cached_programming else None
+            if score_data is None and not use_cached_programming:
+                score_data = run_programming_test_cases(q, code)
+            if score_data is None:
+                score_data = {
+                    "earned": 0,
+                    "total": get_question_max_marks(q),
+                    "percentage": 0,
+                    "results": [],
+                    "note": "Program was not individually submitted before final exam submit.",
+                }
+            earned_marks += int(score_data.get("earned", 0) or 0)
             answer_payloads[qid] = json.dumps({"code": code, **score_data}, ensure_ascii=False)
         elif q.get("type") == "mcq":
             if check_mcq_correct(user_val, q):
@@ -452,9 +482,14 @@ def insert_user_answer_row(attempt_id, question_id, answer, time_spent_seconds=N
             last_error = e
     raise last_error
 
-def submit_exam_attempt(questions, include_time=False):
+def submit_exam_attempt(questions, include_time=False, require_programming_submitted=False):
+    if require_programming_submitted:
+        pending = get_unsubmitted_program_questions(questions, st.session_state.answers)
+        if pending:
+            nums = ", ".join(str(n) for n in pending)
+            raise ValueError(f"Please click Submit Program for question(s): {nums}")
     attempt_uuid = str(uuid.uuid4())
-    final_score, total_marks, final_percentage, answer_payloads = score_exam_answers(questions, st.session_state.answers)
+    final_score, total_marks, final_percentage, answer_payloads = score_exam_answers(questions, st.session_state.answers, use_cached_programming=True)
     supabase.table("exam_attempts").insert({
         "id": attempt_uuid,
         "user_id": st.session_state.user_id,
@@ -2678,15 +2713,33 @@ def exam_workspace_view():
                         height=110,
                         placeholder="Mee own input ikkada enter chesi Run Custom Input click cheyyandi..."
                     )
-                    run_col, custom_col = st.columns(2)
+                    run_col, submit_prog_col, custom_col = st.columns(3)
                     with run_col:
-                        run_tests_clicked = st.button("▶️ Run Test Cases", key=f"run_prog_{question['id']}", type="primary", use_container_width=True)
+                        run_tests_clicked = st.button("Run Tests", key=f"run_prog_{question['id']}", use_container_width=True)
+                    with submit_prog_col:
+                        submit_program_clicked = st.button("Submit Program", key=f"submit_prog_{question['id']}", type="primary", use_container_width=True)
                     with custom_col:
-                        run_custom_clicked = st.button("Run Custom Input", key=f"run_custom_{question['id']}", use_container_width=True)
+                        run_custom_clicked = st.button("Run Custom", key=f"run_custom_{question['id']}", use_container_width=True)
 
                     if run_tests_clicked:
                         with st.spinner("Program run avuthundi..."):
                             st.session_state.program_run_results[str(question["id"])] = run_programming_test_cases(question, answer)
+
+                    if submit_program_clicked:
+                        with st.spinner("Program submit avuthundi..."):
+                            score_data = run_programming_test_cases(question, answer)
+                            st.session_state.program_run_results[str(question["id"])] = score_data
+                            st.session_state.program_submissions[str(question["id"])] = {"code": answer, "score_data": score_data}
+                            st.success(f"Program submitted: {score_data['earned']}/{score_data['total']} marks")
+
+                    saved_prog = st.session_state.program_submissions.get(str(question["id"]), {})
+                    if saved_prog.get("code") == answer and saved_prog.get("score_data"):
+                        saved_score = saved_prog["score_data"]
+                        st.success(f"Saved for final submit: {saved_score['earned']}/{saved_score['total']} marks")
+                    elif saved_prog:
+                        st.warning("Code changed after Submit Program. Please submit this program again before final submit.")
+                    else:
+                        st.info("Final exam submit fast ga undali ante ee program ki Submit Program click cheyyandi.")
 
                     if run_custom_clicked:
                         with st.spinner("Custom input tho program run avuthundi..."):
@@ -2745,10 +2798,11 @@ def exam_workspace_view():
                 if st.button("🚀 Submit Exam", type="primary", use_container_width=True):
                     save_current_q_time()
                     try:
-                        submit_exam_attempt(questions, include_time=True)
+                        submit_exam_attempt(questions, include_time=True, require_programming_submitted=True)
                         st.session_state.question_time_log = {}
                         st.session_state.question_start_time = {}
                         st.session_state.program_run_results = {}
+                        st.session_state.program_submissions = {}
                         st.session_state.exam_submitted = True; st.rerun()
                     except Exception as e:
                         st.error(f"Submit failed: {e}")
