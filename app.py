@@ -1782,7 +1782,7 @@ def admin_dashboard():
     label = f"Group Chat ({unread_admin})" if unread_admin > 0 else "Group Chat"
     
     menu = st.sidebar.selectbox("Navigation Control",
-        ["🗂️ Manage Course Content", "📝 Manage Exams & Questions", "📊 Student Results & Ranks", chat_menu_label])
+        ["🗂️ Manage Course Content", "📝 Manage Exams & Questions", "📊 Student Results & Ranks", "chat_menu_label"])
     if "Group Chat" in menu:
         menu = "💬 Group Chat"
 
