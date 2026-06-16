@@ -1777,8 +1777,10 @@ def admin_dashboard():
             st.rerun()
     st.sidebar.divider()
 
+    
     unread_admin = get_unread_count(st.session_state.user_id)
-    label = f"Group Chat ({unread})" if unread > 0 else "Group Chat"
+    label = f"Group Chat ({unread_admin})" if unread_admin > 0 else "Group Chat"
+    
     menu = st.sidebar.selectbox("Navigation Control",
         ["🗂️ Manage Course Content", "📝 Manage Exams & Questions", "📊 Student Results & Ranks", chat_menu_label])
     if "Group Chat" in menu:
