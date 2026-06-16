@@ -74,7 +74,7 @@ defaults = {
     "email_temp": "",
     "user_id_temp": "",
     "role_temp": "",
-    "user_page": "📚 My Classes",
+    "user_page": "My Classes",
     "focus_class_id": "",
     "focus_exam_id": "",
     "question_start_time": {},
@@ -109,7 +109,7 @@ if not st.session_state.logged_in:
         pass
 
 # =========================
-# JAVA CODE EVALUATOR
+# PROGRAMMING CODE EVALUATOR
 # =========================
 def evaluate_java_code(user_code, input_data, expected_output):
     if not st.secrets.get("RAPIDAPI_KEY", ""):
@@ -132,37 +132,158 @@ def evaluate_java_code(user_code, input_data, expected_output):
     except Exception:
         return False
 
+PROGRAMMING_LANGUAGES = {
+    "java": {
+        "label": "Java",
+        "piston_language": "java",
+        "piston_version": "15.0.2",
+        "file_name": "Main.java",
+        "judge0_id": 27,
+        "code_language": "java",
+        "default_code": """import java.util.*;
+
+public class Main {
+    public static void main(String[] args) {
+        Scanner sc = new Scanner(System.in);
+        String name = sc.hasNextLine() ? sc.nextLine() : \"Student\";
+        System.out.println(\"Hello, \" + name + \"!\");
+    }
+}""",
+    },
+    "c": {
+        "label": "C",
+        "piston_language": "c",
+        "piston_version": "10.2.0",
+        "file_name": "main.c",
+        "judge0_id": 50,
+        "code_language": "c",
+        "default_code": """#include <stdio.h>
+
+int main() {
+    char name[100] = \"Student\";
+    if (fgets(name, sizeof(name), stdin)) {
+        for (int i = 0; name[i] != '\\0'; i++) {
+            if (name[i] == '\\n') {
+                name[i] = '\\0';
+                break;
+            }
+        }
+    }
+    printf(\"Hello, %s!\\n\", name);
+    return 0;
+}""",
+    },
+    "python": {
+        "label": "Python",
+        "piston_language": "python",
+        "piston_version": "3.10.0",
+        "file_name": "main.py",
+        "judge0_id": 71,
+        "code_language": "python",
+        "default_code": """try:
+    name = input().strip()
+except EOFError:
+    name = \"Student\"
+print(f\"Hello, {name or 'Student'}!\")""",
+    },
+}
+
+PROGRAMMING_LANGUAGE_LABELS = {meta["label"]: key for key, meta in PROGRAMMING_LANGUAGES.items()}
+
+
+def normalize_programming_language(language):
+    lang = str(language or "java").strip().lower()
+    if lang in ("py", "python3"):
+        return "python"
+    if lang in ("c", "gcc"):
+        return "c"
+    return lang if lang in PROGRAMMING_LANGUAGES else "java"
+
+
+def get_programming_language_meta(language):
+    return PROGRAMMING_LANGUAGES[normalize_programming_language(language)]
+
+
+def run_code_with_piston(user_code, input_data="", language="java"):
+    meta = get_programming_language_meta(language)
+    piston_payload = {
+        "language": meta["piston_language"],
+        "version": meta["piston_version"],
+        "files": [{"name": meta["file_name"], "content": user_code}],
+        "stdin": input_data or "",
+    }
+    result = requests.post("https://emkc.org/api/v2/piston/execute", json=piston_payload, timeout=40).json()
+    compile_result = result.get("compile") or {}
+    run_result = result.get("run") or {}
+    stdout = run_result.get("stdout") or ""
+    stderr = (
+        compile_result.get("stderr")
+        or compile_result.get("output")
+        or run_result.get("stderr")
+        or run_result.get("output")
+        or result.get("message")
+        or ""
+    )
+    ok = not stderr and run_result.get("code", 0) == 0
+    label = meta["label"]
+    return {
+        "ok": ok,
+        "status": f"Accepted ({label})" if ok else f"Error ({label})",
+        "stdout": stdout,
+        "stderr": stderr,
+        "time": None,
+        "memory": None,
+    }
+
+
+def run_programming_code(user_code, input_data="", language="java"):
+    lang = normalize_programming_language(language)
+    if lang == "java":
+        return run_java_code(user_code, input_data)
+
+    meta = get_programming_language_meta(lang)
+    rapidapi_key = st.secrets.get("RAPIDAPI_KEY", "")
+    if not rapidapi_key:
+        try:
+            return run_code_with_piston(user_code, input_data, lang)
+        except Exception as e:
+            return {"ok": False, "status": f"{meta['label']} API Error", "stdout": "", "stderr": str(e), "time": None, "memory": None}
+
+    url = "https://judge0-ce.p.rapidapi.com/submissions?base64_encoded=false&fields=*"
+    payload = {"source_code": user_code, "language_id": meta["judge0_id"], "stdin": input_data or ""}
+    headers = {"x-rapidapi-key": rapidapi_key, "Content-Type": "application/json"}
+    try:
+        response = requests.post(url, json=payload, headers=headers, timeout=30).json()
+        token = response.get("token")
+        if not token:
+            return {"ok": False, "status": "Submission failed", "stdout": "", "stderr": str(response), "time": None, "memory": None}
+        time.sleep(2)
+        result = requests.get(
+            f"https://judge0-ce.p.rapidapi.com/submissions/{token}?base64_encoded=false&fields=*",
+            headers=headers,
+            timeout=30
+        ).json()
+        status = (result.get("status") or {}).get("description", "Unknown")
+        stdout = result.get("stdout") or ""
+        stderr = result.get("stderr") or result.get("compile_output") or result.get("message") or ""
+        return {
+            "ok": status == "Accepted",
+            "status": status,
+            "stdout": stdout,
+            "stderr": stderr,
+            "time": result.get("time"),
+            "memory": result.get("memory"),
+        }
+    except Exception as e:
+        return {"ok": False, "status": "API Error", "stdout": "", "stderr": str(e), "time": None, "memory": None}
+
 def run_java_code(user_code, input_data=""):
     rapidapi_key = st.secrets.get("RAPIDAPI_KEY", "")
     if not rapidapi_key:
         def run_with_piston():
-            piston_payload = {
-                "language": "java",
-                "version": "15.0.2",
-                "files": [{"name": "Main.java", "content": user_code}],
-                "stdin": input_data or "",
-            }
-            result = requests.post("https://emkc.org/api/v2/piston/execute", json=piston_payload, timeout=40).json()
-            compile_result = result.get("compile") or {}
-            run_result = result.get("run") or {}
-            stdout = run_result.get("stdout") or ""
-            stderr = (
-                compile_result.get("stderr")
-                or compile_result.get("output")
-                or run_result.get("stderr")
-                or run_result.get("output")
-                or result.get("message")
-                or ""
-            )
-            ok = not stderr and run_result.get("code", 0) == 0
-            return {
-                "ok": ok,
-                "status": "Accepted (fallback Java 15)" if ok else "Error (fallback Java 15)",
-                "stdout": stdout,
-                "stderr": stderr,
-                "time": None,
-                "memory": None,
-            }
+            result = run_code_with_piston(user_code, input_data, "java")
+            result["status"] = "Accepted (fallback Java 15)" if result.get("ok") else "Error (fallback Java 15)"
+            return result
 
         java8_code = user_code.replace("public class Main", "class Main")
         wandbox_payload = {
@@ -268,10 +389,11 @@ def run_java_code(user_code, input_data=""):
 
 PROGRAMMING_META_PREFIX = "__PROGRAMMING_META__"
 
-def make_programming_meta(description, test_cases):
+def make_programming_meta(description, test_cases, language="java"):
     return PROGRAMMING_META_PREFIX + json.dumps({
         "description": description or "",
         "test_cases": test_cases or [],
+        "language": normalize_programming_language(language),
     }, ensure_ascii=False)
 
 def get_programming_meta(question):
@@ -280,12 +402,13 @@ def get_programming_meta(question):
         try:
             data = json.loads(raw[len(PROGRAMMING_META_PREFIX):])
             data["test_cases"] = data.get("test_cases") or []
+            data["language"] = normalize_programming_language(data.get("language"))
             for tc in data["test_cases"]:
                 tc["hidden"] = bool(tc.get("hidden", False))
             return data
         except Exception:
-            return {"description": "", "test_cases": []}
-    return {"description": raw if question.get("type") == "programming" else "", "test_cases": []}
+            return {"description": "", "test_cases": [], "language": "java"}
+    return {"description": raw if question.get("type") == "programming" else "", "test_cases": [], "language": "java"}
 
 def enable_textarea_tab_support():
     st.components.v1.html(
@@ -341,7 +464,7 @@ def run_programming_test_cases(question, code):
             marks = int(tc.get("marks", 0) or 0)
         except Exception:
             marks = 0
-        result = run_java_code(code, inp)
+        result = run_programming_code(code, inp, meta.get("language", "java"))
         actual = str(result.get("stdout", "")).strip()
         passed = result.get("ok") and actual == expected
         if passed:
@@ -992,7 +1115,7 @@ def get_student_completed_ids(user_id):
 def focus_student_class(class_id, exam_id=""):
     st.session_state.focus_class_id = str(class_id) if class_id else ""
     st.session_state.focus_exam_id = str(exam_id) if exam_id else ""
-    st.session_state.user_page = "📚 My Classes"
+    st.session_state.user_page = "My Classes"
     st.rerun()
 
 def start_student_exam(exam):
@@ -1174,56 +1297,60 @@ def show_student_progress_tab(user_id):
                     if st.button("Open", key=f"prog_open_exam_{exam['id']}", use_container_width=True, type="primary"):
                         start_student_exam(exam)
 
-def show_java_practice_tab():
-    st.title("☕ Java Practice")
-    default_code = """import java.util.*;
+def show_code_practice_tab():
+    st.title("Code Practice")
+    if "practice_language" not in st.session_state:
+        st.session_state.practice_language = "java"
+    if "practice_code_by_language" not in st.session_state:
+        st.session_state.practice_code_by_language = {}
+    if "practice_input" not in st.session_state:
+        st.session_state.practice_input = ""
 
-public class Main {
-    public static void main(String[] args) {
-        Scanner sc = new Scanner(System.in);
-        String name = sc.hasNextLine() ? sc.nextLine() : "Student";
-        System.out.println("Hello, " + name + "!");
-    }
-}"""
-    if "java_practice_code" not in st.session_state:
-        st.session_state.java_practice_code = default_code
-    if "java_practice_input" not in st.session_state:
-        st.session_state.java_practice_input = ""
-
-    st.session_state.java_practice_code = st.text_area(
-        "Java Code",
-        value=st.session_state.java_practice_code,
-        height=360,
-        key="java_practice_code_editor"
+    selected_label = st.selectbox(
+        "Language",
+        list(PROGRAMMING_LANGUAGE_LABELS.keys()),
+        index=list(PROGRAMMING_LANGUAGE_LABELS.values()).index(st.session_state.practice_language),
+        key="practice_language_selector",
     )
-    st.session_state.java_practice_input = st.text_area(
+    selected_language = PROGRAMMING_LANGUAGE_LABELS[selected_label]
+    st.session_state.practice_language = selected_language
+    lang_meta = get_programming_language_meta(selected_language)
+
+    if selected_language not in st.session_state.practice_code_by_language:
+        st.session_state.practice_code_by_language[selected_language] = lang_meta["default_code"]
+
+    st.session_state.practice_code_by_language[selected_language] = st.text_area(
+        f"{lang_meta['label']} Code",
+        value=st.session_state.practice_code_by_language[selected_language],
+        height=360,
+        key=f"practice_code_editor_{selected_language}"
+    )
+    st.session_state.practice_input = st.text_area(
         "Input",
-        value=st.session_state.java_practice_input,
+        value=st.session_state.practice_input,
         height=120,
-        key="java_practice_input_editor",
+        key="practice_input_editor",
         placeholder="Program ki kavalsina input ikkada type cheyyandi..."
     )
 
     col_run, col_reset = st.columns([1, 1])
     with col_run:
-        run_clicked = st.button("▶️ Run Java", type="primary", use_container_width=True)
+        run_clicked = st.button(f"Run {lang_meta['label']}", type="primary", use_container_width=True)
     with col_reset:
-        if st.button("↩️ Reset Sample", use_container_width=True):
-            st.session_state.java_practice_code = default_code
-            st.session_state.java_practice_input = ""
+        if st.button("Reset Sample", use_container_width=True):
+            st.session_state.practice_code_by_language[selected_language] = lang_meta["default_code"]
+            st.session_state.practice_input = ""
             st.rerun()
 
     if run_clicked:
-        if not st.session_state.java_practice_code.strip():
-            st.warning("Java code enter cheyyandi.")
+        code = st.session_state.practice_code_by_language[selected_language]
+        if not code.strip():
+            st.warning(f"{lang_meta['label']} code enter cheyyandi.")
             return
-        with st.spinner("Java program run avuthundi..."):
-            result = run_java_code(st.session_state.java_practice_code, st.session_state.java_practice_input)
+        with st.spinner(f"{lang_meta['label']} program run avuthundi..."):
+            result = run_programming_code(code, st.session_state.practice_input, selected_language)
         st.subheader("Output")
-        if result.get("stdout"):
-            st.code(result["stdout"], language="text")
-        else:
-            st.code("", language="text")
+        st.code(result.get("stdout", ""), language="text")
         if result.get("stderr"):
             st.subheader("Errors / Compiler Messages")
             st.code(result["stderr"], language="text")
@@ -1237,6 +1364,11 @@ public class Main {
             st.success(f"Status: {status_text}" + (f" | {' | '.join(meta)}" if meta else ""))
         else:
             st.error(f"Status: {status_text}" + (f" | {' | '.join(meta)}" if meta else ""))
+
+
+def show_java_practice_tab():
+    show_code_practice_tab()
+
 
 def show_programming_questions_tab(user_id):
     st.title("Programming Questions")
@@ -1376,7 +1508,7 @@ def render_review_sheet(questions, ans_map, db_attempt):
                 except Exception:
                     prog_ans = {"code": u_ans}
                 st.caption(f"Score: {prog_ans.get('earned', 0)}/{prog_ans.get('total', get_question_max_marks(q))} ({prog_ans.get('percentage', 0)}%)")
-                st.code(prog_ans.get("code", ""), language="java")
+                st.code(prog_ans.get("code", ""), language=get_programming_language_meta(get_programming_meta(q).get("language", "java"))["code_language"])
                 for res in prog_ans.get("results", []):
                     badge = "✅ Passed" if res.get("passed") else "❌ Failed"
                     st.caption(f"Test Case {res.get('case')}: {badge} • {res.get('marks', 0)} marks")
@@ -1581,7 +1713,7 @@ def admin_dashboard():
     st.sidebar.divider()
 
     unread_admin = get_unread_count(st.session_state.user_id)
-    chat_menu_label = f"💬 Group Chat 🔴 {unread_admin}" if unread_admin > 0 else "💬 Group Chat"
+    label = f"Group Chat ({unread})" if unread > 0 else "Group Chat"
     menu = st.sidebar.selectbox("Navigation Control",
         ["🗂️ Manage Course Content", "📝 Manage Exams & Questions", "📊 Student Results & Ranks", chat_menu_label])
     if "Group Chat" in menu:
@@ -1870,6 +2002,8 @@ def admin_dashboard():
             prog_test_cases = []
 
             if q_type == "programming":
+                prog_language_label = st.selectbox("Programming Language", list(PROGRAMMING_LANGUAGE_LABELS.keys()), key="aq_prog_language")
+                prog_language = PROGRAMMING_LANGUAGE_LABELS[prog_language_label]
                 prog_description = st.text_area("Programming Description", key="aq_prog_desc",
                     placeholder="Problem statement, constraints, input/output format ikkada rayandi...")
                 st.markdown("**Test Cases & Marks**")
@@ -1934,7 +2068,7 @@ def admin_dashboard():
                         final_img_url = upload_image_to_imgbb(img_file)
                     elif img_url_input.strip():
                         final_img_url = img_url_input.strip()
-                    explanation_value = make_programming_meta(prog_description, prog_test_cases) if q_type == "programming" else (exp_text.strip() if exp_text.strip() else None)
+                    explanation_value = make_programming_meta(prog_description, prog_test_cases, prog_language) if q_type == "programming" else (exp_text.strip() if exp_text.strip() else None)
                     supabase.table("questions").insert({
                         "exam_id": ex_options[sel_ex],
                         "question": q_text,
@@ -2363,11 +2497,11 @@ def user_dashboard(preview_mode=False):
             st.query_params.clear()
             st.rerun()
         st.sidebar.divider()
-        pages = ["📚 My Classes", "Programming", "📊 Progress", "☕ Java Practice", "💬 Group Chat", "📅 Attendance"]
+        pages = ["My Classes", "Programming", "Progress", "Code Practice", "Group Chat", "Attendance"]
         for pg in pages:
-            if pg == "💬 Group Chat":
+            if pg == "Group Chat":
                 unread = get_unread_count(st.session_state.user_id)
-                label = f"💬 Group Chat  🔴{unread}" if unread > 0 else "💬 Group Chat"
+                label = f"Group Chat ({unread})" if unread > 0 else "Group Chat"
             else:
                 label = pg
             if st.sidebar.button(label, use_container_width=True,
@@ -2380,20 +2514,20 @@ def user_dashboard(preview_mode=False):
         mark_today_attendance(st.session_state.user_id)
     else:
         st.info("👁️ Student Preview Mode")
-        user_page = "📚 My Classes"
+        user_page = "My Classes"
 
     if not preview_mode:
         show_notification_banner(st.session_state.user_id)
 
-    if user_page == "💬 Group Chat":
+    if user_page == "Group Chat":
         group_chat(); return
-    if user_page == "📊 Progress":
+    if user_page == "Progress":
         show_student_progress_tab(st.session_state.user_id); return
-    if user_page == "☕ Java Practice":
-        show_java_practice_tab(); return
+    if user_page in ["Java Practice", "Code Practice"]:
+        show_code_practice_tab(); return
     if user_page == "Programming":
         show_programming_questions_tab(st.session_state.user_id); return
-    if user_page == "📅 Attendance":
+    if user_page == "Attendance":
         show_attendance_tab(st.session_state.user_id); return
 
     # My Classes
@@ -2689,13 +2823,14 @@ def exam_workspace_view():
             else:
                 meta = get_programming_meta(question)
                 max_marks = get_question_max_marks(question)
+                lang_meta = get_programming_language_meta(meta.get("language", "java"))
                 p_left, p_right = st.columns([1, 1])
                 with p_left:
                     st.markdown("#### Problem")
                     st.markdown(f"**{question['question']}**")
                     if meta.get("description"):
                         st.markdown(meta["description"])
-                    st.caption(f"Total Marks: {max_marks}")
+                    st.caption(f"Language: {lang_meta['label']} | Total Marks: {max_marks}")
                     with st.expander("Sample test cases"):
                         for idx, tc in enumerate(meta.get("test_cases", []), start=1):
                             if tc.get("hidden", False):
@@ -2705,7 +2840,7 @@ def exam_workspace_view():
                 with p_right:
                     enable_textarea_tab_support()
                     editor_value = stored_ans if stored_ans else ""
-                    answer = st.text_area("Java Program", value=editor_value, key=f"code_{question['id']}", height=360)
+                    answer = st.text_area(f"{lang_meta['label']} Program", value=editor_value, key=f"code_{question['id']}", height=360)
                     st.session_state.answers[question["id"]] = answer
                     custom_input = st.text_area(
                         "Custom Input",
@@ -2743,7 +2878,7 @@ def exam_workspace_view():
 
                     if run_custom_clicked:
                         with st.spinner("Custom input tho program run avuthundi..."):
-                            st.session_state.program_custom_results[str(question["id"])] = run_java_code(answer, custom_input)
+                            st.session_state.program_custom_results[str(question["id"])] = run_programming_code(answer, custom_input, meta.get("language", "java"))
 
                     custom_data = st.session_state.program_custom_results.get(str(question["id"]))
                     if custom_data:
