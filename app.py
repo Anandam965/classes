@@ -116,7 +116,7 @@ def evaluate_java_code(user_code, input_data, expected_output):
         result = run_java_code(user_code, input_data)
         return result.get("stdout", "").strip() == expected_output.strip()
     url = "https://judge0-ce.p.rapidapi.com/submissions?base64_encoded=false&fields=*"
-    payload = {"source_code": user_code, "language_id": 27, "stdin": input_data}
+    payload = {"source_code": user_code, "language_id": 62, "stdin": input_data}
     headers = {"x-rapidapi-key": st.secrets.get("RAPIDAPI_KEY", ""), "Content-Type": "application/json"}
     try:
         response = requests.post(url, json=payload, headers=headers).json()
@@ -138,7 +138,7 @@ PROGRAMMING_LANGUAGES = {
         "wandbox_compiler": "openjdk-jdk-21+35",
         "wandbox_options": "--release=8",
         "file_name": "Main.java",
-        "judge0_id": 27,
+        "judge0_id": 62,
         "code_language": "java",
         "default_code": """import java.util.*;
 
@@ -411,7 +411,7 @@ def run_java_code(user_code, input_data=""):
                 return {"ok": False, "status": "Java API Error", "stdout": "", "stderr": str(e)}
 
     url = "https://judge0-ce.p.rapidapi.com/submissions?base64_encoded=false&fields=*"
-    payload = {"source_code": user_code, "language_id": 27, "stdin": input_data or ""}
+    payload = {"source_code": user_code, "language_id": 62, "stdin": input_data or ""}
     headers = {"x-rapidapi-key": rapidapi_key, "Content-Type": "application/json"}
     try:
         response = requests.post(url, json=payload, headers=headers, timeout=30).json()
@@ -3040,4 +3040,3 @@ else:
         exam_workspace_view()
     else:
         user_dashboard(preview_mode=False)
-
