@@ -135,8 +135,8 @@ def evaluate_java_code(user_code, input_data, expected_output):
 PROGRAMMING_LANGUAGES = {
     "java": {
         "label": "Java",
-        "piston_language": "java",
-        "piston_version": "15.0.2",
+        "wandbox_compiler": "openjdk-jdk-21+35",
+        "wandbox_options": "--release=8",
         "file_name": "Main.java",
         "judge0_id": 27,
         "code_language": "java",
@@ -152,8 +152,8 @@ public class Main {
     },
     "c": {
         "label": "C",
-        "piston_language": "c",
-        "piston_version": "10.2.0",
+        "wandbox_compiler": "gcc-13.2.0-c",
+        "wandbox_options": "",
         "file_name": "main.c",
         "judge0_id": 50,
         "code_language": "c",
@@ -175,8 +175,8 @@ int main() {
     },
     "python": {
         "label": "Python",
-        "piston_language": "python",
-        "piston_version": "3.10.0",
+        "wandbox_compiler": "cpython-3.10.15",
+        "wandbox_options": "",
         "file_name": "main.py",
         "judge0_id": 71,
         "code_language": "python",
@@ -204,35 +204,93 @@ def get_programming_language_meta(language):
     return PROGRAMMING_LANGUAGES[normalize_programming_language(language)]
 
 
-def run_code_with_piston(user_code, input_data="", language="java"):
+def compiler_service_unavailable(text):
+    raw = str(text or "")
+    busy_markers = [
+        "Resource temporarily unavailable",
+        "OCI runtime error",
+        "Too Many Requests",
+        "rate limit",
+        "temporarily unavailable",
+        "Service Unavailable",
+        "Bad Gateway",
+        "Gateway Timeout",
+    ]
+    return any(marker.lower() in raw.lower() for marker in busy_markers)
+
+
+def normalize_compiler_stderr(stderr):
+    warning_lines = [
+        "warning: [options] source value 8 is obsolete",
+        "warning: [options] target value 8 is obsolete",
+        "warning: [options] To suppress warnings about obsolete options",
+    ]
+    return "\n".join(
+        line for line in str(stderr or "").splitlines()
+        if not any(line.startswith(w) for w in warning_lines) and line.strip() != "3 warnings"
+    )
+
+
+def run_code_with_wandbox(user_code, input_data="", language="java"):
     meta = get_programming_language_meta(language)
-    piston_payload = {
-        "language": meta["piston_language"],
-        "version": meta["piston_version"],
-        "files": [{"name": meta["file_name"], "content": user_code}],
+    code = user_code
+    if normalize_programming_language(language) == "java":
+        code = user_code.replace("public class Main", "class Main")
+    wandbox_payload = {
+        "compiler": meta["wandbox_compiler"],
+        "code": code,
         "stdin": input_data or "",
     }
-    result = requests.post("https://emkc.org/api/v2/piston/execute", json=piston_payload, timeout=40).json()
-    compile_result = result.get("compile") or {}
-    run_result = result.get("run") or {}
-    stdout = run_result.get("stdout") or ""
+    if meta.get("wandbox_options"):
+        wandbox_payload["compiler-option-raw"] = meta["wandbox_options"]
+    result = requests.post("https://wandbox.org/api/compile.json", json=wandbox_payload, timeout=40).json()
+    stdout = result.get("program_output") or ""
+    status_code = str(result.get("status", ""))
     stderr = (
-        compile_result.get("stderr")
-        or compile_result.get("output")
-        or run_result.get("stderr")
-        or run_result.get("output")
+        result.get("compiler_error")
+        or result.get("compiler_message")
+        or result.get("program_error")
+        or result.get("program_message")
         or result.get("message")
         or ""
     )
-    ok = not stderr and run_result.get("code", 0) == 0
+    stderr = normalize_compiler_stderr(stderr)
     label = meta["label"]
     return {
-        "ok": ok,
-        "status": f"Accepted ({label})" if ok else f"Error ({label})",
+        "ok": status_code == "0",
+        "status": f"Accepted ({label})" if status_code == "0" else f"Error ({label})",
         "stdout": stdout,
         "stderr": stderr,
         "time": None,
         "memory": None,
+    }
+
+
+def run_code_with_judge0_public(user_code, input_data="", language="java"):
+    meta = get_programming_language_meta(language)
+    url = "https://ce.judge0.com/submissions?base64_encoded=false&fields=*"
+    payload = {"source_code": user_code, "language_id": meta["judge0_id"], "stdin": input_data or ""}
+    headers = {"Content-Type": "application/json"}
+    response = requests.post(url, json=payload, headers=headers, timeout=30).json()
+    token = response.get("token")
+    if not token:
+        return {"ok": False, "status": "Submission failed", "stdout": "", "stderr": str(response), "time": None, "memory": None}
+    time.sleep(2)
+    result = requests.get(
+        f"https://ce.judge0.com/submissions/{token}?base64_encoded=false&fields=*",
+        headers=headers,
+        timeout=30
+    ).json()
+    status = (result.get("status") or {}).get("description", "Unknown")
+    stdout = result.get("stdout") or ""
+    stderr = normalize_compiler_stderr(result.get("stderr") or result.get("compile_output") or result.get("message") or "")
+    return {
+        "ok": status == "Accepted",
+        "status": f"{status} (Judge0 public)",
+        "stdout": stdout,
+        "stderr": stderr,
+        "time": result.get("time"),
+        "memory": result.get("memory"),
     }
 
 
@@ -245,7 +303,16 @@ def run_programming_code(user_code, input_data="", language="java"):
     rapidapi_key = st.secrets.get("RAPIDAPI_KEY", "")
     if not rapidapi_key:
         try:
-            return run_code_with_piston(user_code, input_data, lang)
+            result = run_code_with_wandbox(user_code, input_data, lang)
+            if result.get("ok") or not compiler_service_unavailable(result.get("stderr")):
+                return result
+        except Exception as e:
+            result = {"stderr": str(e)}
+        try:
+            fallback = run_code_with_judge0_public(user_code, input_data, lang)
+            if fallback.get("stderr"):
+                fallback["stderr"] = ("Wandbox busy/error kabatti Judge0 public lo run chesanu.\n" + fallback["stderr"]).strip()
+            return fallback
         except Exception as e:
             return {"ok": False, "status": f"{meta['label']} API Error", "stdout": "", "stderr": str(e), "time": None, "memory": None}
 
@@ -265,7 +332,7 @@ def run_programming_code(user_code, input_data="", language="java"):
         ).json()
         status = (result.get("status") or {}).get("description", "Unknown")
         stdout = result.get("stdout") or ""
-        stderr = result.get("stderr") or result.get("compile_output") or result.get("message") or ""
+        stderr = normalize_compiler_stderr(result.get("stderr") or result.get("compile_output") or result.get("message") or "")
         return {
             "ok": status == "Accepted",
             "status": status,
@@ -280,10 +347,8 @@ def run_programming_code(user_code, input_data="", language="java"):
 def run_java_code(user_code, input_data=""):
     rapidapi_key = st.secrets.get("RAPIDAPI_KEY", "")
     if not rapidapi_key:
-        def run_with_piston():
-            result = run_code_with_piston(user_code, input_data, "java")
-            result["status"] = "Accepted (fallback Java 15)" if result.get("ok") else "Error (fallback Java 15)"
-            return result
+        def run_with_judge0_public():
+            return run_code_with_judge0_public(user_code, input_data, "java")
 
         java8_code = user_code.replace("public class Main", "class Main")
         wandbox_payload = {
@@ -302,7 +367,7 @@ def run_java_code(user_code, input_data=""):
                     str(result.get("compiler_message") or ""),
                     str(result.get("program_message") or ""),
                 ])
-                if "Resource temporarily unavailable" not in raw_error and "OCI runtime error" not in raw_error:
+                if not compiler_service_unavailable(raw_error):
                     break
                 if attempt == 0:
                     time.sleep(1)
@@ -312,12 +377,9 @@ def run_java_code(user_code, input_data=""):
                 str(result.get("compiler_message") or ""),
                 str(result.get("program_message") or ""),
             ])
-            if "Resource temporarily unavailable" in raw_error or "OCI runtime error" in raw_error:
-                fallback = run_with_piston()
-                fallback["stderr"] = (
-                    "Java 8 server busy kabatti fallback Java 15 lo run chesanu.\n"
-                    + (fallback.get("stderr") or "")
-                ).strip()
+            if compiler_service_unavailable(raw_error):
+                fallback = run_with_judge0_public()
+                fallback["status"] = f"{fallback.get('status', 'Unknown')} - Wandbox busy fallback"
                 return fallback
             stdout = result.get("program_output") or ""
             status_code = str(result.get("status", ""))
@@ -330,15 +392,7 @@ def run_java_code(user_code, input_data=""):
                     or result.get("program_message")
                     or ""
                 )
-                warning_lines = [
-                    "warning: [options] source value 8 is obsolete",
-                    "warning: [options] target value 8 is obsolete",
-                    "warning: [options] To suppress warnings about obsolete options",
-                ]
-                stderr = "\n".join(
-                    line for line in stderr.splitlines()
-                    if not any(line.startswith(w) for w in warning_lines) and line.strip() != "3 warnings"
-                )
+                stderr = normalize_compiler_stderr(stderr)
             status = "Accepted (Java 8 compatible)" if status_code == "0" else "Error"
             return {
                 "ok": status_code == "0",
@@ -350,11 +404,8 @@ def run_java_code(user_code, input_data=""):
             }
         except Exception as e:
             try:
-                fallback = run_with_piston()
-                fallback["stderr"] = (
-                    "Java 8 API busy/error kabatti fallback Java 15 lo run chesanu.\n"
-                    + (fallback.get("stderr") or "")
-                ).strip()
+                fallback = run_with_judge0_public()
+                fallback["status"] = f"{fallback.get('status', 'Unknown')} - Wandbox API fallback"
                 return fallback
             except Exception:
                 return {"ok": False, "status": "Java API Error", "stdout": "", "stderr": str(e)}
