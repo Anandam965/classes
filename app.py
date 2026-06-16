@@ -503,8 +503,9 @@ def get_question_max_marks(question):
 def get_exam_max_marks(questions):
     return sum(get_question_max_marks(q) for q in questions)
 
-def run_programming_test_cases(question, code):
+def run_programming_test_cases(question, code, language=None):
     meta = get_programming_meta(question)
+    selected_language = normalize_programming_language(language or meta.get("language", "java"))
     results = []
     total_marks = get_question_max_marks(question)
     earned = 0
@@ -515,7 +516,7 @@ def run_programming_test_cases(question, code):
             marks = int(tc.get("marks", 0) or 0)
         except Exception:
             marks = 0
-        result = run_programming_code(code, inp, meta.get("language", "java"))
+        result = run_programming_code(code, inp, selected_language)
         actual = str(result.get("stdout", "")).strip()
         passed = result.get("ok") and actual == expected
         if passed:
@@ -532,7 +533,7 @@ def run_programming_test_cases(question, code):
             "error": result.get("stderr", ""),
         })
     pct = int((earned / total_marks) * 100) if total_marks else 0
-    return {"earned": earned, "total": total_marks, "percentage": pct, "results": results}
+    return {"earned": earned, "total": total_marks, "percentage": pct, "language": selected_language, "results": results}
 
 def is_programming_exam(exam_id):
     try:
@@ -568,9 +569,19 @@ def user_attempted_question(user_id, question_id):
     except Exception:
         return False
 
-def get_cached_program_submission(question_id, code):
+def parse_program_answer(value, default_language="java"):
+    if isinstance(value, dict):
+        return str(value.get("code", "")), normalize_programming_language(value.get("language", default_language))
+    return str(value or ""), normalize_programming_language(default_language)
+
+
+def get_cached_program_submission(question_id, code, language="java"):
     saved = st.session_state.program_submissions.get(str(question_id), {})
-    if saved.get("code") == code and saved.get("score_data"):
+    if (
+        saved.get("code") == code
+        and normalize_programming_language(saved.get("language", language)) == normalize_programming_language(language)
+        and saved.get("score_data")
+    ):
         return saved["score_data"]
     return None
 
@@ -580,9 +591,9 @@ def get_unsubmitted_program_questions(questions, answers):
         if q.get("type") != "programming":
             continue
         qid = q["id"]
-        code = answers.get(qid, "")
-        code = code if isinstance(code, str) else str(code)
-        if not get_cached_program_submission(qid, code):
+        meta = get_programming_meta(q)
+        code, language = parse_program_answer(answers.get(qid, ""), meta.get("language", "java"))
+        if not get_cached_program_submission(qid, code, language):
             pending.append(idx)
     return pending
 
@@ -594,10 +605,11 @@ def score_exam_answers(questions, answers, use_cached_programming=True):
         qid = q["id"]
         user_val = answers.get(qid, "")
         if q.get("type") == "programming":
-            code = user_val if isinstance(user_val, str) else str(user_val)
-            score_data = get_cached_program_submission(qid, code) if use_cached_programming else None
+            meta = get_programming_meta(q)
+            code, language = parse_program_answer(user_val, meta.get("language", "java"))
+            score_data = get_cached_program_submission(qid, code, language) if use_cached_programming else None
             if score_data is None and not use_cached_programming:
-                score_data = run_programming_test_cases(q, code)
+                score_data = run_programming_test_cases(q, code, language)
             if score_data is None:
                 score_data = {
                     "earned": 0,
@@ -607,7 +619,7 @@ def score_exam_answers(questions, answers, use_cached_programming=True):
                     "note": "Program was not individually submitted before final exam submit.",
                 }
             earned_marks += int(score_data.get("earned", 0) or 0)
-            answer_payloads[qid] = json.dumps({"code": code, **score_data}, ensure_ascii=False)
+            answer_payloads[qid] = json.dumps({"code": code, "language": language, **score_data}, ensure_ascii=False)
         elif q.get("type") == "mcq":
             if check_mcq_correct(user_val, q):
                 earned_marks += 1
@@ -633,6 +645,7 @@ def compact_answer_for_save(answer, max_chars=3500):
                 "code": code[:max_chars],
                 "earned": earned,
                 "total": total,
+                "language": data.get("language", "java"),
                 "note": "Detailed test-case output was trimmed while saving.",
             }, ensure_ascii=False)
     except Exception:
@@ -1559,7 +1572,8 @@ def render_review_sheet(questions, ans_map, db_attempt):
                 except Exception:
                     prog_ans = {"code": u_ans}
                 st.caption(f"Score: {prog_ans.get('earned', 0)}/{prog_ans.get('total', get_question_max_marks(q))} ({prog_ans.get('percentage', 0)}%)")
-                st.code(prog_ans.get("code", ""), language=get_programming_language_meta(get_programming_meta(q).get("language", "java"))["code_language"])
+                answer_language = prog_ans.get("language", get_programming_meta(q).get("language", "java"))
+                st.code(prog_ans.get("code", ""), language=get_programming_language_meta(answer_language)["code_language"])
                 for res in prog_ans.get("results", []):
                     badge = "✅ Passed" if res.get("passed") else "❌ Failed"
                     st.caption(f"Test Case {res.get('case')}: {badge} • {res.get('marks', 0)} marks")
@@ -2874,14 +2888,16 @@ def exam_workspace_view():
             else:
                 meta = get_programming_meta(question)
                 max_marks = get_question_max_marks(question)
-                lang_meta = get_programming_language_meta(meta.get("language", "java"))
+                stored_code, stored_language = parse_program_answer(stored_ans, meta.get("language", "java"))
+                language_options = list(PROGRAMMING_LANGUAGE_LABELS.keys())
+                current_language_label = get_programming_language_meta(stored_language)["label"]
                 p_left, p_right = st.columns([1, 1])
                 with p_left:
                     st.markdown("#### Problem")
                     st.markdown(f"**{question['question']}**")
                     if meta.get("description"):
                         st.markdown(meta["description"])
-                    st.caption(f"Language: {lang_meta['label']} | Total Marks: {max_marks}")
+                    st.caption(f"Total Marks: {max_marks}")
                     with st.expander("Sample test cases"):
                         for idx, tc in enumerate(meta.get("test_cases", []), start=1):
                             if tc.get("hidden", False):
@@ -2889,10 +2905,18 @@ def exam_workspace_view():
                             st.markdown(f"**Case {idx}** • {tc.get('marks', 0)} marks")
                             st.code(f"Input:\n{tc.get('input','')}\n\nExpected Output:\n{tc.get('expected_output','')}", language="text")
                 with p_right:
+                    selected_language_label = st.selectbox(
+                        "Language",
+                        language_options,
+                        index=language_options.index(current_language_label) if current_language_label in language_options else 0,
+                        key=f"prog_language_{question['id']}"
+                    )
+                    selected_language = PROGRAMMING_LANGUAGE_LABELS[selected_language_label]
+                    lang_meta = get_programming_language_meta(selected_language)
                     enable_textarea_tab_support()
-                    editor_value = stored_ans if stored_ans else ""
+                    editor_value = stored_code if stored_code else ""
                     answer = st.text_area(f"{lang_meta['label']} Program", value=editor_value, key=f"code_{question['id']}", height=360)
-                    st.session_state.answers[question["id"]] = answer
+                    st.session_state.answers[question["id"]] = {"code": answer, "language": selected_language}
                     custom_input = st.text_area(
                         "Custom Input",
                         key=f"custom_input_{question['id']}",
@@ -2909,17 +2933,17 @@ def exam_workspace_view():
 
                     if run_tests_clicked:
                         with st.spinner("Program run avuthundi..."):
-                            st.session_state.program_run_results[str(question["id"])] = run_programming_test_cases(question, answer)
+                            st.session_state.program_run_results[str(question["id"])] = run_programming_test_cases(question, answer, selected_language)
 
                     if submit_program_clicked:
                         with st.spinner("Program submit avuthundi..."):
-                            score_data = run_programming_test_cases(question, answer)
+                            score_data = run_programming_test_cases(question, answer, selected_language)
                             st.session_state.program_run_results[str(question["id"])] = score_data
-                            st.session_state.program_submissions[str(question["id"])] = {"code": answer, "score_data": score_data}
+                            st.session_state.program_submissions[str(question["id"])] = {"code": answer, "language": selected_language, "score_data": score_data}
                             st.success(f"Program submitted: {score_data['earned']}/{score_data['total']} marks")
 
                     saved_prog = st.session_state.program_submissions.get(str(question["id"]), {})
-                    if saved_prog.get("code") == answer and saved_prog.get("score_data"):
+                    if saved_prog.get("code") == answer and normalize_programming_language(saved_prog.get("language", selected_language)) == selected_language and saved_prog.get("score_data"):
                         saved_score = saved_prog["score_data"]
                         st.success(f"Saved for final submit: {saved_score['earned']}/{saved_score['total']} marks")
                     elif saved_prog:
@@ -2929,9 +2953,13 @@ def exam_workspace_view():
 
                     if run_custom_clicked:
                         with st.spinner("Custom input tho program run avuthundi..."):
-                            st.session_state.program_custom_results[str(question["id"])] = run_programming_code(answer, custom_input, meta.get("language", "java"))
+                            custom_result = run_programming_code(answer, custom_input, selected_language)
+                            custom_result["language"] = selected_language
+                            st.session_state.program_custom_results[str(question["id"])] = custom_result
 
                     custom_data = st.session_state.program_custom_results.get(str(question["id"]))
+                    if custom_data and normalize_programming_language(custom_data.get("language", selected_language)) != selected_language:
+                        custom_data = None
                     if custom_data:
                         st.markdown("#### Custom Output")
                         st.caption(f"Status: {custom_data.get('status','')}")
@@ -2942,6 +2970,8 @@ def exam_workspace_view():
                             st.code(custom_data.get("stderr", ""), language="text")
 
                     run_data = st.session_state.program_run_results.get(str(question["id"]))
+                    if run_data and normalize_programming_language(run_data.get("language", selected_language)) != selected_language:
+                        run_data = None
                     if run_data:
                         st.markdown(f"#### Result: {run_data['earned']}/{run_data['total']} marks ({run_data['percentage']}%)")
                         for res in run_data["results"]:
