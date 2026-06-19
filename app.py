@@ -834,9 +834,7 @@ def login():
             else:
                 try:
                     user_data = supabase.table("users").select("*").eq("app_pin", pin).execute()
-                    if not user_data.data:
-                        st.error("Wrong PIN. Try again.")
-                    else:
+                    if user_data.data:
                         urow = user_data.data[0]
                         st.session_state.logged_in = True
                         st.session_state.role = urow["role"]
@@ -845,6 +843,17 @@ def login():
                         st.query_params["uid"] = str(urow["id"])
                         st.query_params["role"] = urow["role"]
                         st.rerun()
+                    card_user_data = supabase.table("card_users").select("*").eq("app_pin", pin).execute()
+                    if card_user_data.data:
+                        urow = card_user_data.data[0]
+                        st.session_state.logged_in = True
+                        st.session_state.role = "card_user"
+                        st.session_state.user_id = urow["id"]
+                        st.session_state.pin_verified = True
+                        st.query_params["uid"] = str(urow["id"])
+                        st.query_params["role"] = "card_user"
+                        st.rerun()
+                    st.error("Wrong PIN. Try again.")
                 except Exception as e:
                     st.error(str(e))
 
@@ -2610,9 +2619,18 @@ def money_value(value):
 def show_credit_card_sql_help():
     with st.expander("Credit Cards database SQL setup"):
         st.code("""
+create table if not exists card_users (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  mobile text,
+  app_pin text not null unique,
+  active boolean not null default true,
+  created_at timestamptz default now()
+);
+
 create table if not exists card_user_cards (
   id uuid primary key default gen_random_uuid(),
-  user_id uuid not null references users(id) on delete cascade,
+  user_id uuid not null references card_users(id) on delete cascade,
   card_code text not null check (card_code in ('card_1','card_2')),
   created_at timestamptz default now(),
   unique(user_id, card_code)
@@ -2620,7 +2638,7 @@ create table if not exists card_user_cards (
 
 create table if not exists card_transactions (
   id uuid primary key default gen_random_uuid(),
-  user_id uuid not null references users(id) on delete cascade,
+  user_id uuid not null references card_users(id) on delete cascade,
   card_code text not null check (card_code in ('card_1','card_2')),
   purpose text not null,
   amount numeric not null default 0,
@@ -2635,7 +2653,7 @@ create table if not exists card_transactions (
 
 create table if not exists card_payments (
   id uuid primary key default gen_random_uuid(),
-  user_id uuid not null references users(id) on delete cascade,
+  user_id uuid not null references card_users(id) on delete cascade,
   card_code text not null check (card_code in ('card_1','card_2')),
   billing_month text not null,
   bill_start date not null,
@@ -2654,7 +2672,7 @@ create table if not exists card_payments (
 
 def get_card_users():
     try:
-        return supabase.table("users").select("id, name, email, role").eq("role", "card_user").order("name").execute().data or []
+        return supabase.table("card_users").select("id, name, mobile, app_pin, active").order("name").execute().data or []
     except Exception:
         return []
 
@@ -2693,18 +2711,19 @@ def admin_credit_cards_dashboard():
                 st.error("PIN 4 to 6 digits undali.")
             else:
                 try:
-                    existing = supabase.table("users").select("id").eq("app_pin", pin).execute().data
-                    if existing:
+                    existing_lms = supabase.table("users").select("id").eq("app_pin", pin).execute().data
+                    existing_card = supabase.table("card_users").select("id").eq("app_pin", pin).execute().data
+                    if existing_lms or existing_card:
                         st.error("Ee PIN already another user ki undi. Vere PIN try cheyyandi.")
                     else:
-                        new_user_id = str(uuid.uuid4())
-                        supabase.table("users").insert({
-                            "id": new_user_id,
+                        created = supabase.table("card_users").insert({
                             "name": name.strip(),
-                            "email": mobile.strip() or f"card-user-{new_user_id[:8]}",
-                            "role": "card_user",
+                            "mobile": mobile.strip(),
                             "app_pin": pin,
                         }).execute()
+                        new_user_id = created.data[0]["id"] if created.data else None
+                        if not new_user_id:
+                            raise Exception("Card user create failed.")
                         for card_code in assigned:
                             supabase.table("card_user_cards").insert({"user_id": new_user_id, "card_code": card_code}).execute()
                         st.success("Card user PIN login created. User PIN tho login avvachu.")
@@ -2717,7 +2736,7 @@ def admin_credit_cards_dashboard():
         if not users:
             st.info("No card users yet.")
         for user in users:
-            with st.expander(f"{user.get('name','User')} - {user.get('email','')}"):
+            with st.expander(f"{user.get('name','User')} - {user.get('mobile','')}"):
                 current_cards = get_assigned_cards(user["id"])
                 selected_cards = st.multiselect("Assigned cards", ["card_1", "card_2"], default=current_cards, format_func=get_card_label, key=f"cards_{user['id']}")
                 if st.button("Save cards", key=f"save_cards_{user['id']}"):
@@ -2740,7 +2759,7 @@ def admin_credit_cards_dashboard():
         if not rows:
             st.info("Pending transactions levu.")
         for row in rows:
-            user = supabase.table("users").select("name, email").eq("id", row["user_id"]).execute().data or [{}]
+            user = supabase.table("card_users").select("name, mobile").eq("id", row["user_id"]).execute().data or [{}]
             with st.expander(f"{get_card_label(row['card_code'])} | {user[0].get('name','User')} | Rs.{money_value(row.get('amount')):.2f} | {row.get('transaction_date')}"):
                 st.write(row.get("purpose", ""))
                 if row.get("proof_url"):
@@ -2767,7 +2786,7 @@ def admin_credit_cards_dashboard():
             st.error(f"Payments load failed: {e}")
             payments = []
         for pay in payments:
-            user = supabase.table("users").select("name, email").eq("id", pay["user_id"]).execute().data or [{}]
+            user = supabase.table("card_users").select("name, mobile").eq("id", pay["user_id"]).execute().data or [{}]
             with st.expander(f"{pay.get('status','pending').upper()} | {get_card_label(pay['card_code'])} | {user[0].get('name','User')} | {pay.get('billing_month')} | Rs.{money_value(pay.get('amount')):.2f}"):
                 st.write(f"Bill period: {pay.get('bill_start')} to {pay.get('bill_end')}")
                 st.link_button("Open payment screenshot", pay["proof_url"])
@@ -2789,7 +2808,7 @@ def admin_credit_cards_dashboard():
         st.subheader("Add transaction for a user")
         users = get_card_users()
         if users:
-            labels = {f"{u.get('name','User')} ({u.get('email','')})": u for u in users}
+            labels = {f"{u.get('name','User')} ({u.get('mobile','')})": u for u in users}
             selected_label = st.selectbox("User", list(labels.keys()), key="manual_card_user")
             selected_user = labels[selected_label]
             user_cards = get_assigned_cards(selected_user["id"]) or ["card_1", "card_2"]
@@ -2827,7 +2846,7 @@ def admin_credit_cards_dashboard():
             st.error(f"Transactions load failed: {e}")
             txns = []
         for row in txns:
-            user = supabase.table("users").select("name, email").eq("id", row["user_id"]).execute().data or [{}]
+            user = supabase.table("card_users").select("name, mobile").eq("id", row["user_id"]).execute().data or [{}]
             with st.expander(f"{get_card_label(row['card_code'])} | {user[0].get('name','User')} | {row.get('purpose','')}"):
                 col1, col2, col3 = st.columns([2, 1, 1])
                 new_purpose = col1.text_input("Purpose", value=row.get("purpose") or "", key=f"edit_purpose_{row['id']}")
