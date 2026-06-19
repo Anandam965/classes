@@ -952,6 +952,10 @@ def mark_notifications_read(user_id):
     except Exception:
         pass
 
+def clean_ui_text(value):
+    text = str(value or "")
+    return "".join(ch for ch in text if ch == "\n" or ch == "\t" or 32 <= ord(ch) <= 126).strip()
+
 def show_notification_banner(user_id):
     notifs = get_unread_notifications(user_id)
     if not notifs:
@@ -962,7 +966,7 @@ def show_notification_banner(user_id):
           border-radius:0 8px 8px 0;margin-bottom:5px;font-size:0.92rem;color:#c0392b;font-weight:500; }
         .notif-wrap:first-child { border-left-color:#e74c3c;background:#ffeaea;font-weight:700;font-size:0.97rem; }
         </style>""", unsafe_allow_html=True)
-    notif_html = "".join(f"<div class='notif-wrap'>ðŸ”” {n['message']}</div>" for n in notifs)
+    notif_html = "".join(f"<div class='notif-wrap'>Alert: {clean_ui_text(n.get('message'))}</div>" for n in notifs)
     st.markdown(notif_html, unsafe_allow_html=True)
     if st.button(f"âœ… Mark all as Read ({len(notifs)})", key="mark_notif_read", type="secondary"):
         mark_notifications_read(user_id)
@@ -1757,8 +1761,8 @@ def check_mcq_correct(user_val, q):
 
 
 def admin_dashboard():
-    st.sidebar.title("ðŸ›¡ï¸ Admin Workspace")
-    if st.sidebar.button("ðŸšª Logout", use_container_width=True):
+    st.sidebar.title("Admin Workspace")
+    if st.sidebar.button("Logout", use_container_width=True):
         for key in defaults:
             st.session_state[key] = defaults[key]
         st.query_params.clear()
@@ -1766,14 +1770,14 @@ def admin_dashboard():
 
     st.sidebar.divider()
     if st.session_state.admin_preview_mode:
-        if st.sidebar.button("ðŸ›¡ï¸ Admin View à°•à°¿ à°¤à°¿à°°à°¿à°—à°¿ à°µà±†à°³à±à°³à±", use_container_width=True, type="primary"):
+        if st.sidebar.button("Back to Admin View", use_container_width=True, type="primary"):
             st.session_state.admin_preview_mode = False
             st.rerun()
         user_dashboard(preview_mode=True)
         return
     else:
         show_notification_banner(st.session_state.user_id)
-        if st.sidebar.button("ðŸ‘ï¸ Student View Preview", use_container_width=True):
+        if st.sidebar.button("Student View Preview", use_container_width=True):
             st.session_state.admin_preview_mode = True
             st.rerun()
     st.sidebar.divider()
@@ -1783,9 +1787,9 @@ def admin_dashboard():
     label = f"Group Chat ({unread_admin})" if unread_admin > 0 else "Group Chat"
     
     menu = st.sidebar.selectbox("Navigation Control",
-        ["ðŸ—‚ï¸ Manage Course Content", "ðŸ“ Manage Exams & Questions", "ðŸ“Š Student Results & Ranks", "chat_menu_label"])
+        ["Manage Course Content", "Manage Exams & Questions", "Student Results & Ranks", "chat_menu_label"])
     if "Group Chat" in menu:
-        menu = "ðŸ’¬ Group Chat"
+        menu = "Group Chat"
     if st.sidebar.button("Credit Cards", use_container_width=True):
         menu = "Credit Cards"
 
@@ -1793,7 +1797,7 @@ def admin_dashboard():
         admin_credit_cards_dashboard()
         return
 
-    if menu == "ðŸ—‚ï¸ Manage Course Content":
+    if menu == "Manage Course Content":
         tab1, tab2, tab3 = st.tabs(["ðŸ“ Modules Setup", "ðŸ“‚ Submodules Setup", "ðŸ–¥ï¸ Live/Recorded Classes"])
 
         with tab1:
@@ -1899,7 +1903,7 @@ def admin_dashboard():
                             supabase.table("classes").delete().eq("id", cls["id"]).execute()
                             st.warning("Deleted!"); st.rerun()
 
-    elif menu == "ðŸ“ Manage Exams & Questions":
+    elif menu == "Manage Exams & Questions":
         ex_tab1, ex_tab2, ex_tab3, ex_tab4, ex_tab5 = st.tabs([
             "ðŸ“ Exams Setup", "â“ Add Questions", "ðŸ” Review Papers", "ðŸ“ Bulk Upload (CSV)", "ðŸ¤– AI Gen"
         ])
@@ -2406,7 +2410,7 @@ def admin_dashboard():
                         else:
                             st.error("Question text empty!")
 
-    elif menu == "ðŸ“Š Student Results & Ranks":
+    elif menu == "Student Results & Ranks":
         r_tab1, r_tab2, r_tab3, r_tab4, r_tab5, r_tab6 = st.tabs([
             "ðŸ† Leaderboards", "ðŸ“ Manual Evaluation", "ðŸ“œ Score Summary",
             "ðŸ”„ Re-Exam Requests", "ðŸ“Œ Explain Requests", "ðŸ“… Attendance"
@@ -2547,7 +2551,7 @@ def admin_dashboard():
                 sel_uid = all_students[sel_idx]["id"]
                 show_attendance_tab(sel_uid)
 
-    elif menu == "ðŸ’¬ Group Chat":
+    elif menu == "Group Chat":
         with st.expander("ðŸ”” Broadcast Notification à°ªà°‚à°ªà°‚à°¡à°¿"):
             notif_msg = st.text_input("Message", key="broadcast_msg")
             if st.button("ðŸ“£ Send to All Users", type="primary"):
@@ -2675,32 +2679,35 @@ def admin_credit_cards_dashboard():
     tab_users, tab_txns, tab_payments, tab_manual = st.tabs(["Users & Cards", "Approve Transactions", "Payment Screenshots", "Add/Edit Transactions"])
 
     with tab_users:
-        st.subheader("Add card user login")
+        st.subheader("Add card user PIN login")
         with st.form("add_card_user_form", clear_on_submit=True):
             name = st.text_input("User name")
-            email = st.text_input("Login email")
-            password = st.text_input("Temporary password", type="password")
+            mobile = st.text_input("Mobile / note")
+            pin = st.text_input("Login PIN", type="password", max_chars=6)
             assigned = st.multiselect("Cards allowed", ["card_1", "card_2"], format_func=get_card_label, default=["card_1"])
-            submitted = st.form_submit_button("Create Login", type="primary")
+            submitted = st.form_submit_button("Create PIN Login", type="primary")
         if submitted:
-            if not name.strip() or not email.strip() or not password.strip() or not assigned:
-                st.error("Name, email, password, cards required.")
+            if not name.strip() or not pin.strip() or not assigned:
+                st.error("Name, PIN, cards required.")
+            elif not pin.isdigit() or len(pin) < 4:
+                st.error("PIN 4 to 6 digits undali.")
             else:
                 try:
-                    auth_res = supabase.auth.sign_up({"email": email.strip(), "password": password})
-                    auth_user = auth_res.user
-                    if not auth_user:
-                        st.error("Auth user create failed. Supabase email confirmation settings check cheyyandi.")
+                    existing = supabase.table("users").select("id").eq("app_pin", pin).execute().data
+                    if existing:
+                        st.error("Ee PIN already another user ki undi. Vere PIN try cheyyandi.")
                     else:
-                        supabase.table("users").upsert({
-                            "id": auth_user.id,
+                        new_user_id = str(uuid.uuid4())
+                        supabase.table("users").insert({
+                            "id": new_user_id,
                             "name": name.strip(),
-                            "email": email.strip(),
+                            "email": mobile.strip() or f"card-user-{new_user_id[:8]}",
                             "role": "card_user",
+                            "app_pin": pin,
                         }).execute()
                         for card_code in assigned:
-                            supabase.table("card_user_cards").upsert({"user_id": auth_user.id, "card_code": card_code}, on_conflict="user_id,card_code").execute()
-                        st.success("Card user login created.")
+                            supabase.table("card_user_cards").insert({"user_id": new_user_id, "card_code": card_code}).execute()
+                        st.success("Card user PIN login created. User PIN tho login avvachu.")
                         st.rerun()
                 except Exception as e:
                     st.error(f"Create user failed: {e}")
