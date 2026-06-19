@@ -17,7 +17,7 @@ def upload_image_to_imgbb(image_file):
     try:
         api_key = st.secrets.get("IMGBB_API_KEY", "")
         if not api_key:
-            st.error("IMGBB_API_KEY secrets లో లేదు!")
+            st.error("IMGBB_API_KEY secrets à°²à±‹ à°²à±‡à°¦à±!")
             return None
         img_data = base64.b64encode(image_file.read()).decode("utf-8")
         response = requests.post("https://api.imgbb.com/1/upload", data={"key": api_key, "image": img_data})
@@ -44,7 +44,7 @@ try:
     SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
     supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 except Exception as e:
-    st.error("Secrets లో విలువలు కనపడటం లేదు. Settings -> Secrets ని చెక్ చేయండి.")
+    st.error("Secrets à°²à±‹ à°µà°¿à°²à±à°µà°²à± à°•à°¨à°ªà°¡à°Ÿà°‚ à°²à±‡à°¦à±. Settings -> Secrets à°¨à°¿ à°šà±†à°•à± à°šà±‡à°¯à°‚à°¡à°¿.")
     st.stop()
 
 try:
@@ -75,6 +75,7 @@ defaults = {
     "user_id_temp": "",
     "role_temp": "",
     "user_page": "My Classes",
+    "card_user_page": "Monthly Bill",
     "focus_class_id": "",
     "focus_exam_id": "",
     "question_start_time": {},
@@ -698,7 +699,7 @@ def get_answer_time_spent(attempt_id, question_id):
         return 0
 
 # =========================
-# OCR: IMAGE → QUESTION EXTRACT
+# OCR: IMAGE â†’ QUESTION EXTRACT
 # =========================
 def extract_question_from_image(image_source):
     """Image nundi OCR.space API use chesi question + options extract cheyyali"""
@@ -770,7 +771,7 @@ def extract_question_from_image(image_source):
     try:
         api_key = st.secrets.get("OCR_SPACE_API_KEY", "")
         if not api_key:
-            st.error("OCR_SPACE_API_KEY Streamlit secrets లో add చేయండి.")
+            st.error("OCR_SPACE_API_KEY Streamlit secrets à°²à±‹ add à°šà±‡à°¯à°‚à°¡à°¿.")
             return None
         payload = {"apikey": api_key, "language": "eng", "OCREngine": "2",
                    "isOverlayRequired": "false", "scale": "true"}
@@ -790,21 +791,21 @@ def extract_question_from_image(image_source):
         parsed = result.get("ParsedResults") or []
         raw_text = "\n".join(p.get("ParsedText","") for p in parsed if p.get("ParsedText")).strip()
         if not raw_text:
-            st.error("Image లో text clear గా కనిపించలేదు.")
+            st.error("Image à°²à±‹ text clear à°—à°¾ à°•à°¨à°¿à°ªà°¿à°‚à°šà°²à±‡à°¦à±.")
             return None
-        with st.expander("📄 OCR raw text చూడండి"):
+        with st.expander("ðŸ“„ OCR raw text à°šà±‚à°¡à°‚à°¡à°¿"):
             st.code(raw_text)
         return parse_ocr_text(raw_text)
     except Exception as e:
-        st.error(f"Image నుండి question extract కాలేదు: {e}")
+        st.error(f"Image à°¨à±à°‚à°¡à°¿ question extract à°•à°¾à°²à±‡à°¦à±: {e}")
         return None
 
 
 def login():
-    st.title("📚 LMS Login")
-    login_method = st.radio("Login method:", ["📧 Email & Password", "🔑 PIN తో Login"], horizontal=True, key="login_method_radio")
+    st.title("ðŸ“š LMS Login")
+    login_method = st.radio("Login method:", ["ðŸ“§ Email & Password", "ðŸ”‘ PIN à°¤à±‹ Login"], horizontal=True, key="login_method_radio")
 
-    if login_method == "📧 Email & Password":
+    if login_method == "ðŸ“§ Email & Password":
         email = st.text_input("Email", key="login_email")
         password = st.text_input("Password", type="password", key="login_password")
         if st.button("Login", type="primary", use_container_width=True, key="email_login_btn"):
@@ -821,20 +822,20 @@ def login():
                     st.session_state.pin_verified = False
                     st.rerun()
                 else:
-                    st.error("User record కనపడటం లేదు.")
+                    st.error("User record à°•à°¨à°ªà°¡à°Ÿà°‚ à°²à±‡à°¦à±.")
             except Exception as e:
                 st.error(str(e))
     else:
-        st.caption("మీ unique PIN enter చేయండి.")
-        pin = st.text_input("🔑 PIN", type="password", max_chars=6, key="pin_only_input")
-        if st.button("🔓 Enter App", type="primary", use_container_width=True, key="pin_only_btn"):
+        st.caption("à°®à±€ unique PIN enter à°šà±‡à°¯à°‚à°¡à°¿.")
+        pin = st.text_input("ðŸ”‘ PIN", type="password", max_chars=6, key="pin_only_input")
+        if st.button("ðŸ”“ Enter App", type="primary", use_container_width=True, key="pin_only_btn"):
             if not pin:
-                st.error("PIN enter చేయండి.")
+                st.error("PIN enter à°šà±‡à°¯à°‚à°¡à°¿.")
             else:
                 try:
                     user_data = supabase.table("users").select("*").eq("app_pin", pin).execute()
                     if not user_data.data:
-                        st.error("❌ Wrong PIN! మళ్ళీ try చేయండి.")
+                        st.error("âŒ Wrong PIN! à°®à°³à±à°³à±€ try à°šà±‡à°¯à°‚à°¡à°¿.")
                     else:
                         urow = user_data.data[0]
                         st.session_state.logged_in = True
@@ -849,21 +850,21 @@ def login():
 
 
 def pin_screen():
-    st.title("🔒 App Lock")
+    st.title("ðŸ”’ App Lock")
     if st.session_state.pin_setup_mode:
-        st.subheader("మీ PIN set చేయండి (4-6 digits)")
-        st.caption("ఈ PIN globally unique గా ఉంటుంది.")
-        pin1 = st.text_input("కొత్త PIN (4-6 digits)", type="password", max_chars=6, key="pin_new")
-        pin2 = st.text_input("PIN మళ్ళీ enter చేయండి", type="password", max_chars=6, key="pin_confirm")
-        if st.button("✅ PIN Set చేయి", type="primary", use_container_width=True):
+        st.subheader("à°®à±€ PIN set à°šà±‡à°¯à°‚à°¡à°¿ (4-6 digits)")
+        st.caption("à°ˆ PIN globally unique à°—à°¾ à°‰à°‚à°Ÿà±à°‚à°¦à°¿.")
+        pin1 = st.text_input("à°•à±Šà°¤à±à°¤ PIN (4-6 digits)", type="password", max_chars=6, key="pin_new")
+        pin2 = st.text_input("PIN à°®à°³à±à°³à±€ enter à°šà±‡à°¯à°‚à°¡à°¿", type="password", max_chars=6, key="pin_confirm")
+        if st.button("âœ… PIN Set à°šà±‡à°¯à°¿", type="primary", use_container_width=True):
             if not pin1.isdigit() or len(pin1) < 4:
-                st.error("4-6 digits మాత్రమే enter చేయండి!")
+                st.error("4-6 digits à°®à°¾à°¤à±à°°à°®à±‡ enter à°šà±‡à°¯à°‚à°¡à°¿!")
             elif pin1 != pin2:
-                st.error("రెండు PINలు match కాలేదు!")
+                st.error("à°°à±†à°‚à°¡à± PINà°²à± match à°•à°¾à°²à±‡à°¦à±!")
             else:
                 existing = supabase.table("users").select("id").eq("app_pin", pin1).execute().data
                 if existing and existing[0]["id"] != st.session_state.user_id_temp:
-                    st.error("❌ ఈ PIN వేరె user వాడుతున్నారు.")
+                    st.error("âŒ à°ˆ PIN à°µà±‡à°°à±† user à°µà°¾à°¡à±à°¤à±à°¨à±à°¨à°¾à°°à±.")
                 else:
                     supabase.table("users").update({"app_pin": pin1}).eq("id", st.session_state.user_id_temp).execute()
                     st.session_state.logged_in = True
@@ -872,14 +873,14 @@ def pin_screen():
                     st.session_state.pin_verified = True
                     st.query_params["uid"] = str(st.session_state.user_id_temp)
                     st.query_params["role"] = st.session_state.role_temp
-                    st.success("PIN set అయింది! Welcome 🎉")
+                    st.success("PIN set à°…à°¯à°¿à°‚à°¦à°¿! Welcome ðŸŽ‰")
                     st.rerun()
     else:
-        st.subheader("మీ PIN enter చేయండి")
+        st.subheader("à°®à±€ PIN enter à°šà±‡à°¯à°‚à°¡à°¿")
         pin_input = st.text_input("4-digit PIN", type="password", max_chars=4, key="pin_entry")
         col1, col2 = st.columns(2)
         with col1:
-            if st.button("🔓 Enter App", type="primary", use_container_width=True):
+            if st.button("ðŸ”“ Enter App", type="primary", use_container_width=True):
                 urow = supabase.table("users").select("app_pin").eq("id", st.session_state.user_id_temp).execute().data
                 if urow and urow[0]["app_pin"] == pin_input:
                     st.session_state.logged_in = True
@@ -890,9 +891,9 @@ def pin_screen():
                     st.query_params["role"] = st.session_state.role_temp
                     st.rerun()
                 else:
-                    st.error("❌ Wrong PIN!")
+                    st.error("âŒ Wrong PIN!")
         with col2:
-            if st.button("🔙 వేరే Account తో Login", use_container_width=True):
+            if st.button("ðŸ”™ à°µà±‡à°°à±‡ Account à°¤à±‹ Login", use_container_width=True):
                 st.session_state.email_temp = ""
                 st.session_state.user_id_temp = ""
                 st.session_state.role_temp = ""
@@ -961,9 +962,9 @@ def show_notification_banner(user_id):
           border-radius:0 8px 8px 0;margin-bottom:5px;font-size:0.92rem;color:#c0392b;font-weight:500; }
         .notif-wrap:first-child { border-left-color:#e74c3c;background:#ffeaea;font-weight:700;font-size:0.97rem; }
         </style>""", unsafe_allow_html=True)
-    notif_html = "".join(f"<div class='notif-wrap'>🔔 {n['message']}</div>" for n in notifs)
+    notif_html = "".join(f"<div class='notif-wrap'>ðŸ”” {n['message']}</div>" for n in notifs)
     st.markdown(notif_html, unsafe_allow_html=True)
-    if st.button(f"✅ Mark all as Read ({len(notifs)})", key="mark_notif_read", type="secondary"):
+    if st.button(f"âœ… Mark all as Read ({len(notifs)})", key="mark_notif_read", type="secondary"):
         mark_notifications_read(user_id)
         st.rerun()
 
@@ -983,13 +984,13 @@ def get_unread_count(user_id):
         return 0
 
 def group_chat():
-    st.title("💬 Group Chat")
+    st.title("ðŸ’¬ Group Chat")
     user_id = str(st.session_state.user_id)
     messages = supabase.table("messages").select("*").order("created_at", desc=False).limit(50).execute().data
     chat_container = st.container(height=450)
     with chat_container:
         if not messages:
-            st.info("ఇంకా messages లేవు. మొదటిగా message చేయండి! 👋")
+            st.info("à°‡à°‚à°•à°¾ messages à°²à±‡à°µà±. à°®à±Šà°¦à°Ÿà°¿à°—à°¾ message à°šà±‡à°¯à°‚à°¡à°¿! ðŸ‘‹")
         for msg in messages:
             is_me = msg["user_id"] == user_id
             time_str = str(msg.get("created_at", ""))[:16]
@@ -1012,11 +1013,11 @@ def group_chat():
     st.divider()
     col_input, col_send, col_read = st.columns([5, 1, 1])
     with col_input:
-        new_msg = st.text_input("Message రాయండి...", key="chat_input", label_visibility="collapsed")
+        new_msg = st.text_input("Message à°°à°¾à°¯à°‚à°¡à°¿...", key="chat_input", label_visibility="collapsed")
     with col_send:
-        send = st.button("📤 Send", use_container_width=True, type="primary")
+        send = st.button("ðŸ“¤ Send", use_container_width=True, type="primary")
     with col_read:
-        mark_read = st.button("✅ Read", use_container_width=True)
+        mark_read = st.button("âœ… Read", use_container_width=True)
     if send and new_msg.strip():
         uinfo = supabase.table("users").select("name").eq("id", user_id).execute().data
         uname = uinfo[0]["name"] if uinfo else "Unknown"
@@ -1025,7 +1026,7 @@ def group_chat():
         st.rerun()
     if mark_read:
         supabase.table("message_reads").upsert({"user_id": user_id, "last_read_at": "now()"}, on_conflict="user_id").execute()
-        st.success("✅ అన్ని messages చదివినట్లు mark అయింది!")
+        st.success("âœ… à°…à°¨à±à°¨à°¿ messages à°šà°¦à°¿à°µà°¿à°¨à°Ÿà±à°²à± mark à°…à°¯à°¿à°‚à°¦à°¿!")
         st.rerun()
 
 # =========================
@@ -1045,7 +1046,7 @@ def mark_today_attendance(user_id):
         pass
 
 def show_attendance_tab(user_id):
-    st.title("📅 My Attendance")
+    st.title("ðŸ“… My Attendance")
     today = date.today()
     start_day = today - timedelta(days=364)
 
@@ -1057,8 +1058,8 @@ def show_attendance_tab(user_id):
             .execute().data
         attended = {str(r["attendance_date"]) for r in rows if r.get("attendance_date")}
     except Exception as e:
-        st.warning("Attendance table database లో లేదు. Admin SQL run చేయండి.")
-        with st.expander("📋 SQL to create attendance table"):
+        st.warning("Attendance table database à°²à±‹ à°²à±‡à°¦à±. Admin SQL run à°šà±‡à°¯à°‚à°¡à°¿.")
+        with st.expander("ðŸ“‹ SQL to create attendance table"):
             st.code("""
 CREATE TABLE IF NOT EXISTS attendance (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -1090,14 +1091,14 @@ CREATE TABLE IF NOT EXISTS attendance (
         prev_d = d2
 
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("📊 Total Days", total)
-    c2.metric("🔥 Current Streak", f"{streak} days")
-    c3.metric("🏆 Longest Streak", f"{longest} days")
-    c4.metric("📅 Today", "✅ Present" if today.isoformat() in attended else "⏳ Pending")
+    c1.metric("ðŸ“Š Total Days", total)
+    c2.metric("ðŸ”¥ Current Streak", f"{streak} days")
+    c3.metric("ðŸ† Longest Streak", f"{longest} days")
+    c4.metric("ðŸ“… Today", "âœ… Present" if today.isoformat() in attended else "â³ Pending")
 
     st.divider()
 
-    # Build heatmap — weeks as columns, days as rows (Sun=0 .. Sat=6)
+    # Build heatmap â€” weeks as columns, days as rows (Sun=0 .. Sat=6)
     # Align start to Sunday
     offset = start_day.isoweekday() % 7  # Sun=0
     grid_start = start_day - timedelta(days=offset)
@@ -1134,7 +1135,7 @@ CREATE TABLE IF NOT EXISTS attendance (
             else:
                 color = "#ebedf0"
                 border = "1px solid rgba(27,31,36,0.06)"
-            title = f"{d.strftime('%d %b %Y')} — {'Present' if d.isoformat() in attended else 'Absent'}"
+            title = f"{d.strftime('%d %b %Y')} â€” {'Present' if d.isoformat() in attended else 'Absent'}"
             cells += (
                 f"<div title='{title}' style='width:14px;height:14px;border-radius:2px;"
                 f"background:{color};border:{border};'></div>"
@@ -1150,7 +1151,7 @@ CREATE TABLE IF NOT EXISTS attendance (
         </style>
         <div class="att-card">
           <div class="att-title">Daily Login Activity</div>
-          <div class="att-sub">Login చేసిన రోజులు 🟩 green గా కనిపిస్తాయి (last 1 year)</div>
+          <div class="att-sub">Login à°šà±‡à°¸à°¿à°¨ à°°à±‹à°œà±à°²à± ðŸŸ© green à°—à°¾ à°•à°¨à°¿à°ªà°¿à°¸à±à°¤à°¾à°¯à°¿ (last 1 year)</div>
           <div style="display:flex;gap:3px;margin-bottom:4px;">{label_html}</div>
           <div style="display:flex;gap:3px;overflow-x:auto;">{week_html}</div>
           <div style="display:flex;align-items:center;gap:5px;justify-content:flex-end;color:#57606a;font-size:11px;margin-top:8px;">
@@ -1302,7 +1303,7 @@ def collect_student_progress(user_id):
     }
 
 def show_student_progress_tab(user_id):
-    st.title("📊 My Progress")
+    st.title("ðŸ“Š My Progress")
     try:
         progress = collect_student_progress(user_id)
     except Exception as e:
@@ -1356,7 +1357,7 @@ def show_student_progress_tab(user_id):
                 col_info, col_btn = st.columns([4, 1])
                 with col_info:
                     st.markdown(f"**{exam.get('title', 'Exam')}**")
-                    st.caption(f"{row['total_q']} questions • {exam.get('duration_mins', 30)} mins")
+                    st.caption(f"{row['total_q']} questions â€¢ {exam.get('duration_mins', 30)} mins")
                 with col_btn:
                     if st.button("Open", key=f"prog_open_exam_{exam['id']}", use_container_width=True, type="primary"):
                         start_student_exam(exam)
@@ -1492,7 +1493,7 @@ def render_review_sheet(questions, ans_map, db_attempt):
         is_correct = str(u_ans).strip().lower() == c_ans.lower()
 
         with st.container(border=True):
-            # Header row: Q number + badge + 📌 button
+            # Header row: Q number + badge + ðŸ“Œ button
             hcol, bcol = st.columns([7, 1])
             with hcol:
                 badge_style = (
@@ -1514,11 +1515,11 @@ def render_review_sheet(questions, ans_map, db_attempt):
             with bcol:
                 qid = q["id"]
                 if qid in st.session_state.explain_selected:
-                    if st.button("✅ Marked", key=f"exp_{qid}", use_container_width=True, type="primary"):
+                    if st.button("âœ… Marked", key=f"exp_{qid}", use_container_width=True, type="primary"):
                         st.session_state.explain_selected.discard(qid)
                         st.rerun()
                 else:
-                    if st.button("📌 Explain", key=f"exp_{qid}", use_container_width=True):
+                    if st.button("ðŸ“Œ Explain", key=f"exp_{qid}", use_container_width=True):
                         st.session_state.explain_selected.add(qid)
                         st.rerun()
 
@@ -1527,7 +1528,7 @@ def render_review_sheet(questions, ans_map, db_attempt):
             if t_spent and t_spent > 0:
                 mins_s, secs_s = divmod(t_spent, 60)
                 tstr = f"{mins_s}m {secs_s}s" if mins_s > 0 else f"{secs_s}s"
-                st.caption(f"⏱️ Time spent: **{tstr}**")
+                st.caption(f"â±ï¸ Time spent: **{tstr}**")
 
             # MCQ styled options
             if q["type"] == "mcq":
@@ -1548,9 +1549,9 @@ def render_review_sheet(questions, ans_map, db_attempt):
                     )
                     if is_opt_correct:
                         correct_display = f"{lbl}. {otxt}"
-                        bg, br, col, suffix, fw = "#eafaf0","#27ae60","#1b5e34","  ✓","700"
+                        bg, br, col, suffix, fw = "#eafaf0","#27ae60","#1b5e34","  âœ“","700"
                     elif is_user_pick and not is_correct:
-                        bg, br, col, suffix, fw = "#fdecea","#e74c3c","#c0392b","  (Your Answer) ✗","700"
+                        bg, br, col, suffix, fw = "#fdecea","#e74c3c","#c0392b","  (Your Answer) âœ—","700"
                     else:
                         bg, br, col, suffix, fw = "#ffffff","#dfe6ee","#2c3e50","","400"
                     opts_html += (
@@ -1575,14 +1576,14 @@ def render_review_sheet(questions, ans_map, db_attempt):
                 answer_language = prog_ans.get("language", get_programming_meta(q).get("language", "java"))
                 st.code(prog_ans.get("code", ""), language=get_programming_language_meta(answer_language)["code_language"])
                 for res in prog_ans.get("results", []):
-                    badge = "✅ Passed" if res.get("passed") else "❌ Failed"
-                    st.caption(f"Test Case {res.get('case')}: {badge} • {res.get('marks', 0)} marks")
+                    badge = "âœ… Passed" if res.get("passed") else "âŒ Failed"
+                    st.caption(f"Test Case {res.get('case')}: {badge} â€¢ {res.get('marks', 0)} marks")
 
             else:
                 ans_bg = "#eafaf0" if is_correct else "#fdecea"
                 ans_br = "#27ae60" if is_correct else "#e74c3c"
                 ans_col = "#1b5e34" if is_correct else "#c0392b"
-                ans_sfx = " ✓" if is_correct else " (Your Answer) ✗"
+                ans_sfx = " âœ“" if is_correct else " (Your Answer) âœ—"
                 st.markdown(
                     f"<div style='background:{ans_bg};border:1.5px solid {ans_br};border-radius:10px;"
                     f"padding:12px 16px;margin-bottom:8px;color:{ans_col};font-weight:700;'>"
@@ -1611,7 +1612,7 @@ def render_review_sheet(questions, ans_map, db_attempt):
             # Report Question link style
             st.markdown(
                 "<div style='margin-top:8px;'>"
-                "<span style='color:#e74c3c;font-size:0.82rem;cursor:pointer;'>⚠️ Report Question</span>"
+                "<span style='color:#e74c3c;font-size:0.82rem;cursor:pointer;'>âš ï¸ Report Question</span>"
                 "</div>",
                 unsafe_allow_html=True
             )
@@ -1620,8 +1621,8 @@ def render_review_sheet(questions, ans_map, db_attempt):
     st.divider()
     selected_count = len(st.session_state.explain_selected)
     if selected_count > 0:
-        st.info(f"📌 {selected_count} questions marked for explanation")
-        if st.button(f"📨 Admin కి Explain Request పంపు ({selected_count} questions)", type="primary", use_container_width=True):
+        st.info(f"ðŸ“Œ {selected_count} questions marked for explanation")
+        if st.button(f"ðŸ“¨ Admin à°•à°¿ Explain Request à°ªà°‚à°ªà± ({selected_count} questions)", type="primary", use_container_width=True):
             try:
                 supabase.table("explain_requests").insert({
                     "user_id": str(st.session_state.user_id),
@@ -1631,9 +1632,9 @@ def render_review_sheet(questions, ans_map, db_attempt):
                 }).execute()
                 uinfo = supabase.table("users").select("name").eq("id", st.session_state.user_id).execute().data
                 uname = uinfo[0]["name"] if uinfo else "Student"
-                send_notification(f"📌 {uname} {selected_count} questions కి explanation request చేశారు!")
+                send_notification(f"ðŸ“Œ {uname} {selected_count} questions à°•à°¿ explanation request à°šà±‡à°¶à°¾à°°à±!")
                 st.session_state.explain_selected = set()
-                st.success("✅ Request పంపబడింది!")
+                st.success("âœ… Request à°ªà°‚à°ªà°¬à°¡à°¿à°‚à°¦à°¿!")
                 st.rerun()
             except Exception as e:
                 st.error(f"Request error: {e}")
@@ -1676,7 +1677,7 @@ def generate_exam_ppt(questions, exam_title, q_requesters=None):
     box(ts, 0, 0, 10, 5.625, NAV); box(ts, 0, 2.5, 10, 0.06, ACC)
     txt(ts, exam_title or "Exam Review", 0.5, 1.0, 9, 1.2, sz=36, bold=True, color=WHT, align=PP_ALIGN.CENTER)
     txt(ts, f"{len(questions)} Questions", 0.5, 2.65, 9, 0.6, sz=20, color="CADCFC", align=PP_ALIGN.CENTER)
-    txt(ts, "Correct → Green  |  Wrong → White", 0.5, 4.6, 9, 0.4, sz=12, italic=True, color="8899CC", align=PP_ALIGN.CENTER)
+    txt(ts, "Correct â†’ Green  |  Wrong â†’ White", 0.5, 4.6, 9, 0.4, sz=12, italic=True, color="8899CC", align=PP_ALIGN.CENTER)
 
     for idx, q in enumerate(questions):
         sl = prs.slides.add_slide(BL); box(sl, 0, 0, 10, 5.625, LGT)
@@ -1687,7 +1688,7 @@ def generate_exam_ppt(questions, exam_title, q_requesters=None):
         cur_y += 0.78
         if q_requesters and q.get("id") in q_requesters:
             names = q_requesters[q["id"]][:4]
-            ns = "📌 " + ",  ".join(names)
+            ns = "ðŸ“Œ " + ",  ".join(names)
             if len(q_requesters[q["id"]]) > 4:
                 ns += f"  +{len(q_requesters[q['id']])-4} more"
             box(sl, 0.3, cur_y, 9.4, 0.3, "FFF9C4", "F9A825", Pt(1))
@@ -1717,13 +1718,13 @@ def generate_exam_ppt(questions, exam_title, q_requesters=None):
                 box(sl, ox+0.1, oy+0.16, 0.46, 0.46, GRD if is_cor else ACC)
                 txt(sl, lbl, ox+0.1, oy+0.16, 0.46, 0.46, sz=12, bold=True, color=WHT, align=PP_ALIGN.CENTER)
                 txt(sl, str(otxt), ox+0.68, oy+0.08, ow-0.8, oh-0.16, sz=13, color=tc)
-            txt(sl, f"✓  Correct: {correct_ans}", 0.3, 5.15, 9, 0.35, sz=11, bold=True, color=GRN)
+            txt(sl, f"âœ“  Correct: {correct_ans}", 0.3, 5.15, 9, 0.35, sz=11, bold=True, color=GRN)
         else:
             box(sl, 0.3, cur_y, 9.4, 1.1, "EAF7EE", GRN, Pt(2))
             txt(sl, correct_ans, 0.5, cur_y+0.1, 9.0, 0.9, sz=14, bold=True, color=GRN)
         hint = str(q.get("hint","") or "").strip()
         if hint:
-            txt(sl, f"💡 {hint}", 0.3, 5.38, 9, 0.25, sz=10, italic=True, color=MUT)
+            txt(sl, f"ðŸ’¡ {hint}", 0.3, 5.38, 9, 0.25, sz=10, italic=True, color=MUT)
         txt(sl, f"{idx+1}/{len(questions)}", 8.6, 5.38, 1.1, 0.25, sz=9, color=MUT, align=PP_ALIGN.RIGHT)
 
     es = prs.slides.add_slide(BL); box(es, 0, 0, 10, 5.625, NAV)
@@ -1734,7 +1735,7 @@ def generate_exam_ppt(questions, exam_title, q_requesters=None):
     return buf.read()
 
 def check_mcq_correct(user_val, q):
-    """MCQ answer check — user_val can be label (A/B/C/D) or full text"""
+    """MCQ answer check â€” user_val can be label (A/B/C/D) or full text"""
     correct = str(q.get("correct_answer","")).strip()
     user = str(user_val).strip()
     if not user or not correct:
@@ -1756,8 +1757,8 @@ def check_mcq_correct(user_val, q):
 
 
 def admin_dashboard():
-    st.sidebar.title("🛡️ Admin Workspace")
-    if st.sidebar.button("🚪 Logout", use_container_width=True):
+    st.sidebar.title("ðŸ›¡ï¸ Admin Workspace")
+    if st.sidebar.button("ðŸšª Logout", use_container_width=True):
         for key in defaults:
             st.session_state[key] = defaults[key]
         st.query_params.clear()
@@ -1765,14 +1766,14 @@ def admin_dashboard():
 
     st.sidebar.divider()
     if st.session_state.admin_preview_mode:
-        if st.sidebar.button("🛡️ Admin View కి తిరిగి వెళ్ళు", use_container_width=True, type="primary"):
+        if st.sidebar.button("ðŸ›¡ï¸ Admin View à°•à°¿ à°¤à°¿à°°à°¿à°—à°¿ à°µà±†à°³à±à°³à±", use_container_width=True, type="primary"):
             st.session_state.admin_preview_mode = False
             st.rerun()
         user_dashboard(preview_mode=True)
         return
     else:
         show_notification_banner(st.session_state.user_id)
-        if st.sidebar.button("👁️ Student View Preview", use_container_width=True):
+        if st.sidebar.button("ðŸ‘ï¸ Student View Preview", use_container_width=True):
             st.session_state.admin_preview_mode = True
             st.rerun()
     st.sidebar.divider()
@@ -1782,18 +1783,24 @@ def admin_dashboard():
     label = f"Group Chat ({unread_admin})" if unread_admin > 0 else "Group Chat"
     
     menu = st.sidebar.selectbox("Navigation Control",
-        ["🗂️ Manage Course Content", "📝 Manage Exams & Questions", "📊 Student Results & Ranks", "chat_menu_label"])
+        ["ðŸ—‚ï¸ Manage Course Content", "ðŸ“ Manage Exams & Questions", "ðŸ“Š Student Results & Ranks", "chat_menu_label"])
     if "Group Chat" in menu:
-        menu = "💬 Group Chat"
+        menu = "ðŸ’¬ Group Chat"
+    if st.sidebar.button("Credit Cards", use_container_width=True):
+        menu = "Credit Cards"
 
-    if menu == "🗂️ Manage Course Content":
-        tab1, tab2, tab3 = st.tabs(["📁 Modules Setup", "📂 Submodules Setup", "🖥️ Live/Recorded Classes"])
+    if menu == "Credit Cards":
+        admin_credit_cards_dashboard()
+        return
+
+    if menu == "ðŸ—‚ï¸ Manage Course Content":
+        tab1, tab2, tab3 = st.tabs(["ðŸ“ Modules Setup", "ðŸ“‚ Submodules Setup", "ðŸ–¥ï¸ Live/Recorded Classes"])
 
         with tab1:
             st.subheader("Manage Core Modules")
             with st.form("add_module_form", clear_on_submit=True):
                 module_name = st.text_input("New Module Title")
-                if st.form_submit_button("✨ Save Module"):
+                if st.form_submit_button("âœ¨ Save Module"):
                     if module_name.strip():
                         supabase.table("modules").insert({"title": module_name}).execute()
                         st.success("Module Added!")
@@ -1805,11 +1812,11 @@ def admin_dashboard():
                 with col1:
                     new_m_title = st.text_input("Module Name", value=m["title"], key=f"mod_t_{m['id']}")
                 with col2:
-                    if st.button("💾 Update", key=f"mod_u_{m['id']}", use_container_width=True):
+                    if st.button("ðŸ’¾ Update", key=f"mod_u_{m['id']}", use_container_width=True):
                         supabase.table("modules").update({"title": new_m_title}).eq("id", m["id"]).execute()
                         st.success("Updated!"); st.rerun()
                 with col3:
-                    if st.button("🗑️ Delete", key=f"mod_d_{m['id']}", type="secondary", use_container_width=True):
+                    if st.button("ðŸ—‘ï¸ Delete", key=f"mod_d_{m['id']}", type="secondary", use_container_width=True):
                         supabase.table("modules").delete().eq("id", m["id"]).execute()
                         st.warning("Deleted!"); st.rerun()
 
@@ -1820,7 +1827,7 @@ def admin_dashboard():
             with st.form("add_sub_form", clear_on_submit=True):
                 sel_mod = st.selectbox("Select Parent Module", list(mod_options.keys()) or ["No modules yet"])
                 sub_name = st.text_input("Submodule Title")
-                if st.form_submit_button("✨ Save Submodule"):
+                if st.form_submit_button("âœ¨ Save Submodule"):
                     if sub_name.strip() and sel_mod in mod_options:
                         supabase.table("submodules").insert({"module_id": mod_options[sel_mod], "title": sub_name}).execute()
                         st.success("Linked!"); st.rerun()
@@ -1834,11 +1841,11 @@ def admin_dashboard():
                 with col2:
                     new_s_title = st.text_input("Edit Title", value=s["title"], key=f"sub_t_{s['id']}", label_visibility="collapsed")
                 with col3:
-                    if st.button("💾 Update", key=f"sub_u_{s['id']}", use_container_width=True):
+                    if st.button("ðŸ’¾ Update", key=f"sub_u_{s['id']}", use_container_width=True):
                         supabase.table("submodules").update({"title": new_s_title}).eq("id", s["id"]).execute()
                         st.success("Updated!"); st.rerun()
                 with col4:
-                    if st.button("🗑️ Delete", key=f"sub_d_{s['id']}", type="secondary", use_container_width=True):
+                    if st.button("ðŸ—‘ï¸ Delete", key=f"sub_d_{s['id']}", type="secondary", use_container_width=True):
                         supabase.table("submodules").delete().eq("id", s["id"]).execute()
                         st.warning("Deleted!"); st.rerun()
 
@@ -1846,14 +1853,14 @@ def admin_dashboard():
             st.subheader("Manage Stream/Video Classes")
             sub_list = supabase.table("submodules").select("*").execute().data
             sub_options = {s["title"]: s["id"] for s in sub_list} if sub_list else {}
-            with st.expander("➕ Add New Class Room"):
+            with st.expander("âž• Add New Class Room"):
                 with st.form("add_class_form", clear_on_submit=True):
                     sel_sub = st.selectbox("Link to Submodule", list(sub_options.keys()) or ["No submodules yet"])
                     c_title = st.text_input("Class Title")
                     c_link = st.text_input("Live Stream Link")
                     v_link = st.text_input("Recorded Video URL")
                     p_link = st.text_input("Notes PDF URL")
-                    if st.form_submit_button("🚀 Deploy Class"):
+                    if st.form_submit_button("ðŸš€ Deploy Class"):
                         if sel_sub in sub_options:
                             supabase.table("classes").insert({
                                 "submodule_id": sub_options[sel_sub], "title": c_title,
@@ -1868,15 +1875,15 @@ def admin_dashboard():
                 comp_data = supabase.table("class_completions").select("user_id").eq("class_id", cls["id"]).execute().data
                 comp_count = len(comp_data)
                 pct = int((comp_count / total_users * 100)) if total_users > 0 else 0
-                with st.expander(f"🖥️ {cls['title']}  —  {comp_count}/{total_users} students  ({pct}%)"):
+                with st.expander(f"ðŸ–¥ï¸ {cls['title']}  â€”  {comp_count}/{total_users} students  ({pct}%)"):
                     col_prog, col_num = st.columns([5, 1])
                     with col_prog: st.progress(pct / 100)
                     with col_num: st.markdown(f"**{pct}%**")
                     if comp_count > 0:
-                        with st.expander(f"👥 {comp_count} మంది complete చేశారు"):
+                        with st.expander(f"ðŸ‘¥ {comp_count} à°®à°‚à°¦à°¿ complete à°šà±‡à°¶à°¾à°°à±"):
                             for row in comp_data:
                                 u = supabase.table("users").select("name, email").eq("id", row["user_id"]).execute().data
-                                if u: st.caption(f"✅ {u[0]['name']} ({u[0]['email']})")
+                                if u: st.caption(f"âœ… {u[0]['name']} ({u[0]['email']})")
                     st.divider()
                     ec_title = st.text_input("Title", value=cls["title"], key=f"ct_{cls['id']}")
                     ec_link = st.text_input("Live Link", value=cls.get("class_link",""), key=f"cl_{cls['id']}")
@@ -1884,17 +1891,17 @@ def admin_dashboard():
                     ep_link = st.text_input("PDF Link", value=cls.get("notes_pdf",""), key=f"cp_{cls['id']}")
                     b1, b2 = st.columns(2)
                     with b1:
-                        if st.button("💾 Save Changes", key=f"cu_{cls['id']}", type="primary", use_container_width=True):
+                        if st.button("ðŸ’¾ Save Changes", key=f"cu_{cls['id']}", type="primary", use_container_width=True):
                             supabase.table("classes").update({"title": ec_title, "class_link": ec_link, "recorded_video": ev_link, "notes_pdf": ep_link}).eq("id", cls["id"]).execute()
                             st.success("Saved!"); st.rerun()
                     with b2:
-                        if st.button("🗑️ Remove Class", key=f"cd_{cls['id']}", use_container_width=True):
+                        if st.button("ðŸ—‘ï¸ Remove Class", key=f"cd_{cls['id']}", use_container_width=True):
                             supabase.table("classes").delete().eq("id", cls["id"]).execute()
                             st.warning("Deleted!"); st.rerun()
 
-    elif menu == "📝 Manage Exams & Questions":
+    elif menu == "ðŸ“ Manage Exams & Questions":
         ex_tab1, ex_tab2, ex_tab3, ex_tab4, ex_tab5 = st.tabs([
-            "📝 Exams Setup", "❓ Add Questions", "🔍 Review Papers", "📁 Bulk Upload (CSV)", "🤖 AI Gen"
+            "ðŸ“ Exams Setup", "â“ Add Questions", "ðŸ” Review Papers", "ðŸ“ Bulk Upload (CSV)", "ðŸ¤– AI Gen"
         ])
 
         with ex_tab1:
@@ -1908,7 +1915,7 @@ def admin_dashboard():
                 e_pwd = st.text_input("Exam Password (Optional)", type="password")
                 c_en = st.checkbox("Turn On Exam", value=True)
                 c_ans = st.checkbox("Enable Answers Visibility")
-                if st.form_submit_button("📋 Generate Exam Layout"):
+                if st.form_submit_button("ðŸ“‹ Generate Exam Layout"):
                     if sel_cls in cls_options:
                         supabase.table("exams").insert({
                             "class_id": cls_options[sel_cls], "title": e_title,
@@ -1978,11 +1985,11 @@ def admin_dashboard():
                                 st.success("Programming exam create ayyindi!")
                                 st.rerun()
             st.divider()
-            st.write("### ⚙️ Live Exam Controls")
+            st.write("### âš™ï¸ Live Exam Controls")
             exams_all = supabase.table("exams").select("*").execute().data
             for ex in exams_all:
                 with st.container(border=True):
-                    st.markdown(f"#### 📄 **{ex['title']}**")
+                    st.markdown(f"#### ðŸ“„ **{ex['title']}**")
                     col_e1, col_e2, col_e3 = st.columns([2, 2, 2])
                     with col_e1:
                         updated_dur = st.number_input("Duration (Mins)", min_value=1, max_value=180, value=int(ex.get("duration_mins",30)), key=f"dur_{ex['id']}")
@@ -1993,7 +2000,7 @@ def admin_dashboard():
                         t_ans = st.toggle("Show Answers", value=ex["show_answers"], key=f"tog_ans_{ex['id']}")
                     col_btn1, col_btn2 = st.columns(2)
                     with col_btn1:
-                        if st.button("💾 Save", key=f"up_ex_{ex['id']}", type="primary", use_container_width=True):
+                        if st.button("ðŸ’¾ Save", key=f"up_ex_{ex['id']}", type="primary", use_container_width=True):
                             old_pwd = str(ex.get("password") or "")
                             new_pwd = updated_pwd.strip()
                             supabase.table("exams").update({
@@ -2002,10 +2009,10 @@ def admin_dashboard():
                                 "enabled": t_active, "show_answers": t_ans
                             }).eq("id", ex["id"]).execute()
                             if new_pwd and new_pwd != old_pwd:
-                                send_notification(f"📝 '{ex['title']}' exam కి password set అయింది: {new_pwd}")
+                                send_notification(f"ðŸ“ '{ex['title']}' exam à°•à°¿ password set à°…à°¯à°¿à°‚à°¦à°¿: {new_pwd}")
                             st.success("Updated!"); st.rerun()
                     with col_btn2:
-                        if st.button("🗑️ Delete Exam", key=f"del_ex_{ex['id']}", type="secondary", use_container_width=True):
+                        if st.button("ðŸ—‘ï¸ Delete Exam", key=f"del_ex_{ex['id']}", type="secondary", use_container_width=True):
                             supabase.table("exams").delete().eq("id", ex["id"]).execute()
                             st.warning("Deleted!"); st.rerun()
 
@@ -2013,11 +2020,11 @@ def admin_dashboard():
             st.subheader("Add Questions")
             exams_q = supabase.table("exams").select("*").execute().data
             ex_options = {e["title"]: e["id"] for e in exams_q} if exams_q else {}
-            st.markdown("#### ➕ Add Question")
+            st.markdown("#### âž• Add Question")
             sel_ex = st.selectbox("Select Exam", list(ex_options.keys()) or ["No exams yet"], key="add_q_exam")
 
-            # ── Image upload / URL ──
-            st.caption("📷 Image upload చేస్తే automatically question + options extract అవుతాయి")
+            # â”€â”€ Image upload / URL â”€â”€
+            st.caption("ðŸ“· Image upload à°šà±‡à°¸à±à°¤à±‡ automatically question + options extract à°…à°µà±à°¤à°¾à°¯à°¿")
             img_col1, img_col2 = st.columns(2)
             with img_col1:
                 img_url_input = st.text_input("Image URL", key="add_img_url", placeholder="https://...")
@@ -2033,11 +2040,11 @@ def admin_dashboard():
 
             extract_source = img_file if img_file else (img_url_input.strip() or None)
             if extract_source:
-                if st.button("🔍 Image నుండి Question Extract చేయి", use_container_width=True, key="extract_ocr_btn"):
+                if st.button("ðŸ” Image à°¨à±à°‚à°¡à°¿ Question Extract à°šà±‡à°¯à°¿", use_container_width=True, key="extract_ocr_btn"):
                     with st.spinner("OCR processing..."):
                         extracted = extract_question_from_image(extract_source)
                     if extracted:
-                        # Set widget keys DIRECTLY before they render — widgets not yet on screen
+                        # Set widget keys DIRECTLY before they render â€” widgets not yet on screen
                         st.session_state["aq_q_text"] = extracted.get("question", "")
                         st.session_state["aq_opt_A"]  = extracted.get("option_a", "")
                         st.session_state["aq_opt_B"]  = extracted.get("option_b", "")
@@ -2049,21 +2056,21 @@ def admin_dashboard():
                             st.session_state["aq_correct_lbl"] = ans
                         q_type_ocr = extracted.get("type","mcq")
                         st.session_state["aq_q_type_idx"] = ["mcq","blank","programming"].index(q_type_ocr) if q_type_ocr in ["mcq","blank","programming"] else 0
-                        st.rerun()  # ONE rerun — widgets will now render with pre-filled values
+                        st.rerun()  # ONE rerun â€” widgets will now render with pre-filled values
 
             st.divider()
 
-            # ── Question Type ──
+            # â”€â”€ Question Type â”€â”€
             type_idx_default = st.session_state.get("aq_q_type_idx", 0)
             q_type = st.selectbox("Question Type", ["mcq","blank","programming"],
                                    index=type_idx_default, key="aq_q_type")
 
-            # ── Question Text ──
+            # â”€â”€ Question Text â”€â”€
             q_text = st.text_area("Question / Title", key="aq_q_text")
 
             opt_vals = {"A": "", "B": "", "C": "", "D": ""}
             correct_lbl = st.session_state.get("aq_correct_lbl", "")
-            h_text = st.text_input("💡 Hint", key="aq_hint")
+            h_text = st.text_input("ðŸ’¡ Hint", key="aq_hint")
             exp_text = ""
             prog_description = ""
             prog_test_cases = []
@@ -2095,9 +2102,9 @@ def admin_dashboard():
                         })
                 correct_lbl = "AUTO"
             else:
-                # ── 4 Options + ✓ Set Correct button ──
+                # â”€â”€ 4 Options + âœ“ Set Correct button â”€â”€
                 if q_type == "mcq":
-                    st.markdown("**Options** — సరైన option పక్కన **✓ Set Correct** నొక్కండి")
+                    st.markdown("**Options** â€” à°¸à°°à±ˆà°¨ option à°ªà°•à±à°•à°¨ **âœ“ Set Correct** à°¨à±Šà°•à±à°•à°‚à°¡à°¿")
                     for lbl in ["A","B","C","D"]:
                         c1, c2, c3 = st.columns([1, 6, 2])
                         with c1:
@@ -2110,7 +2117,7 @@ def admin_dashboard():
                             cur_correct = st.session_state.get("aq_correct_lbl", "")
                             is_correct = cur_correct == lbl
                             if st.button(
-                                "✅ Correct" if is_correct else "✓ Set Correct",
+                                "âœ… Correct" if is_correct else "âœ“ Set Correct",
                                 key=f"aq_setcor_{lbl}",
                                 use_container_width=True,
                                 type="primary" if is_correct else "secondary"
@@ -2121,14 +2128,14 @@ def admin_dashboard():
                     correct_lbl = st.session_state.get("aq_correct_lbl", "")
                     if correct_lbl:
                         opt_text = opt_vals.get(correct_lbl, "")
-                        st.info(f"🎯 Correct Answer: **{correct_lbl}. {opt_text}**")
+                        st.info(f"ðŸŽ¯ Correct Answer: **{correct_lbl}. {opt_text}**")
                 else:
                     correct_lbl = st.text_input("Correct Answer", key="aq_blank_correct")
 
-                exp_text = st.text_area("📖 Answer Explanation (optional)", key="aq_explanation",
-                                         placeholder="ఈ సమాధానం ఎందుకు correct అో వివరించండి...")
+                exp_text = st.text_area("ðŸ“– Answer Explanation (optional)", key="aq_explanation",
+                                         placeholder="à°ˆ à°¸à°®à°¾à°§à°¾à°¨à°‚ à°Žà°‚à°¦à±à°•à± correct à°…à±‹ à°µà°¿à°µà°°à°¿à°‚à°šà°‚à°¡à°¿...")
 
-            if st.button("➕ Add Question", type="primary", key="add_q_btn", use_container_width=True):
+            if st.button("âž• Add Question", type="primary", key="add_q_btn", use_container_width=True):
                 if sel_ex in ex_options and q_text.strip():
                     final_img_url = None
                     if img_file:
@@ -2156,13 +2163,13 @@ def admin_dashboard():
                     for k in ["aq_q_text","aq_opt_A","aq_opt_B","aq_opt_C","aq_opt_D",
                               "aq_hint","aq_explanation","aq_prog_desc","aq_blank_correct","aq_correct_lbl","aq_q_type_idx"]:
                         st.session_state.pop(k, None)
-                    st.success("✅ Question Added!")
+                    st.success("âœ… Question Added!")
                     st.rerun()
                 else:
-                    st.error("Exam select చేయండి మరియు question text enter చేయండి.")
+                    st.error("Exam select à°šà±‡à°¯à°‚à°¡à°¿ à°®à°°à°¿à°¯à± question text enter à°šà±‡à°¯à°‚à°¡à°¿.")
 
         with ex_tab4:
-            st.subheader("📁 Bulk Upload Questions (CSV)")
+            st.subheader("ðŸ“ Bulk Upload Questions (CSV)")
             exams = supabase.table("exams").select("id, title").execute()
             exam_options = {ex["title"]: ex["id"] for ex in exams.data} if exams.data else {}
             if exam_options:
@@ -2178,11 +2185,11 @@ def admin_dashboard():
                         required = ["question", "type", "correct_answer"]
                         missing = [col for col in required if col not in df.columns]
                         if missing:
-                            st.error(f"CSV లో ఈ columns లేవు: {missing}")
+                            st.error(f"CSV à°²à±‹ à°ˆ columns à°²à±‡à°µà±: {missing}")
                             st.caption("Expected: question, type, option_a..d, correct_answer, hint, explanation")
                         else:
                             df = df.fillna("")
-                            st.success(f"✅ {len(df)} rows loaded!")
+                            st.success(f"âœ… {len(df)} rows loaded!")
                             st.write("Preview:", df.head())
                             if st.button("Upload to DB"):
                                 try:
@@ -2200,23 +2207,23 @@ def admin_dashboard():
                                             "hint": str(row.get("hint","")),
                                             "explanation": exp_val if exp_val else None
                                         }).execute()
-                                    st.success(f"✅ {len(df)} questions uploaded!")
+                                    st.success(f"âœ… {len(df)} questions uploaded!")
                                 except Exception as e:
                                     st.error(f"Upload Error: {e}")
                     except Exception as e:
-                        st.error(f"CSV చదవలేకపోయాం: {e}")
+                        st.error(f"CSV à°šà°¦à°µà°²à±‡à°•à°ªà±‹à°¯à°¾à°‚: {e}")
             else:
-                st.warning("ముందుగా ఒక Exam create చేయండి.")
+                st.warning("à°®à±à°‚à°¦à±à°—à°¾ à°’à°• Exam create à°šà±‡à°¯à°‚à°¡à°¿.")
 
         with ex_tab5:
-            st.subheader("🤖 AI Question Generator (Gemini)")
+            st.subheader("ðŸ¤– AI Question Generator (Gemini)")
             exams_ai = supabase.table("exams").select("*").execute().data
             ai_ex_options = {e["title"]: e["id"] for e in exams_ai} if exams_ai else {}
             sel_ai_ex = st.selectbox("Save to Exam", list(ai_ex_options.keys()) or ["No exams yet"], key="ai_gen_exam")
             lesson_text = st.text_area("Paste Lesson Content here:")
-            if st.button("✨ Generate Questions"):
+            if st.button("âœ¨ Generate Questions"):
                 if not lesson_text.strip():
-                    st.warning("దయచేసి lesson text పైన paste చేయండి!")
+                    st.warning("à°¦à°¯à°šà±‡à°¸à°¿ lesson text à°ªà±ˆà°¨ paste à°šà±‡à°¯à°‚à°¡à°¿!")
                 else:
                     try:
                         prompt = (
@@ -2234,7 +2241,7 @@ def admin_dashboard():
                             raw_text = raw_text[4:].strip()
                         parsed_qs = json.loads(raw_text)
                         st.session_state.ai_generated_qs = parsed_qs
-                        st.success(f"✅ {len(parsed_qs)} questions generated!")
+                        st.success(f"âœ… {len(parsed_qs)} questions generated!")
                     except Exception as e:
                         st.error(f"AI Error: {e}")
 
@@ -2244,11 +2251,11 @@ def admin_dashboard():
                     with st.container(border=True):
                         st.markdown(f"**Q{gi+1}. {gq.get('question','')}**")
                         st.caption(f"A: {gq.get('option_a','')} | B: {gq.get('option_b','')} | C: {gq.get('option_c','')} | D: {gq.get('option_d','')}")
-                        st.caption(f"🎯 Correct: {gq.get('correct_answer','')}")
+                        st.caption(f"ðŸŽ¯ Correct: {gq.get('correct_answer','')}")
                         if gq.get("explanation"):
-                            st.caption(f"📖 {gq.get('explanation','')}")
+                            st.caption(f"ðŸ“– {gq.get('explanation','')}")
                 if sel_ai_ex in ai_ex_options:
-                    if st.button("📥 DB లో Save చేయి", type="primary", use_container_width=True):
+                    if st.button("ðŸ“¥ DB à°²à±‹ Save à°šà±‡à°¯à°¿", type="primary", use_container_width=True):
                         try:
                             for gq in st.session_state.ai_generated_qs:
                                 supabase.table("questions").insert({
@@ -2259,14 +2266,14 @@ def admin_dashboard():
                                     "correct_answer": gq.get("correct_answer",""), "hint": "",
                                     "explanation": gq.get("explanation","") or None
                                 }).execute()
-                            st.success(f"✅ {len(st.session_state.ai_generated_qs)} questions saved!")
+                            st.success(f"âœ… {len(st.session_state.ai_generated_qs)} questions saved!")
                             st.session_state.ai_generated_qs = None
                             st.rerun()
                         except Exception as e:
                             st.error(f"Save Error: {e}")
 
         with ex_tab3:
-            st.subheader("🔍 Review Existing Exam Papers")
+            st.subheader("ðŸ” Review Existing Exam Papers")
             exams_all_edit = supabase.table("exams").select("*").execute().data
             if not exams_all_edit:
                 st.info("No exams created yet.")
@@ -2298,20 +2305,20 @@ def admin_dashboard():
 
                 dl_col1, dl_col2 = st.columns(2)
                 with dl_col1:
-                    if current_questions and st.button("📊 All Questions PPT", use_container_width=True):
-                        with st.spinner("PPT generate అవుతుంది..."):
+                    if current_questions and st.button("ðŸ“Š All Questions PPT", use_container_width=True):
+                        with st.spinner("PPT generate à°…à°µà±à°¤à±à°‚à°¦à°¿..."):
                             ppt_bytes = generate_exam_ppt(current_questions, selected_exam_title, q_requesters=q_requesters)
                             if ppt_bytes:
-                                st.download_button("⬇️ Download", data=ppt_bytes,
+                                st.download_button("â¬‡ï¸ Download", data=ppt_bytes,
                                     file_name=f"{selected_exam_title[:25]}_all.pptx",
                                     mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
                                     key="ppt_all_btn")
                 with dl_col2:
-                    if marked_questions and st.button(f"📌 Marked Questions PPT ({len(marked_questions)})", use_container_width=True, type="primary"):
-                        with st.spinner("PPT generate అవుతుంది..."):
+                    if marked_questions and st.button(f"ðŸ“Œ Marked Questions PPT ({len(marked_questions)})", use_container_width=True, type="primary"):
+                        with st.spinner("PPT generate à°…à°µà±à°¤à±à°‚à°¦à°¿..."):
                             ppt_bytes = generate_exam_ppt(marked_questions, f"{selected_exam_title} - Explain", q_requesters=q_requesters)
                             if ppt_bytes:
-                                st.download_button("⬇️ Download", data=ppt_bytes,
+                                st.download_button("â¬‡ï¸ Download", data=ppt_bytes,
                                     file_name=f"{selected_exam_title[:25]}_marked.pptx",
                                     mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
                                     key="ppt_marked_btn")
@@ -2325,20 +2332,20 @@ def admin_dashboard():
                             if q.get("image_url"): st.image(q["image_url"], width=200)
                             if q["type"] == "mcq":
                                 st.caption(f"A: {q['option_a']} | B: {q['option_b']} | C: {q['option_c']} | D: {q['option_d']}")
-                            st.caption(f"🎯 Answer: {q['correct_answer']} | 💡 Hint: {q.get('hint','')}")
+                            st.caption(f"ðŸŽ¯ Answer: {q['correct_answer']} | ðŸ’¡ Hint: {q.get('hint','')}")
                             if q.get("explanation"):
-                                st.caption(f"📖 Explanation: {q['explanation']}")
+                                st.caption(f"ðŸ“– Explanation: {q['explanation']}")
                         with col_q2:
-                            if st.button("✏️ Edit", key=f"edit_btn_{q['id']}", use_container_width=True):
+                            if st.button("âœï¸ Edit", key=f"edit_btn_{q['id']}", use_container_width=True):
                                 st.session_state[f"editing_{q['id']}"] = True; st.rerun()
                         with col_q3:
-                            if st.button("🗑️ Delete", key=f"del_q_{q['id']}", type="secondary", use_container_width=True):
+                            if st.button("ðŸ—‘ï¸ Delete", key=f"del_q_{q['id']}", type="secondary", use_container_width=True):
                                 supabase.table("questions").delete().eq("id", q["id"]).execute()
                                 st.success(f"Q{idx+1} Deleted!"); st.rerun()
 
                         if st.session_state.get(f"editing_{q['id']}", False):
                             with st.form(key=f"edit_form_{q['id']}"):
-                                st.markdown("##### ✏️ Question Edit")
+                                st.markdown("##### âœï¸ Question Edit")
                                 eq_type = st.selectbox("Type", ["mcq","blank","programming"],
                                     index=["mcq","blank","programming"].index(q["type"]) if q["type"] in ["mcq","blank","programming"] else 0,
                                     key=f"eq_type_{q['id']}")
@@ -2352,14 +2359,14 @@ def admin_dashboard():
                                     eq_d = st.text_input("Option D", value=q.get("option_d",""), key=f"eq_d_{q['id']}")
                                 eq_ans = st.text_input("Correct Answer", value=q.get("correct_answer",""), key=f"eq_ans_{q['id']}")
                                 eq_hint = st.text_input("Hint", value=q.get("hint",""), key=f"eq_hint_{q['id']}")
-                                eq_explanation = st.text_area("📖 Explanation", value=q.get("explanation","") or "", key=f"eq_exp_{q['id']}")
+                                eq_explanation = st.text_area("ðŸ“– Explanation", value=q.get("explanation","") or "", key=f"eq_exp_{q['id']}")
                                 eq_img_url = st.text_input("Image URL", value=q.get("image_url","") or "", key=f"eq_img_{q['id']}")
                                 if q.get("image_url"): st.image(q["image_url"], width=150)
                                 save_col, cancel_col = st.columns(2)
                                 with save_col:
-                                    saved = st.form_submit_button("💾 Save", use_container_width=True, type="primary")
+                                    saved = st.form_submit_button("ðŸ’¾ Save", use_container_width=True, type="primary")
                                 with cancel_col:
-                                    cancelled = st.form_submit_button("✖️ Cancel", use_container_width=True)
+                                    cancelled = st.form_submit_button("âœ–ï¸ Cancel", use_container_width=True)
                                 if saved:
                                     supabase.table("questions").update({
                                         "type": eq_type, "question": eq_text,
@@ -2374,7 +2381,7 @@ def admin_dashboard():
                                     st.session_state[f"editing_{q['id']}"] = False; st.rerun()
 
                 st.divider()
-                st.markdown("#### ➕ Quick Add Question")
+                st.markdown("#### âž• Quick Add Question")
                 with st.form("quick_add_question_form", clear_on_submit=True):
                     q_type_new = st.selectbox("Type", ["mcq","blank","programming"], key="new_q_type")
                     q_text_new = st.text_area("Question Text", key="new_q_text")
@@ -2385,8 +2392,8 @@ def admin_dashboard():
                         c_new = st.text_input("Option C", key="new_c"); d_new = st.text_input("Option D", key="new_d")
                     h_text_new = st.text_input("Hint", key="new_hint")
                     c_ans_new = st.text_input("Correct Answer", key="new_ans")
-                    exp_new = st.text_area("📖 Explanation (optional)", key="new_explanation")
-                    if st.form_submit_button("🚀 Add Question"):
+                    exp_new = st.text_area("ðŸ“– Explanation (optional)", key="new_explanation")
+                    if st.form_submit_button("ðŸš€ Add Question"):
                         if q_text_new.strip():
                             supabase.table("questions").insert({
                                 "exam_id": selected_exam_id, "question": q_text_new, "type": q_type_new,
@@ -2399,14 +2406,14 @@ def admin_dashboard():
                         else:
                             st.error("Question text empty!")
 
-    elif menu == "📊 Student Results & Ranks":
+    elif menu == "ðŸ“Š Student Results & Ranks":
         r_tab1, r_tab2, r_tab3, r_tab4, r_tab5, r_tab6 = st.tabs([
-            "🏆 Leaderboards", "📝 Manual Evaluation", "📜 Score Summary",
-            "🔄 Re-Exam Requests", "📌 Explain Requests", "📅 Attendance"
+            "ðŸ† Leaderboards", "ðŸ“ Manual Evaluation", "ðŸ“œ Score Summary",
+            "ðŸ”„ Re-Exam Requests", "ðŸ“Œ Explain Requests", "ðŸ“… Attendance"
         ])
 
         with r_tab1:
-            st.title("🏆 Leaderboard")
+            st.title("ðŸ† Leaderboard")
             exams = supabase.table("exams").select("*").execute().data
             if exams:
                 sel_ex_lb = st.selectbox("Select Exam", [e["title"] for e in exams])
@@ -2415,13 +2422,13 @@ def admin_dashboard():
                     board = get_exam_leaderboard(target_ex["id"])
                     if board:
                         for rank, st_row in enumerate(board):
-                            medal = "🥇" if rank==0 else "🥈" if rank==1 else "🥉" if rank==2 else f"{rank+1}."
-                            st.write(f"{medal} **{st_row['Name']}** ({st_row['Email']}) — Score: **{st_row['Score']}**")
+                            medal = "ðŸ¥‡" if rank==0 else "ðŸ¥ˆ" if rank==1 else "ðŸ¥‰" if rank==2 else f"{rank+1}."
+                            st.write(f"{medal} **{st_row['Name']}** ({st_row['Email']}) â€” Score: **{st_row['Score']}**")
                     else:
                         st.info("No attempts yet.")
 
         with r_tab2:
-            st.title("📝 Manual Evaluator")
+            st.title("ðŸ“ Manual Evaluator")
             attempts_to_eval = supabase.table("exam_attempts").select("*").execute().data
             if not attempts_to_eval:
                 st.info("No submissions available.")
@@ -2433,7 +2440,7 @@ def admin_dashboard():
                         with st.container(border=True):
                             col_s1, col_s2 = st.columns([3, 1])
                             with col_s1:
-                                st.markdown(f"##### 👤 **{u_data[0]['name']}** | 🎯 **{e_data[0]['title']}**")
+                                st.markdown(f"##### ðŸ‘¤ **{u_data[0]['name']}** | ðŸŽ¯ **{e_data[0]['title']}**")
                                 st.code(att.get("submitted_answers","# No code submitted."), language="python")
                             with col_s2:
                                 current_score = int(att.get("score") or 0)
@@ -2444,7 +2451,7 @@ def admin_dashboard():
                                     exam_max_score = 100
                                 score_max = max(100, int(exam_max_score or 0), current_score)
                                 new_score = st.number_input("Score", min_value=0, max_value=score_max, value=current_score, step=1, key=f"score_in_{att['id']}")
-                                if st.button("💾 Save", key=f"btn_score_{att['id']}", type="primary", use_container_width=True):
+                                if st.button("ðŸ’¾ Save", key=f"btn_score_{att['id']}", type="primary", use_container_width=True):
                                     supabase.table("exam_attempts").update({"score": new_score}).eq("id", att["id"]).execute()
                                     st.success("Score Saved!"); st.rerun()
 
@@ -2458,14 +2465,14 @@ def admin_dashboard():
                     u_prof = supabase.table("users").select("*").eq("id", att["user_id"]).execute().data
                     e_prof = supabase.table("exams").select("*").eq("id", att["exam_id"]).execute().data
                     if u_prof and e_prof:
-                        st.markdown(f"👤 **{u_prof[0]['name']}** — **{e_prof[0]['title']}** — Score: **{att['score']}**")
+                        st.markdown(f"ðŸ‘¤ **{u_prof[0]['name']}** â€” **{e_prof[0]['title']}** â€” Score: **{att['score']}**")
                         st.divider()
 
         with r_tab4:
-            st.title("🔄 Re-Exam Requests")
+            st.title("ðŸ”„ Re-Exam Requests")
             requests_data = supabase.table("exam_retake_requests").select("*").eq("status","pending").order("requested_at",desc=True).execute().data
             if not requests_data:
-                st.info("Pending requests లేవు.")
+                st.info("Pending requests à°²à±‡à°µà±.")
             else:
                 for req in requests_data:
                     u_info = supabase.table("users").select("name, email").eq("id", req["user_id"]).execute().data
@@ -2474,22 +2481,22 @@ def admin_dashboard():
                         with st.container(border=True):
                             col1, col2, col3 = st.columns([4, 1, 1])
                             with col1:
-                                st.markdown(f"**👤 {u_info[0]['name']}** ({u_info[0]['email']})")
-                                st.caption(f"📝 {e_info[0]['title']} | {req['requested_at'][:10]}")
+                                st.markdown(f"**ðŸ‘¤ {u_info[0]['name']}** ({u_info[0]['email']})")
+                                st.caption(f"ðŸ“ {e_info[0]['title']} | {req['requested_at'][:10]}")
                             with col2:
-                                if st.button("✅ Approve", key=f"apr_{req['id']}", type="primary", use_container_width=True):
+                                if st.button("âœ… Approve", key=f"apr_{req['id']}", type="primary", use_container_width=True):
                                     supabase.table("exam_retake_requests").update({"status":"approved","reviewed_at":"now()"}).eq("id",req["id"]).execute()
                                     st.success("Approved!"); st.rerun()
                             with col3:
-                                if st.button("❌ Reject", key=f"rej_{req['id']}", use_container_width=True):
+                                if st.button("âŒ Reject", key=f"rej_{req['id']}", use_container_width=True):
                                     supabase.table("exam_retake_requests").update({"status":"rejected","reviewed_at":"now()"}).eq("id",req["id"]).execute()
                                     st.warning("Rejected!"); st.rerun()
 
         with r_tab5:
-            st.title("📌 Explain Requests")
+            st.title("ðŸ“Œ Explain Requests")
             exp_requests = supabase.table("explain_requests").select("*").order("created_at",desc=True).execute().data
             if not exp_requests:
-                st.info("Explain requests లేవు.")
+                st.info("Explain requests à°²à±‡à°µà±.")
             else:
                 for req in exp_requests:
                     u_info = supabase.table("users").select("name, email").eq("id", req["user_id"]).execute().data
@@ -2498,12 +2505,12 @@ def admin_dashboard():
                     ename = e_info[0]["title"] if e_info else "Unknown Exam"
                     qids = json.loads(req["question_ids"]) if req.get("question_ids") else []
                     status = req.get("status","pending")
-                    status_color = {"pending":"🟡","done":"🟢","rejected":"🔴"}.get(status,"🟡")
+                    status_color = {"pending":"ðŸŸ¡","done":"ðŸŸ¢","rejected":"ðŸ”´"}.get(status,"ðŸŸ¡")
                     with st.container(border=True):
                         col1, col2, col3 = st.columns([4, 1, 1])
                         with col1:
-                            st.markdown(f"**👤 {uname}** ({u_info[0]['email'] if u_info else ''})")
-                            st.caption(f"📝 {ename} | {len(qids)} questions | {status_color} {status} | {str(req.get('created_at',''))[:10]}")
+                            st.markdown(f"**ðŸ‘¤ {uname}** ({u_info[0]['email'] if u_info else ''})")
+                            st.caption(f"ðŸ“ {ename} | {len(qids)} questions | {status_color} {status} | {str(req.get('created_at',''))[:10]}")
                         with col2:
                             if qids:
                                 marked_qs = supabase.table("questions").select("*").in_("id", qids).execute().data
@@ -2519,38 +2526,426 @@ def admin_dashboard():
                                             if un2 not in qr[qid2]: qr[qid2].append(un2)
                                     ppt_bytes = generate_exam_ppt(marked_qs, f"{ename} - Explain", q_requesters=qr)
                                     if ppt_bytes:
-                                        st.download_button("📊 PPT", data=ppt_bytes,
+                                        st.download_button("ðŸ“Š PPT", data=ppt_bytes,
                                             file_name=f"{ename[:20]}_explain.pptx",
                                             mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
                                             key=f"exp_ppt_{req['id']}")
                         with col3:
                             if status == "pending":
-                                if st.button("✅ Done", key=f"exp_done_{req['id']}", use_container_width=True, type="primary"):
+                                if st.button("âœ… Done", key=f"exp_done_{req['id']}", use_container_width=True, type="primary"):
                                     supabase.table("explain_requests").update({"status":"done"}).eq("id",req["id"]).execute()
                                     st.rerun()
 
         with r_tab6:
-            st.title("📅 Student Attendance")
+            st.title("ðŸ“… Student Attendance")
             all_students = supabase.table("users").select("id, name, email").eq("role","user").execute().data
             if not all_students:
-                st.info("Students లేరు.")
+                st.info("Students à°²à±‡à°°à±.")
             else:
-                sel_student = st.selectbox("Student select చేయండి", [f"{s['name']} ({s['email']})" for s in all_students])
+                sel_student = st.selectbox("Student select à°šà±‡à°¯à°‚à°¡à°¿", [f"{s['name']} ({s['email']})" for s in all_students])
                 sel_idx = [f"{s['name']} ({s['email']})" for s in all_students].index(sel_student)
                 sel_uid = all_students[sel_idx]["id"]
                 show_attendance_tab(sel_uid)
 
-    elif menu == "💬 Group Chat":
-        with st.expander("🔔 Broadcast Notification పంపండి"):
+    elif menu == "ðŸ’¬ Group Chat":
+        with st.expander("ðŸ”” Broadcast Notification à°ªà°‚à°ªà°‚à°¡à°¿"):
             notif_msg = st.text_input("Message", key="broadcast_msg")
-            if st.button("📣 Send to All Users", type="primary"):
+            if st.button("ðŸ“£ Send to All Users", type="primary"):
                 if notif_msg.strip():
                     send_notification(notif_msg.strip())
-                    st.success("✅ పంపబడింది!"); st.rerun()
+                    st.success("âœ… à°ªà°‚à°ªà°¬à°¡à°¿à°‚à°¦à°¿!"); st.rerun()
                 else:
-                    st.warning("Message enter చేయండి.")
+                    st.warning("Message enter à°šà±‡à°¯à°‚à°¡à°¿.")
+            st.divider()
+            group_chat()
+
+# =========================
+# CREDIT CARD SHARING PORTAL
+# =========================
+CARD_CONFIG = {
+    "card_1": {"label": "Card 1", "bill_day": 13},
+    "card_2": {"label": "Card 2", "bill_day": 22},
+}
+
+
+def get_card_label(card_code):
+    return CARD_CONFIG.get(card_code, {}).get("label", card_code)
+
+
+def get_card_bill_day(card_code):
+    return int(CARD_CONFIG.get(card_code, {}).get("bill_day", 1))
+
+
+def add_months(source_date, months):
+    month = source_date.month - 1 + months
+    year = source_date.year + month // 12
+    month = month % 12 + 1
+    max_days = [31, 29 if year % 4 == 0 and (year % 100 != 0 or year % 400 == 0) else 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+    return source_date.replace(year=year, month=month, day=min(source_date.day, max_days[month - 1]))
+
+
+def get_statement_period(card_code, anchor=None):
+    anchor = anchor or date.today()
+    bill_day = get_card_bill_day(card_code)
+    this_month_bill = date(anchor.year, anchor.month, min(bill_day, 28 if anchor.month == 2 else 30 if anchor.month in [4, 6, 9, 11] else 31))
+    if anchor >= this_month_bill:
+        end_date = this_month_bill
+    else:
+        end_date = add_months(this_month_bill, -1)
+    start_date = add_months(end_date, -1) + timedelta(days=1)
+    return start_date, end_date
+
+
+def money_value(value):
+    try:
+        return float(value or 0)
+    except Exception:
+        return 0.0
+
+
+def show_credit_card_sql_help():
+    with st.expander("Credit Cards database SQL setup"):
+        st.code("""
+create table if not exists card_user_cards (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references users(id) on delete cascade,
+  card_code text not null check (card_code in ('card_1','card_2')),
+  created_at timestamptz default now(),
+  unique(user_id, card_code)
+);
+
+create table if not exists card_transactions (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references users(id) on delete cascade,
+  card_code text not null check (card_code in ('card_1','card_2')),
+  purpose text not null,
+  amount numeric not null default 0,
+  transaction_date date not null,
+  proof_url text,
+  status text not null default 'pending' check (status in ('pending','approved','rejected')),
+  admin_note text,
+  approved_by uuid references users(id),
+  approved_at timestamptz,
+  created_at timestamptz default now()
+);
+
+create table if not exists card_payments (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references users(id) on delete cascade,
+  card_code text not null check (card_code in ('card_1','card_2')),
+  billing_month text not null,
+  bill_start date not null,
+  bill_end date not null,
+  amount numeric not null default 0,
+  proof_url text not null,
+  status text not null default 'pending' check (status in ('pending','paid','rejected')),
+  admin_note text,
+  approved_by uuid references users(id),
+  approved_at timestamptz,
+  created_at timestamptz default now(),
+  unique(user_id, card_code, billing_month)
+);
+""", language="sql")
+
+
+def get_card_users():
+    try:
+        return supabase.table("users").select("id, name, email, role").eq("role", "card_user").order("name").execute().data or []
+    except Exception:
+        return []
+
+
+def get_assigned_cards(user_id):
+    try:
+        rows = supabase.table("card_user_cards").select("card_code").eq("user_id", user_id).execute().data or []
+        return [r.get("card_code") for r in rows]
+    except Exception:
+        return []
+
+
+def upload_optional_image(uploaded_file):
+    if not uploaded_file:
+        return ""
+    return upload_image_to_imgbb(uploaded_file) or ""
+
+
+def admin_credit_cards_dashboard():
+    st.title("Credit Cards Admin")
+    show_credit_card_sql_help()
+    tab_users, tab_txns, tab_payments, tab_manual = st.tabs(["Users & Cards", "Approve Transactions", "Payment Screenshots", "Add/Edit Transactions"])
+
+    with tab_users:
+        st.subheader("Add card user login")
+        with st.form("add_card_user_form", clear_on_submit=True):
+            name = st.text_input("User name")
+            email = st.text_input("Login email")
+            password = st.text_input("Temporary password", type="password")
+            assigned = st.multiselect("Cards allowed", ["card_1", "card_2"], format_func=get_card_label, default=["card_1"])
+            submitted = st.form_submit_button("Create Login", type="primary")
+        if submitted:
+            if not name.strip() or not email.strip() or not password.strip() or not assigned:
+                st.error("Name, email, password, cards required.")
+            else:
+                try:
+                    auth_res = supabase.auth.sign_up({"email": email.strip(), "password": password})
+                    auth_user = auth_res.user
+                    if not auth_user:
+                        st.error("Auth user create failed. Supabase email confirmation settings check cheyyandi.")
+                    else:
+                        supabase.table("users").upsert({
+                            "id": auth_user.id,
+                            "name": name.strip(),
+                            "email": email.strip(),
+                            "role": "card_user",
+                        }).execute()
+                        for card_code in assigned:
+                            supabase.table("card_user_cards").upsert({"user_id": auth_user.id, "card_code": card_code}, on_conflict="user_id,card_code").execute()
+                        st.success("Card user login created.")
+                        st.rerun()
+                except Exception as e:
+                    st.error(f"Create user failed: {e}")
+
         st.divider()
-        group_chat()
+        users = get_card_users()
+        if not users:
+            st.info("No card users yet.")
+        for user in users:
+            with st.expander(f"{user.get('name','User')} - {user.get('email','')}"):
+                current_cards = get_assigned_cards(user["id"])
+                selected_cards = st.multiselect("Assigned cards", ["card_1", "card_2"], default=current_cards, format_func=get_card_label, key=f"cards_{user['id']}")
+                if st.button("Save cards", key=f"save_cards_{user['id']}"):
+                    try:
+                        supabase.table("card_user_cards").delete().eq("user_id", user["id"]).execute()
+                        for card_code in selected_cards:
+                            supabase.table("card_user_cards").insert({"user_id": user["id"], "card_code": card_code}).execute()
+                        st.success("Cards updated.")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Cards update failed: {e}")
+
+    with tab_txns:
+        st.subheader("Pending user transactions")
+        try:
+            rows = supabase.table("card_transactions").select("*").eq("status", "pending").order("transaction_date", desc=True).execute().data or []
+        except Exception as e:
+            st.error(f"Transactions load failed: {e}")
+            rows = []
+        if not rows:
+            st.info("Pending transactions levu.")
+        for row in rows:
+            user = supabase.table("users").select("name, email").eq("id", row["user_id"]).execute().data or [{}]
+            with st.expander(f"{get_card_label(row['card_code'])} | {user[0].get('name','User')} | Rs.{money_value(row.get('amount')):.2f} | {row.get('transaction_date')}"):
+                st.write(row.get("purpose", ""))
+                if row.get("proof_url"):
+                    st.link_button("Open screenshot", row["proof_url"])
+                    st.image(row["proof_url"], width=300)
+                note = st.text_input("Admin note", value=row.get("admin_note") or "", key=f"txn_note_{row['id']}")
+                col1, col2 = st.columns(2)
+                with col1:
+                    if st.button("Approve", type="primary", key=f"txn_ok_{row['id']}"):
+                        supabase.table("card_transactions").update({"status": "approved", "admin_note": note, "approved_by": st.session_state.user_id, "approved_at": "now()"}).eq("id", row["id"]).execute()
+                        st.success("Approved.")
+                        st.rerun()
+                with col2:
+                    if st.button("Reject", key=f"txn_no_{row['id']}"):
+                        supabase.table("card_transactions").update({"status": "rejected", "admin_note": note}).eq("id", row["id"]).execute()
+                        st.warning("Rejected.")
+                        st.rerun()
+
+    with tab_payments:
+        st.subheader("User bill payment screenshots")
+        try:
+            payments = supabase.table("card_payments").select("*").order("created_at", desc=True).execute().data or []
+        except Exception as e:
+            st.error(f"Payments load failed: {e}")
+            payments = []
+        for pay in payments:
+            user = supabase.table("users").select("name, email").eq("id", pay["user_id"]).execute().data or [{}]
+            with st.expander(f"{pay.get('status','pending').upper()} | {get_card_label(pay['card_code'])} | {user[0].get('name','User')} | {pay.get('billing_month')} | Rs.{money_value(pay.get('amount')):.2f}"):
+                st.write(f"Bill period: {pay.get('bill_start')} to {pay.get('bill_end')}")
+                st.link_button("Open payment screenshot", pay["proof_url"])
+                st.image(pay["proof_url"], width=320)
+                note = st.text_input("Payment admin note", value=pay.get("admin_note") or "", key=f"pay_note_{pay['id']}")
+                col1, col2 = st.columns(2)
+                with col1:
+                    if st.button("Mark Paid", type="primary", key=f"pay_ok_{pay['id']}"):
+                        supabase.table("card_payments").update({"status": "paid", "admin_note": note, "approved_by": st.session_state.user_id, "approved_at": "now()"}).eq("id", pay["id"]).execute()
+                        st.success("Payment marked paid.")
+                        st.rerun()
+                with col2:
+                    if st.button("Reject Payment", key=f"pay_no_{pay['id']}"):
+                        supabase.table("card_payments").update({"status": "rejected", "admin_note": note}).eq("id", pay["id"]).execute()
+                        st.warning("Payment rejected.")
+                        st.rerun()
+
+    with tab_manual:
+        st.subheader("Add transaction for a user")
+        users = get_card_users()
+        if users:
+            labels = {f"{u.get('name','User')} ({u.get('email','')})": u for u in users}
+            selected_label = st.selectbox("User", list(labels.keys()), key="manual_card_user")
+            selected_user = labels[selected_label]
+            user_cards = get_assigned_cards(selected_user["id"]) or ["card_1", "card_2"]
+            with st.form("manual_card_txn_form", clear_on_submit=True):
+                card_code = st.selectbox("Card", user_cards, format_func=get_card_label)
+                purpose = st.text_input("Purpose")
+                amount = st.number_input("Amount", min_value=0.0, step=1.0)
+                txn_date = st.date_input("Date", value=date.today())
+                proof_file = st.file_uploader("Screenshot optional", type=["png", "jpg", "jpeg", "webp", "pdf"])
+                submit_txn = st.form_submit_button("Add Approved Transaction", type="primary")
+            if submit_txn:
+                if not purpose.strip() or amount <= 0:
+                    st.error("Purpose and amount required.")
+                else:
+                    proof_url = upload_optional_image(proof_file)
+                    supabase.table("card_transactions").insert({
+                        "user_id": selected_user["id"],
+                        "card_code": card_code,
+                        "purpose": purpose.strip(),
+                        "amount": amount,
+                        "transaction_date": str(txn_date),
+                        "proof_url": proof_url,
+                        "status": "approved",
+                        "approved_by": st.session_state.user_id,
+                        "approved_at": "now()",
+                    }).execute()
+                    st.success("Transaction added.")
+                    st.rerun()
+
+        st.divider()
+        st.subheader("Edit existing transactions")
+        try:
+            txns = supabase.table("card_transactions").select("*").order("transaction_date", desc=True).limit(100).execute().data or []
+        except Exception as e:
+            st.error(f"Transactions load failed: {e}")
+            txns = []
+        for row in txns:
+            user = supabase.table("users").select("name, email").eq("id", row["user_id"]).execute().data or [{}]
+            with st.expander(f"{get_card_label(row['card_code'])} | {user[0].get('name','User')} | {row.get('purpose','')}"):
+                col1, col2, col3 = st.columns([2, 1, 1])
+                new_purpose = col1.text_input("Purpose", value=row.get("purpose") or "", key=f"edit_purpose_{row['id']}")
+                new_amount = col2.number_input("Amount", min_value=0.0, value=money_value(row.get("amount")), step=1.0, key=f"edit_amount_{row['id']}")
+                new_status = col3.selectbox("Status", ["pending", "approved", "rejected"], index=["pending", "approved", "rejected"].index(row.get("status", "pending")), key=f"edit_status_{row['id']}")
+                new_date = st.date_input("Date", value=date.fromisoformat(str(row.get("transaction_date"))), key=f"edit_date_{row['id']}")
+                if row.get("proof_url"):
+                    st.link_button("Open screenshot", row["proof_url"], key=f"edit_link_{row['id']}")
+                if st.button("Save transaction", key=f"save_txn_{row['id']}"):
+                    supabase.table("card_transactions").update({
+                        "purpose": new_purpose.strip(),
+                        "amount": new_amount,
+                        "transaction_date": str(new_date),
+                        "status": new_status,
+                    }).eq("id", row["id"]).execute()
+                    st.success("Transaction updated.")
+                    st.rerun()
+
+
+def card_user_dashboard():
+    st.sidebar.title("Credit Card Portal")
+    if st.sidebar.button("Logout", use_container_width=True):
+        for key in defaults:
+            st.session_state[key] = defaults[key]
+        st.query_params.clear()
+        st.rerun()
+    st.sidebar.divider()
+    pages = ["Monthly Bill", "Add Transaction", "History"]
+    for pg in pages:
+        if st.sidebar.button(pg, use_container_width=True, type="primary" if st.session_state.card_user_page == pg else "secondary", key=f"card_nav_{pg}"):
+            st.session_state.card_user_page = pg
+            st.rerun()
+
+    user_id = st.session_state.user_id
+    assigned_cards = get_assigned_cards(user_id)
+    if not assigned_cards:
+        st.warning("No cards assigned yet. Admin ni contact cheyyandi.")
+        return
+
+    st.title("Credit Card Portal")
+    if st.session_state.card_user_page == "Add Transaction":
+        with st.form("user_add_card_txn", clear_on_submit=True):
+            card_code = st.selectbox("Card", assigned_cards, format_func=get_card_label)
+            purpose = st.text_input("Purpose")
+            amount = st.number_input("Amount", min_value=0.0, step=1.0)
+            txn_date = st.date_input("Transaction date", value=date.today())
+            proof_file = st.file_uploader("Payment/transaction screenshot", type=["png", "jpg", "jpeg", "webp"])
+            submitted = st.form_submit_button("Submit for admin approval", type="primary")
+        if submitted:
+            if not purpose.strip() or amount <= 0:
+                st.error("Purpose and amount required.")
+            else:
+                proof_url = upload_optional_image(proof_file)
+                supabase.table("card_transactions").insert({
+                    "user_id": user_id,
+                    "card_code": card_code,
+                    "purpose": purpose.strip(),
+                    "amount": amount,
+                    "transaction_date": str(txn_date),
+                    "proof_url": proof_url,
+                    "status": "pending",
+                }).execute()
+                st.success("Transaction sent to admin for approval.")
+                st.rerun()
+        return
+
+    if st.session_state.card_user_page == "History":
+        rows = supabase.table("card_transactions").select("*").eq("user_id", user_id).order("transaction_date", desc=True).execute().data or []
+        if not rows:
+            st.info("Transactions levu.")
+        else:
+            st.dataframe([{
+                "date": r.get("transaction_date"),
+                "card": get_card_label(r.get("card_code")),
+                "purpose": r.get("purpose"),
+                "amount": money_value(r.get("amount")),
+                "status": r.get("status"),
+                "admin_note": r.get("admin_note") or "",
+            } for r in rows], use_container_width=True, hide_index=True)
+        return
+
+    for card_code in assigned_cards:
+        start_date, end_date = get_statement_period(card_code)
+        billing_month = end_date.strftime("%Y-%m")
+        approved = supabase.table("card_transactions").select("*").eq("user_id", user_id).eq("card_code", card_code).eq("status", "approved").gte("transaction_date", str(start_date)).lte("transaction_date", str(end_date)).order("transaction_date", desc=False).execute().data or []
+        total = sum(money_value(r.get("amount")) for r in approved)
+        payments = supabase.table("card_payments").select("*").eq("user_id", user_id).eq("card_code", card_code).eq("billing_month", billing_month).order("created_at", desc=True).execute().data or []
+        paid = any(p.get("status") == "paid" for p in payments)
+        pending_pay = any(p.get("status") == "pending" for p in payments)
+        status_text = "PAID" if paid else "Payment Waiting Admin Approval" if pending_pay else "PAY"
+        with st.container(border=True):
+            st.subheader(f"{get_card_label(card_code)} - Bill date {get_card_bill_day(card_code)}")
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Bill period", f"{start_date} to {end_date}")
+            c2.metric("Approved amount", f"Rs.{total:.2f}")
+            c3.metric("Status", status_text)
+            if approved:
+                st.dataframe([{
+                    "date": r.get("transaction_date"),
+                    "purpose": r.get("purpose"),
+                    "amount": money_value(r.get("amount")),
+                } for r in approved], use_container_width=True, hide_index=True)
+            else:
+                st.info("Ee bill period lo approved transactions levu.")
+            if not paid and total > 0:
+                with st.form(f"pay_form_{card_code}_{billing_month}"):
+                    pay_file = st.file_uploader("Upload bill paid screenshot", type=["png", "jpg", "jpeg", "webp"], key=f"pay_file_{card_code}_{billing_month}")
+                    submit_pay = st.form_submit_button("Pay / Submit Screenshot", type="primary")
+                if submit_pay:
+                    proof_url = upload_optional_image(pay_file)
+                    if not proof_url:
+                        st.error("Screenshot upload required.")
+                    else:
+                        supabase.table("card_payments").upsert({
+                            "user_id": user_id,
+                            "card_code": card_code,
+                            "billing_month": billing_month,
+                            "bill_start": str(start_date),
+                            "bill_end": str(end_date),
+                            "amount": total,
+                            "proof_url": proof_url,
+                            "status": "pending",
+                        }, on_conflict="user_id,card_code,billing_month").execute()
+                        st.success("Payment screenshot admin approval ki sent.")
+                        st.rerun()
 
 # =========================
 # USER DASHBOARD
@@ -2558,7 +2953,7 @@ def admin_dashboard():
 def user_dashboard(preview_mode=False):
     if not preview_mode:
         st.sidebar.title("User Workspace")
-        if st.sidebar.button("🚪 Logout", use_container_width=True):
+        if st.sidebar.button("ðŸšª Logout", use_container_width=True):
             for key in defaults:
                 st.session_state[key] = defaults[key]
             st.query_params.clear()
@@ -2580,7 +2975,7 @@ def user_dashboard(preview_mode=False):
         # Mark today's attendance on every login
         mark_today_attendance(st.session_state.user_id)
     else:
-        st.info("👁️ Student Preview Mode")
+        st.info("ðŸ‘ï¸ Student Preview Mode")
         user_page = "My Classes"
 
     if not preview_mode:
@@ -2619,7 +3014,7 @@ def user_dashboard(preview_mode=False):
                 module_has_focus = True
         pct = int((module_done / module_total * 100)) if module_total > 0 else 0
 
-        with st.expander(f"{module['title']}  —  {module_done}/{module_total} classes  ({pct}%)", expanded=module_has_focus):
+        with st.expander(f"{module['title']}  â€”  {module_done}/{module_total} classes  ({pct}%)", expanded=module_has_focus):
             if module_total > 0:
                 st.progress(pct / 100, text=f"Module Progress: {pct}%")
             submodules = supabase.table("submodules").select("*").eq("module_id", module["id"]).execute().data
@@ -2628,13 +3023,13 @@ def user_dashboard(preview_mode=False):
                 sub_total = len(sub_classes)
                 sub_done = sum(1 for c in sub_classes if str(c["id"]) in completed_ids)
                 sub_pct = int((sub_done / sub_total * 100)) if sub_total > 0 else 0
-                st.subheader(f"{sub['title']}  ✅ {sub_done}/{sub_total}")
+                st.subheader(f"{sub['title']}  âœ… {sub_done}/{sub_total}")
                 if sub_total > 0: st.progress(sub_pct / 100)
                 classes = supabase.table("classes").select("*").eq("submodule_id", sub["id"]).execute().data
                 for cls in classes:
                     is_done = str(cls.get("id")) in completed_ids
                     is_focused_class = focus_class_id and str(cls.get("id")) == focus_class_id
-                    st.markdown(f"### {'✅' if is_done else '🔲'} {cls['title']}")
+                    st.markdown(f"### {'âœ…' if is_done else 'ðŸ”²'} {cls['title']}")
                     if is_focused_class:
                         st.info("Progress tab nundi open chesina class idi.")
                     col_link1, col_link2, col_link3 = st.columns(3)
@@ -2650,13 +3045,13 @@ def user_dashboard(preview_mode=False):
                         try: cid = int(class_id)
                         except (ValueError, TypeError): cid = str(class_id)
                         if str(class_id) in completed_ids:
-                            st.success("✅ మీరు ఈ క్లాస్ పూర్తి చేశారు!")
+                            st.success("âœ… à°®à±€à°°à± à°ˆ à°•à±à°²à°¾à°¸à± à°ªà±‚à°°à±à°¤à°¿ à°šà±‡à°¶à°¾à°°à±!")
                         else:
-                            if st.button("✔️ Mark as Completed", key=f"btn_done_{cls['id']}"):
+                            if st.button("âœ”ï¸ Mark as Completed", key=f"btn_done_{cls['id']}"):
                                 try:
                                     supabase.table("class_completions").insert({"user_id": str(st.session_state.user_id), "class_id": cid}).execute()
                                     st.session_state.completed_ids.add(str(class_id))
-                                    st.success("✅ క్లాస్ కంప్లీట్ అయ్యింది!")
+                                    st.success("âœ… à°•à±à°²à°¾à°¸à± à°•à°‚à°ªà±à°²à±€à°Ÿà± à°…à°¯à±à°¯à°¿à°‚à°¦à°¿!")
                                 except Exception as e:
                                     st.error(f"Insert Error: {e}")
 
@@ -2665,29 +3060,29 @@ def user_dashboard(preview_mode=False):
                         if not exam["enabled"]: continue
                         exam_dur = exam.get("duration_mins", 30)
                         is_focused_exam = focus_exam_id and str(exam.get("id")) == focus_exam_id
-                        st.write(f"📝 **Exam: {exam['title']}** ({exam_dur} Mins)")
+                        st.write(f"ðŸ“ **Exam: {exam['title']}** ({exam_dur} Mins)")
                         if is_focused_exam:
-                            st.info("Progress tab nundi open chesina exam idi. Password unte access code enter చేసి start cheyyandi.")
+                            st.info("Progress tab nundi open chesina exam idi. Password unte access code enter à°šà±‡à°¸à°¿ start cheyyandi.")
                         btn_col, lb_col = st.columns([2, 2])
                         with lb_col:
                             board = get_exam_leaderboard(exam["id"])
                             if board:
-                                st.markdown("🏆 **Top Performers:**")
+                                st.markdown("ðŸ† **Top Performers:**")
                                 for idx, student in enumerate(board[:3]):
-                                    medal = "🥇" if idx==0 else "🥈" if idx==1 else "🥉"
-                                    st.caption(f"{medal} {student['Name']} — {student['Score']}")
+                                    medal = "ðŸ¥‡" if idx==0 else "ðŸ¥ˆ" if idx==1 else "ðŸ¥‰"
+                                    st.caption(f"{medal} {student['Name']} â€” {student['Score']}")
                             else:
-                                st.caption("Be the first! 🚀")
+                                st.caption("Be the first! ðŸš€")
                         with btn_col:
                             check_attempt = supabase.table("exam_attempts").select("*").eq("user_id", st.session_state.user_id).eq("exam_id", exam["id"]).execute().data
                             if check_attempt:
                                 q_count = supabase.table("questions").select("*").eq("exam_id", exam["id"]).execute().data
                                 total_q = get_exam_max_marks(q_count)
-                                st.markdown("**📊 మీ Attempts:**")
+                                st.markdown("**ðŸ“Š à°®à±€ Attempts:**")
                                 for idx, att in enumerate(check_attempt):
                                     pct = int((int(att.get("score") or 0) / total_q) * 100) if total_q else 0
                                     st.caption(f"Attempt {idx+1}: **{att['score']}/{total_q}** ({pct}%)")
-                                if st.button("🔍 Show Answers", key=f"view_{exam['id']}", use_container_width=True):
+                                if st.button("ðŸ” Show Answers", key=f"view_{exam['id']}", use_container_width=True):
                                     st.session_state.exam_id = exam["id"]
                                     st.session_state.exam_title = exam["title"]
                                     st.session_state.start_exam = True
@@ -2698,17 +3093,17 @@ def user_dashboard(preview_mode=False):
                                 if retake_req:
                                     status = retake_req[0]["status"]
                                     if status == "pending":
-                                        st.warning("⏳ Re-exam request pending...")
+                                        st.warning("â³ Re-exam request pending...")
                                     elif status == "rejected":
-                                        st.error("❌ Re-exam rejected.")
-                                        if st.button("🔄 మళ్ళీ Request", key=f"retry_req_{exam['id']}", use_container_width=True):
+                                        st.error("âŒ Re-exam rejected.")
+                                        if st.button("ðŸ”„ à°®à°³à±à°³à±€ Request", key=f"retry_req_{exam['id']}", use_container_width=True):
                                             supabase.table("exam_retake_requests").insert({"user_id": st.session_state.user_id, "exam_id": exam["id"], "status":"pending"}).execute()
-                                            st.success("Request పంపబడింది!"); st.rerun()
+                                            st.success("Request à°ªà°‚à°ªà°¬à°¡à°¿à°‚à°¦à°¿!"); st.rerun()
                                     elif status == "approved":
-                                        st.success("✅ Re-exam approved!")
+                                        st.success("âœ… Re-exam approved!")
                                         has_pwd = exam.get("password") and str(exam["password"]).strip()
                                         entered_pwd = st.text_input(f"Access Code", type="password", key=f"repwd_{exam['id']}") if has_pwd else ""
-                                        if st.button("📝 Re-Exam Start", key=f"rebtn_{exam['id']}", use_container_width=True, type="primary"):
+                                        if st.button("ðŸ“ Re-Exam Start", key=f"rebtn_{exam['id']}", use_container_width=True, type="primary"):
                                             if has_pwd and entered_pwd.strip() != str(exam["password"]).strip():
                                                 st.error("Wrong Password!")
                                             else:
@@ -2717,13 +3112,13 @@ def user_dashboard(preview_mode=False):
                                                 st.session_state.update({"exam_id":exam["id"],"exam_title":exam["title"],"start_exam":True,"exam_submitted":False,"answers":{},"question_index":0,"current_questions":q_data,"exam_end_time":time.time()+(int(exam_dur)*60)})
                                                 st.rerun()
                                 else:
-                                    if st.button("🔄 Try Again Request", key=f"req_{exam['id']}", use_container_width=True):
+                                    if st.button("ðŸ”„ Try Again Request", key=f"req_{exam['id']}", use_container_width=True):
                                         supabase.table("exam_retake_requests").insert({"user_id": st.session_state.user_id, "exam_id": exam["id"], "status":"pending"}).execute()
-                                        st.success("✅ Request పంపబడింది!"); st.rerun()
+                                        st.success("âœ… Request à°ªà°‚à°ªà°¬à°¡à°¿à°‚à°¦à°¿!"); st.rerun()
                             else:
                                 has_pwd = exam.get("password") and str(exam["password"]).strip()
                                 entered_pwd = st.text_input(f"Access Code for {exam['title']}", type="password", key=f"pwd_{exam['id']}") if has_pwd else ""
-                                if st.button("📝 Start Exam", key=f"btn_{exam['id']}", use_container_width=True):
+                                if st.button("ðŸ“ Start Exam", key=f"btn_{exam['id']}", use_container_width=True):
                                     if has_pwd and entered_pwd.strip() != str(exam["password"]).strip():
                                         st.error("Wrong Password!")
                                     else:
@@ -2747,7 +3142,7 @@ def exam_workspace_view():
     if not st.session_state.exam_submitted:
         remaining_time = int(st.session_state.exam_end_time - time.time())
         if remaining_time <= 0:
-            st.error("⏰ Time Out! Submitting exam...")
+            st.error("â° Time Out! Submitting exam...")
             time.sleep(1)
             try:
                 submit_exam_attempt(questions, include_time=False)
@@ -2757,26 +3152,26 @@ def exam_workspace_view():
                 return
 
     if st.session_state.exam_submitted:
-        st.title(f"📊 Results: {st.session_state.exam_title}")
+        st.title(f"ðŸ“Š Results: {st.session_state.exam_title}")
         db_attempt = supabase.table("exam_attempts").select("*").eq("user_id", st.session_state.user_id).eq("exam_id", st.session_state.exam_id).execute().data
         if db_attempt and st.session_state.get("last_attempt_id"):
             last_id = st.session_state.last_attempt_id
             db_attempt = sorted(db_attempt, key=lambda att: 0 if att.get("id") == last_id else 1)
         if db_attempt:
             max_marks = get_exam_max_marks(questions)
-            st.markdown("### 📊 మీ అన్ని Attempts")
+            st.markdown("### ðŸ“Š à°®à±€ à°…à°¨à±à°¨à°¿ Attempts")
             for idx, att in enumerate(reversed(db_attempt)):
                 pct = int((int(att.get("score") or 0) / max_marks) * 100) if max_marks else 0
                 st.info(f"Attempt {idx+1}: **{att['score']}/{max_marks}** ({pct}%)")
             st.divider()
             latest = db_attempt[0]
             latest_pct = int((int(latest.get("score") or 0) / max_marks) * 100) if max_marks else 0
-            st.success(f"🎉 Latest Score: {latest['score']}/{max_marks} ({latest_pct}%)")
+            st.success(f"ðŸŽ‰ Latest Score: {latest['score']}/{max_marks} ({latest_pct}%)")
             db_answers = supabase.table("user_answers").select("*").eq("attempt_id", latest["id"]).execute().data
             ans_map = {a["question_id"]: a["answer"] for a in db_answers}
             exam_data = supabase.table("exams").select("*").eq("id", st.session_state.exam_id).execute().data
             if exam_data and exam_data[0]["show_answers"]:
-                st.subheader("📚 Review Sheet")
+                st.subheader("ðŸ“š Review Sheet")
                 render_review_sheet(questions, ans_map, db_attempt)
 
         if st.button("Return to Dashboard", type="primary"):
@@ -2798,7 +3193,7 @@ def exam_workspace_view():
                     background:{'#fff3cd' if remaining_time<300 else '#e8f4fd'};
                     color:{'#856404' if remaining_time<300 else '#0c63e4'};
                     border:1px solid {'#ffc107' if remaining_time<300 else '#b6d4fe'};">
-                    ⏱️ <span id="countdown">{mins:02d}:{secs:02d}</span></div>
+                    â±ï¸ <span id="countdown">{mins:02d}:{secs:02d}</span></div>
                 <script>
                     var total={remaining_time};
                     function tick(){{if(total<=0){{document.getElementById('countdown').innerText="00:00";return;}}
@@ -2813,7 +3208,7 @@ def exam_workspace_view():
             for i in range(total_questions):
                 with cols[i % 3]:
                     q_id = questions[i]["id"]
-                    label = f"🔵 {i+1}" if i==current else (f"🟢 {i+1}" if q_id in st.session_state.answers and st.session_state.answers[q_id] else f"🔴 {i+1}")
+                    label = f"ðŸ”µ {i+1}" if i==current else (f"ðŸŸ¢ {i+1}" if q_id in st.session_state.answers and st.session_state.answers[q_id] else f"ðŸ”´ {i+1}")
                     if st.button(label, key=f"qnav_{i}", use_container_width=True):
                         st.session_state.question_index = i; st.rerun()
 
@@ -2826,7 +3221,7 @@ def exam_workspace_view():
                 st.components.v1.html(f"""
                     <div style="background:#f0f4ff;border:1px solid #b6d4fe;border-radius:8px;padding:6px 10px;
                         text-align:center;font-family:monospace;font-size:1.1rem;font-weight:600;color:#0c63e4;margin-top:8px;">
-                        📝 <span id="qtimer">00:00</span></div>
+                        ðŸ“ <span id="qtimer">00:00</span></div>
                     <script>var elapsed={already_spent};var qtimer=document.getElementById('qtimer');
                     function qtick(){{elapsed++;var m=Math.floor(elapsed/60).toString().padStart(2,'0');var s=(elapsed%60).toString().padStart(2,'0');qtimer.innerText=m+':'+s;}}
                     setInterval(qtick,1000);</script>""", height=55)
@@ -2876,7 +3271,7 @@ def exam_workspace_view():
                     if not otxt:
                         continue
                     is_selected = (stored_ans == lbl or stored_ans == otxt)
-                    btn_label = f"{'🔵 ' if is_selected else ''}{lbl}. {otxt}"
+                    btn_label = f"{'ðŸ”µ ' if is_selected else ''}{lbl}. {otxt}"
                     if st.button(btn_label, key=f"opt_{question['id']}_{lbl}",
                                  use_container_width=True,
                                  type="primary" if is_selected else "secondary"):
@@ -2904,7 +3299,7 @@ def exam_workspace_view():
                         for idx, tc in enumerate(meta.get("test_cases", []), start=1):
                             if tc.get("hidden", False):
                                 continue
-                            st.markdown(f"**Case {idx}** • {tc.get('marks', 0)} marks")
+                            st.markdown(f"**Case {idx}** â€¢ {tc.get('marks', 0)} marks")
                             st.code(f"Input:\n{tc.get('input','')}\n\nExpected Output:\n{tc.get('expected_output','')}", language="text")
                 with p_right:
                     selected_language_label = st.selectbox(
@@ -2979,9 +3374,9 @@ def exam_workspace_view():
                         for res in run_data["results"]:
                             with st.container(border=True):
                                 is_hidden = bool(res.get("hidden", False))
-                                badge = "✅ Passed" if res["passed"] else "❌ Failed"
+                                badge = "âœ… Passed" if res["passed"] else "âŒ Failed"
                                 title = f"Hidden Test Case {res['case']}" if is_hidden else f"Test Case {res['case']}"
-                                st.markdown(f"**{title}** — {badge} — {res['marks']} marks")
+                                st.markdown(f"**{title}** â€” {badge} â€” {res['marks']} marks")
                                 if is_hidden:
                                     st.caption("Input/output hidden. Marks lo count avuthundi.")
                                 elif not res["passed"]:
@@ -3007,13 +3402,13 @@ def exam_workspace_view():
 
             nav_col1, nav_col2, submit_col = st.columns([1, 1, 2])
             with nav_col1:
-                if st.button("⬅️ Previous", disabled=(current==0), use_container_width=True):
+                if st.button("â¬…ï¸ Previous", disabled=(current==0), use_container_width=True):
                     save_current_q_time(); st.session_state.question_index -= 1; st.rerun()
             with nav_col2:
-                if st.button("Next ➡️", disabled=(current==total_questions-1), use_container_width=True):
+                if st.button("Next âž¡ï¸", disabled=(current==total_questions-1), use_container_width=True):
                     save_current_q_time(); st.session_state.question_index += 1; st.rerun()
             with submit_col:
-                if st.button("🚀 Submit Exam", type="primary", use_container_width=True):
+                if st.button("ðŸš€ Submit Exam", type="primary", use_container_width=True):
                     save_current_q_time()
                     try:
                         submit_exam_attempt(questions, include_time=True, require_programming_submitted=True)
@@ -3036,6 +3431,8 @@ if not st.session_state.logged_in:
 else:
     if st.session_state.role == "admin":
         admin_dashboard()
+    elif st.session_state.role == "card_user":
+        card_user_dashboard()
     elif st.session_state.start_exam:
         exam_workspace_view()
     else:
