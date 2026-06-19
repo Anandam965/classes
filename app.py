@@ -1796,12 +1796,10 @@ def admin_dashboard():
     label = f"Group Chat ({unread_admin})" if unread_admin > 0 else "Group Chat"
     
     menu = st.sidebar.selectbox("Navigation Control",
-        ["Manage Course Content", "Manage Exams & Questions", "Student Results & Ranks", "chat_menu_label"])
+        ["Manage Course Content", "Manage Exams & Questions", "Student Results & Ranks", "Credit Cards", "chat_menu_label"],
+        key="admin_navigation")
     if "Group Chat" in menu:
         menu = "Group Chat"
-    if st.sidebar.button("Credit Cards", use_container_width=True):
-        menu = "Credit Cards"
-
     if menu == "Credit Cards":
         admin_credit_cards_dashboard()
         return
