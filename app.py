@@ -2642,6 +2642,7 @@ create table if not exists card_transactions (
   amount numeric not null default 0,
   transaction_date date not null,
   proof_url text,
+  source_key text unique,
   status text not null default 'pending' check (status in ('pending','approved','rejected')),
   admin_note text,
   approved_by uuid references users(id),
@@ -2665,6 +2666,23 @@ create table if not exists card_payments (
   created_at timestamptz default now(),
   unique(user_id, card_code, billing_month)
 );
+
+create table if not exists card_recurring_transactions (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references card_users(id) on delete cascade,
+  card_code text not null check (card_code in ('card_1','card_2')),
+  purpose text not null,
+  amount numeric not null default 0,
+  start_date date not null default current_date,
+  end_date date,
+  active boolean not null default true,
+  created_at timestamptz default now()
+);
+
+alter table card_transactions add column if not exists source_key text;
+create unique index if not exists card_transactions_source_key_idx
+  on card_transactions(source_key)
+  where source_key is not null;
 """, language="sql")
 
 
@@ -2690,10 +2708,62 @@ def upload_optional_image(uploaded_file):
     return upload_image_to_imgbb(uploaded_file) or ""
 
 
+def generate_recurring_transactions(user_id=None):
+    try:
+        query = supabase.table("card_recurring_transactions").select("*").eq("active", True)
+        if user_id:
+            query = query.eq("user_id", user_id)
+        recurring_rows = query.execute().data or []
+    except Exception as e:
+        st.error(f"Monthly auto payments load failed: {e}")
+        return 0
+
+    created_count = 0
+    today = date.today()
+    for item in recurring_rows:
+        card_code = item.get("card_code")
+        if not card_code:
+            continue
+        start_date, end_date = get_statement_period(card_code, today)
+        item_start = date.fromisoformat(str(item.get("start_date") or today))
+        item_end = date.fromisoformat(str(item["end_date"])) if item.get("end_date") else None
+        if item_start > end_date:
+            continue
+        if item_end and item_end < start_date:
+            continue
+        billing_month = end_date.strftime("%Y-%m")
+        source_key = f"recurring:{item['id']}:{billing_month}"
+        txn_date = max(item_start, start_date)
+        if item_end:
+            txn_date = min(txn_date, item_end)
+        try:
+            existing = supabase.table("card_transactions").select("id").eq("source_key", source_key).execute().data
+            if existing:
+                continue
+            supabase.table("card_transactions").insert({
+                "user_id": item["user_id"],
+                "card_code": card_code,
+                "purpose": item.get("purpose") or "Monthly payment",
+                "amount": money_value(item.get("amount")),
+                "transaction_date": str(txn_date),
+                "proof_url": "",
+                "source_key": source_key,
+                "status": "approved",
+                "admin_note": "Auto monthly payment",
+                "approved_by": st.session_state.user_id if st.session_state.get("role") == "admin" else None,
+                "approved_at": "now()",
+            }).execute()
+            created_count += 1
+        except Exception as e:
+            st.error(f"Monthly auto payment create failed: {e}")
+    return created_count
+
+
 def admin_credit_cards_dashboard():
     st.title("Credit Cards Admin")
     show_credit_card_sql_help()
-    tab_users, tab_txns, tab_payments, tab_manual = st.tabs(["Users & Cards", "Approve Transactions", "Payment Screenshots", "Add/Edit Transactions"])
+    generate_recurring_transactions()
+    tab_users, tab_txns, tab_payments, tab_recurring, tab_manual = st.tabs(["Users & Cards", "Approve Transactions", "Payment Screenshots", "Monthly Auto Payments", "Add/Edit Transactions"])
 
     with tab_users:
         st.subheader("Add card user PIN login")
@@ -2809,6 +2879,86 @@ def admin_credit_cards_dashboard():
                         st.warning("Payment rejected.")
                         st.rerun()
 
+    with tab_recurring:
+        st.subheader("One-time setup for monthly payments")
+        users = get_card_users()
+        if not users:
+            st.info("Create card users first.")
+        else:
+            labels = {f"{u.get('name','User')} ({u.get('mobile','')})": u for u in users}
+            selected_label = st.selectbox("User", list(labels.keys()), key="rec_user")
+            selected_user = labels[selected_label]
+            user_cards = get_assigned_cards(selected_user["id"]) or ["card_1", "card_2"]
+            with st.form("recurring_payment_form", clear_on_submit=True):
+                rec_card = st.selectbox("Card", user_cards, format_func=get_card_label, key="rec_card")
+                rec_purpose = st.text_input("Purpose", placeholder="Example: EMI, Netflix, Rent")
+                rec_amount = st.number_input("Monthly amount", min_value=0.0, step=1.0, key="rec_amount")
+                rec_start = st.date_input("Start from", value=date.today(), key="rec_start")
+                has_end = st.checkbox("End date unda?")
+                rec_end = st.date_input("End date", value=add_months(date.today(), 12), key="rec_end") if has_end else None
+                rec_submit = st.form_submit_button("Add Monthly Auto Payment", type="primary")
+            if rec_submit:
+                if not rec_purpose.strip() or rec_amount <= 0:
+                    st.error("Purpose and amount required.")
+                elif rec_end and rec_end < rec_start:
+                    st.error("End date start date kante mundu undakudadhu.")
+                else:
+                    try:
+                        supabase.table("card_recurring_transactions").insert({
+                            "user_id": selected_user["id"],
+                            "card_code": rec_card,
+                            "purpose": rec_purpose.strip(),
+                            "amount": rec_amount,
+                            "start_date": str(rec_start),
+                            "end_date": str(rec_end) if rec_end else None,
+                            "active": True,
+                        }).execute()
+                        made = generate_recurring_transactions(selected_user["id"])
+                        st.success(f"Monthly auto payment added. Current month entries created: {made}")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Monthly auto payment add failed: {e}")
+
+        st.divider()
+        st.subheader("Manage monthly auto payments")
+        try:
+            recurring_rows = supabase.table("card_recurring_transactions").select("*").order("created_at", desc=True).execute().data or []
+        except Exception as e:
+            st.error(f"Monthly auto payments load failed: {e}")
+            recurring_rows = []
+        if not recurring_rows:
+            st.info("Monthly auto payments levu.")
+        for rec in recurring_rows:
+            user = supabase.table("card_users").select("name, mobile").eq("id", rec["user_id"]).execute().data or [{}]
+            status = "Active" if rec.get("active") else "Paused"
+            with st.expander(f"{status} | {user[0].get('name','User')} | {get_card_label(rec.get('card_code'))} | {rec.get('purpose')} | Rs.{money_value(rec.get('amount')):.2f}"):
+                c1, c2, c3 = st.columns([2, 1, 1])
+                new_purpose = c1.text_input("Purpose", value=rec.get("purpose") or "", key=f"rec_purpose_{rec['id']}")
+                new_amount = c2.number_input("Amount", min_value=0.0, value=money_value(rec.get("amount")), step=1.0, key=f"rec_amount_{rec['id']}")
+                new_active = c3.checkbox("Active", value=bool(rec.get("active")), key=f"rec_active_{rec['id']}")
+                c4, c5 = st.columns(2)
+                new_start = c4.date_input("Start date", value=date.fromisoformat(str(rec.get("start_date"))), key=f"rec_start_{rec['id']}")
+                default_end = date.fromisoformat(str(rec["end_date"])) if rec.get("end_date") else add_months(date.today(), 12)
+                use_end = c5.checkbox("Use end date", value=bool(rec.get("end_date")), key=f"rec_use_end_{rec['id']}")
+                new_end = c5.date_input("End date", value=default_end, key=f"rec_end_{rec['id']}") if use_end else None
+                col_save, col_delete = st.columns(2)
+                with col_save:
+                    if st.button("Save auto payment", key=f"save_rec_{rec['id']}", type="primary"):
+                        supabase.table("card_recurring_transactions").update({
+                            "purpose": new_purpose.strip(),
+                            "amount": new_amount,
+                            "start_date": str(new_start),
+                            "end_date": str(new_end) if new_end else None,
+                            "active": new_active,
+                        }).eq("id", rec["id"]).execute()
+                        st.success("Monthly auto payment updated.")
+                        st.rerun()
+                with col_delete:
+                    if st.button("Delete auto payment", key=f"del_rec_{rec['id']}"):
+                        supabase.table("card_recurring_transactions").delete().eq("id", rec["id"]).execute()
+                        st.warning("Monthly auto payment deleted.")
+                        st.rerun()
+
     with tab_manual:
         st.subheader("Add transaction for a user")
         users = get_card_users()
@@ -2890,6 +3040,7 @@ def card_user_dashboard():
     if not assigned_cards:
         st.warning("No cards assigned yet. Admin ni contact cheyyandi.")
         return
+    generate_recurring_transactions(user_id)
 
     st.title("Credit Card Portal")
     if st.session_state.card_user_page == "Add Transaction":
