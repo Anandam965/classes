@@ -2673,7 +2673,8 @@ create table if not exists card_payments (
 def get_card_users():
     try:
         return supabase.table("card_users").select("id, name, mobile, app_pin, active").order("name").execute().data or []
-    except Exception:
+    except Exception as e:
+        st.error(f"Card users load failed: {e}")
         return []
 
 
@@ -2704,6 +2705,7 @@ def admin_credit_cards_dashboard():
             pin = st.text_input("Login PIN", type="password", max_chars=6)
             assigned = st.multiselect("Cards allowed", ["card_1", "card_2"], format_func=get_card_label, default=["card_1"])
             submitted = st.form_submit_button("Create PIN Login", type="primary")
+        created_user = None
         if submitted:
             if not name.strip() or not pin.strip() or not assigned:
                 st.error("Name, PIN, cards required.")
@@ -2721,18 +2723,23 @@ def admin_credit_cards_dashboard():
                             "mobile": mobile.strip(),
                             "app_pin": pin,
                         }).execute()
-                        new_user_id = created.data[0]["id"] if created.data else None
+                        created_data = created.data or []
+                        if not created_data:
+                            created_data = supabase.table("card_users").select("*").eq("app_pin", pin).execute().data or []
+                        new_user_id = created_data[0]["id"] if created_data else None
                         if not new_user_id:
                             raise Exception("Card user create failed.")
                         for card_code in assigned:
                             supabase.table("card_user_cards").insert({"user_id": new_user_id, "card_code": card_code}).execute()
-                        st.success("Card user PIN login created. User PIN tho login avvachu.")
-                        st.rerun()
+                        created_user = created_data[0] if created_data else {"id": new_user_id, "name": name.strip(), "mobile": mobile.strip(), "app_pin": pin, "active": True}
+                        st.success(f"Card user created: {name.strip()} | PIN: {pin}")
                 except Exception as e:
                     st.error(f"Create user failed: {e}")
 
         st.divider()
         users = get_card_users()
+        if created_user and not any(u.get("id") == created_user.get("id") for u in users):
+            users = [created_user] + users
         if not users:
             st.info("No card users yet.")
         for user in users:
