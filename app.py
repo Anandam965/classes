@@ -1806,10 +1806,118 @@ O Rama! Great Son of Kausalya, the Sun is about to rise in the Eastern skies; pl
 
 
 def show_suprabhatam_admin():
-    st.title("Suprabhatam")
-    st.caption("Extracted from Tirumala Tirupati Devasthanams official Suprabhatam page.")
-    st.link_button("Open source page", "https://www.tirumala.org/Suprabhatam.aspx")
-    st.text_area("Suprabhatam text", SUPRABHATAM_TEXT, height=650)
+    st.markdown("""
+    <style>
+    .supra-hero {
+        border: 1px solid #ead8bf;
+        background: #fff8ed;
+        padding: 24px 28px;
+        border-radius: 8px;
+        margin-bottom: 18px;
+    }
+    .supra-hero h1 { margin: 0 0 8px 0; font-size: 2.1rem; color: #5b2d0c; }
+    .supra-hero p { margin: 0; color: #4d3b2a; line-height: 1.65; }
+    .supra-card {
+        border: 1px solid #e6e8ee;
+        background: #ffffff;
+        padding: 18px 20px;
+        border-radius: 8px;
+        margin: 12px 0;
+    }
+    .supra-card h3 { margin-top: 0; color: #263047; }
+    .supra-card p, .supra-card li { line-height: 1.7; color: #2f3545; }
+    .supra-verse {
+        background: #f6f7fb;
+        border-left: 4px solid #c46a2b;
+        padding: 16px 18px;
+        border-radius: 6px;
+        font-size: 1.05rem;
+        line-height: 1.8;
+        color: #1f2533;
+    }
+    .supra-meta {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(120px, 1fr));
+        gap: 12px;
+        margin: 12px 0 18px 0;
+    }
+    .supra-meta div {
+        border: 1px solid #e6e8ee;
+        border-radius: 8px;
+        padding: 14px;
+        background: #ffffff;
+    }
+    .supra-meta strong { display: block; color: #5b2d0c; font-size: 1.2rem; }
+    .supra-meta span { color: #5f6678; font-size: 0.9rem; }
+    </style>
+    <div class="supra-hero">
+        <h1>Suprabhatam</h1>
+        <p>Extracted from Tirumala Tirupati Devasthanams official Suprabhatam page. This page presents the text neatly for reading inside the admin portal.</p>
+    </div>
+    """, unsafe_allow_html=True)
+    st.link_button("Open TTD source page", "https://www.tirumala.org/Suprabhatam.aspx")
+
+    st.markdown("""
+    <div class="supra-card">
+        <h3>About the Seva</h3>
+        <p>'Suprabhatam' is the first and foremost pre-dawn seva performed in the temple of Lord Venkateswara.</p>
+        <p>This ritual is performed at Sayana Mandapam inside sanctum sanctorum to wake up the Lord from His celestial sleep, amidst the rhythmic chanting of vedic hymns. Every day in the early hours acharyapurushas recite the hymns beginning with 'Kausalya Supraja Rama Purva Sandhya Pravarthathe' in front of the main deity at Bangaru Vakili, while on the other hand, a descendant of Tallapaka Annamacharya sings songs penned by the saint poet in praise of Lord Venkateswara at the first corridor of the sanctum sanctorum.</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    st.markdown("""
+    <div class="supra-meta">
+        <div><strong>29</strong><span>Suprabhatam slokas</span></div>
+        <div><strong>11</strong><span>Stotram slokas</span></div>
+        <div><strong>16</strong><span>Prapatti stanzas</span></div>
+        <div><strong>14</strong><span>Mangalasasanam stanzas</span></div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    col1, col2 = st.columns(2)
+    with col1:
+        st.markdown("""
+        <div class="supra-card">
+            <h3>Meaning and Structure</h3>
+            <p>'Suprabhatam' is a Sanskrit term which literally means 'Good Morning'. This hymn consists of four parts: Suprabhatam, Stotram, Prapatti and Mangalasasanam.</p>
+            <ul>
+                <li><b>Suprabhatam:</b> awakening the Lord from divine sleep.</li>
+                <li><b>Stotram:</b> hymns in praise of the Lord.</li>
+                <li><b>Prapatti:</b> total surrender to the Lord.</li>
+                <li><b>Mangalasasanam:</b> prayer sung in the glory of the Lord.</li>
+            </ul>
+        </div>
+        """, unsafe_allow_html=True)
+    with col2:
+        st.markdown("""
+        <div class="supra-card">
+            <h3>Tradition</h3>
+            <p>Suprabhatam was composed by Prativadi Bhayankara Annan, a disciple of the celebrated Vaishnava preceptor Manavala Mamuni, and consists of a total of 70 slokas.</p>
+            <p>The worship of Lord Venkateswara during Suprabhatam is considered highly meritorious. Suprabhata seva tickets can be booked in advance.</p>
+        </div>
+        """, unsafe_allow_html=True)
+
+    st.markdown("""
+    <div class="supra-card">
+        <h3>Ritual Notes</h3>
+        <p>This arjitha seva is performed before the Bangaru Vakili. After the seva, the Bhoga Srinivasa Murthy, the silver replica of the main deity also known as Dhruva Beram, is shifted back from the Sayana Mantapa to the Garbha Griha to commence the Lord's activities for the day.</p>
+        <p>Immediately after completing Suprabhatam, Bangaru Vakili is kept open. The ritual lasts for over 30 minutes. Suprabhata seva is not performed in Dhanurmasa; instead, Tiruppavai is recited during that time.</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    st.markdown("""
+    <div class="supra-card">
+        <h3>Sri Venkateswara Suprabhatam</h3>
+        <div class="supra-verse">
+            Kousalya supraja Rama poorva sandhya pravarthathe<br>
+            Uttishta Narasardula karthavyamdhaivamanhikam
+        </div>
+        <p><b>Meaning:</b> O Rama! Great Son of Kausalya, the Sun is about to rise in the Eastern skies; please arise to offer the early morning oblations.</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    with st.expander("Plain extracted text"):
+        st.text(SUPRABHATAM_TEXT)
 
 
 def admin_dashboard():
