@@ -2,6 +2,7 @@ import os
 import uuid
 import time
 import json
+import re
 import requests
 from datetime import date, timedelta
 
@@ -2595,10 +2596,18 @@ def add_months(source_date, months):
     return source_date.replace(year=year, month=month, day=min(source_date.day, max_days[month - 1]))
 
 
+def days_in_month(year, month):
+    return [31, 29 if year % 4 == 0 and (year % 100 != 0 or year % 400 == 0) else 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1]
+
+
+def bill_date_for_month(card_code, year, month):
+    bill_day = get_card_bill_day(card_code)
+    return date(year, month, min(bill_day, days_in_month(year, month)))
+
+
 def get_statement_period(card_code, anchor=None):
     anchor = anchor or date.today()
-    bill_day = get_card_bill_day(card_code)
-    this_month_bill = date(anchor.year, anchor.month, min(bill_day, 28 if anchor.month == 2 else 30 if anchor.month in [4, 6, 9, 11] else 31))
+    this_month_bill = bill_date_for_month(card_code, anchor.year, anchor.month)
     if anchor >= this_month_bill:
         end_date = this_month_bill
     else:
@@ -2607,11 +2616,123 @@ def get_statement_period(card_code, anchor=None):
     return start_date, end_date
 
 
+def get_statement_period_for_billing_month(card_code, billing_month):
+    year, month = [int(part) for part in str(billing_month).split("-")]
+    end_date = bill_date_for_month(card_code, year, month)
+    start_date = add_months(end_date, -1) + timedelta(days=1)
+    return start_date, end_date
+
+
+def get_billing_month_for_txn(card_code, txn_date):
+    if not isinstance(txn_date, date):
+        txn_date = date.fromisoformat(str(txn_date))
+    this_month_bill = bill_date_for_month(card_code, txn_date.year, txn_date.month)
+    if txn_date <= this_month_bill:
+        end_date = this_month_bill
+    else:
+        next_month = add_months(this_month_bill, 1)
+        end_date = bill_date_for_month(card_code, next_month.year, next_month.month)
+    return end_date.strftime("%Y-%m")
+
+
 def money_value(value):
     try:
         return float(value or 0)
     except Exception:
         return 0.0
+
+
+def extract_amount_from_payment_screenshot(uploaded_file):
+    api_key = st.secrets.get("OCR_SPACE_API_KEY", "")
+    if not api_key:
+        raise Exception("OCR_SPACE_API_KEY secret required for payment amount check.")
+    file_bytes = uploaded_file.getvalue()
+    response = requests.post(
+        "https://api.ocr.space/parse/image",
+        data={"apikey": api_key, "language": "eng", "isOverlayRequired": False},
+        files={"file": (uploaded_file.name, file_bytes, uploaded_file.type)},
+        timeout=40,
+    )
+    result = response.json()
+    if result.get("IsErroredOnProcessing"):
+        raise Exception(str(result.get("ErrorMessage") or result.get("ErrorDetails") or "OCR failed"))
+    parsed = result.get("ParsedResults") or []
+    raw_text = "\n".join(p.get("ParsedText", "") for p in parsed if p.get("ParsedText")).strip()
+    if not raw_text:
+        raise Exception("Screenshot lo amount text clear ga kanipinchaledu.")
+    matches = re.findall(r"(?:rs\.?|inr|₹)?\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)", raw_text, flags=re.IGNORECASE)
+    amounts = []
+    for match in matches:
+        try:
+            value = float(match.replace(",", ""))
+            if value > 0:
+                amounts.append(value)
+        except Exception:
+            pass
+    if not amounts:
+        raise Exception("Screenshot lo amount dorakaledu.")
+    return amounts, raw_text
+
+
+def payment_amount_matches(uploaded_file, expected_amount):
+    amounts, raw_text = extract_amount_from_payment_screenshot(uploaded_file)
+    expected = money_value(expected_amount)
+    closest = min(amounts, key=lambda amount: abs(amount - expected))
+    return abs(closest - expected) <= 1.0, closest, raw_text
+
+
+def get_card_statement_summaries(user_id=None):
+    try:
+        tx_query = supabase.table("card_transactions").select("*").eq("status", "approved")
+        if user_id:
+            tx_query = tx_query.eq("user_id", user_id)
+        txns = tx_query.execute().data or []
+    except Exception as e:
+        st.error(f"Statements load failed: {e}")
+        return []
+
+    summaries = {}
+    for txn in txns:
+        card_code = txn.get("card_code")
+        txn_date = txn.get("transaction_date")
+        if not card_code or not txn_date:
+            continue
+        billing_month = get_billing_month_for_txn(card_code, txn_date)
+        key = (txn.get("user_id"), card_code, billing_month)
+        start_date, end_date = get_statement_period_for_billing_month(card_code, billing_month)
+        item = summaries.setdefault(key, {
+            "user_id": txn.get("user_id"),
+            "card_code": card_code,
+            "billing_month": billing_month,
+            "bill_start": start_date,
+            "bill_end": end_date,
+            "total": 0.0,
+            "transactions": [],
+        })
+        item["total"] += money_value(txn.get("amount"))
+        item["transactions"].append(txn)
+
+    try:
+        pay_query = supabase.table("card_payments").select("*")
+        if user_id:
+            pay_query = pay_query.eq("user_id", user_id)
+        payments = pay_query.execute().data or []
+    except Exception:
+        payments = []
+    payment_map = {}
+    for pay in payments:
+        key = (pay.get("user_id"), pay.get("card_code"), pay.get("billing_month"))
+        current = payment_map.get(key)
+        if not current or str(pay.get("created_at", "")) > str(current.get("created_at", "")):
+            payment_map[key] = pay
+
+    rows = []
+    for key, item in summaries.items():
+        payment = payment_map.get(key)
+        item["payment"] = payment
+        item["payment_status"] = payment.get("status") if payment else "unpaid"
+        rows.append(item)
+    return sorted(rows, key=lambda x: (x["bill_end"], x["card_code"]), reverse=True)
 
 
 def show_credit_card_sql_help():
@@ -2855,6 +2976,46 @@ def admin_credit_cards_dashboard():
 
     with tab_payments:
         st.subheader("User bill payment screenshots")
+        statement_rows = get_card_statement_summaries()
+        pending_rows = [r for r in statement_rows if r.get("payment_status") != "paid"]
+        if statement_rows:
+            st.markdown("### Card usage and receivables")
+            for card_code in ["card_1", "card_2"]:
+                card_rows = [r for r in pending_rows if r["card_code"] == card_code]
+                used_total = sum(r["total"] for r in card_rows)
+                users_count = len(set(r["user_id"] for r in card_rows))
+                st.metric(f"{get_card_label(card_code)} pending receivable", f"Rs.{used_total:.2f}", f"{users_count} users")
+            with st.expander("User monthly statements"):
+                user_cache = {}
+                table_rows = []
+                for row in statement_rows:
+                    uid = row["user_id"]
+                    if uid not in user_cache:
+                        user_cache[uid] = (supabase.table("card_users").select("name, mobile").eq("id", uid).execute().data or [{}])[0]
+                    user = user_cache[uid]
+                    table_rows.append({
+                        "user": user.get("name", "User"),
+                        "mobile": user.get("mobile", ""),
+                        "card": get_card_label(row["card_code"]),
+                        "month": row["billing_month"],
+                        "period": f"{row['bill_start']} to {row['bill_end']}",
+                        "amount": round(row["total"], 2),
+                        "status": row.get("payment_status", "unpaid"),
+                    })
+                st.dataframe(table_rows, use_container_width=True, hide_index=True)
+                selected_statement = st.selectbox(
+                    "Open statement",
+                    [f"{r['user']} | {r['card']} | {r['month']} | Rs.{r['amount']}" for r in table_rows],
+                    key="admin_statement_select",
+                )
+                selected_idx = [f"{r['user']} | {r['card']} | {r['month']} | Rs.{r['amount']}" for r in table_rows].index(selected_statement)
+                selected_row = statement_rows[selected_idx]
+                st.dataframe([{
+                    "date": t.get("transaction_date"),
+                    "purpose": t.get("purpose"),
+                    "amount": money_value(t.get("amount")),
+                } for t in selected_row["transactions"]], use_container_width=True, hide_index=True)
+        st.divider()
         try:
             payments = supabase.table("card_payments").select("*").order("created_at", desc=True).execute().data or []
         except Exception as e:
@@ -3084,50 +3245,83 @@ def card_user_dashboard():
             } for r in rows], use_container_width=True, hide_index=True)
         return
 
-    for card_code in assigned_cards:
-        start_date, end_date = get_statement_period(card_code)
-        billing_month = end_date.strftime("%Y-%m")
-        approved = supabase.table("card_transactions").select("*").eq("user_id", user_id).eq("card_code", card_code).eq("status", "approved").gte("transaction_date", str(start_date)).lte("transaction_date", str(end_date)).order("transaction_date", desc=False).execute().data or []
-        total = sum(money_value(r.get("amount")) for r in approved)
-        payments = supabase.table("card_payments").select("*").eq("user_id", user_id).eq("card_code", card_code).eq("billing_month", billing_month).order("created_at", desc=True).execute().data or []
-        paid = any(p.get("status") == "paid" for p in payments)
-        pending_pay = any(p.get("status") == "pending" for p in payments)
-        status_text = "PAID" if paid else "Payment Waiting Admin Approval" if pending_pay else "PAY"
-        with st.container(border=True):
-            st.subheader(f"{get_card_label(card_code)} - Bill date {get_card_bill_day(card_code)}")
-            c1, c2, c3 = st.columns(3)
-            c1.metric("Bill period", f"{start_date} to {end_date}")
-            c2.metric("Approved amount", f"Rs.{total:.2f}")
-            c3.metric("Status", status_text)
-            if approved:
-                st.dataframe([{
-                    "date": r.get("transaction_date"),
-                    "purpose": r.get("purpose"),
-                    "amount": money_value(r.get("amount")),
-                } for r in approved], use_container_width=True, hide_index=True)
-            else:
-                st.info("Ee bill period lo approved transactions levu.")
-            if not paid and total > 0:
-                with st.form(f"pay_form_{card_code}_{billing_month}"):
-                    pay_file = st.file_uploader("Upload bill paid screenshot", type=["png", "jpg", "jpeg", "webp"], key=f"pay_file_{card_code}_{billing_month}")
-                    submit_pay = st.form_submit_button("Pay / Submit Screenshot", type="primary")
-                if submit_pay:
-                    proof_url = upload_optional_image(pay_file)
-                    if not proof_url:
-                        st.error("Screenshot upload required.")
-                    else:
-                        supabase.table("card_payments").upsert({
-                            "user_id": user_id,
-                            "card_code": card_code,
-                            "billing_month": billing_month,
-                            "bill_start": str(start_date),
-                            "bill_end": str(end_date),
-                            "amount": total,
-                            "proof_url": proof_url,
-                            "status": "pending",
-                        }, on_conflict="user_id,card_code,billing_month").execute()
-                        st.success("Payment screenshot admin approval ki sent.")
-                        st.rerun()
+    statements = [row for row in get_card_statement_summaries(user_id) if row["card_code"] in assigned_cards]
+    if not statements:
+        st.info("Approved transactions or generated statements levu.")
+        return
+
+    pending_statements = [row for row in statements if row.get("payment_status") != "paid"]
+    if pending_statements:
+        st.subheader("Pending statements")
+        st.dataframe([{
+            "card": get_card_label(r["card_code"]),
+            "month": r["billing_month"],
+            "period": f"{r['bill_start']} to {r['bill_end']}",
+            "amount": round(r["total"], 2),
+            "status": r.get("payment_status", "unpaid"),
+        } for r in pending_statements], use_container_width=True, hide_index=True)
+
+    options = {
+        f"{get_card_label(r['card_code'])} | {r['billing_month']} | Rs.{r['total']:.2f} | {r.get('payment_status', 'unpaid')}": r
+        for r in statements
+    }
+    selected_label = st.selectbox("Select statement month", list(options.keys()), key="user_statement_select")
+    selected = options[selected_label]
+    card_code = selected["card_code"]
+    billing_month = selected["billing_month"]
+    start_date = selected["bill_start"]
+    end_date = selected["bill_end"]
+    total = selected["total"]
+    payment = selected.get("payment")
+    payment_status = selected.get("payment_status", "unpaid")
+    status_text = "PAID" if payment_status == "paid" else "Payment Waiting Admin Approval" if payment_status == "pending" else "PAY"
+
+    with st.container(border=True):
+        st.subheader(f"{get_card_label(card_code)} - {billing_month}")
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Bill period", f"{start_date} to {end_date}")
+        c2.metric("Statement amount", f"Rs.{total:.2f}")
+        c3.metric("Status", status_text)
+        st.dataframe([{
+            "date": r.get("transaction_date"),
+            "purpose": r.get("purpose"),
+            "amount": money_value(r.get("amount")),
+        } for r in selected["transactions"]], use_container_width=True, hide_index=True)
+        if payment and payment.get("proof_url"):
+            st.link_button("Open submitted payment screenshot", payment["proof_url"])
+        if payment_status != "paid" and total > 0:
+            with st.form(f"pay_form_{card_code}_{billing_month}"):
+                pay_file = st.file_uploader("Upload bill paid screenshot", type=["png", "jpg", "jpeg", "webp"], key=f"pay_file_{card_code}_{billing_month}")
+                submit_pay = st.form_submit_button("Pay / Submit Screenshot", type="primary")
+            if submit_pay:
+                if not pay_file:
+                    st.error("Screenshot upload required.")
+                else:
+                    try:
+                        matched, found_amount, raw_text = payment_amount_matches(pay_file, total)
+                        if not matched:
+                            st.error(f"Screenshot amount mismatch. Bill amount Rs.{total:.2f}, screenshot amount Rs.{found_amount:.2f}.")
+                            with st.expander("OCR text"):
+                                st.code(raw_text)
+                            return
+                        proof_url = upload_optional_image(pay_file)
+                        if not proof_url:
+                            st.error("Screenshot upload failed.")
+                        else:
+                            supabase.table("card_payments").upsert({
+                                "user_id": user_id,
+                                "card_code": card_code,
+                                "billing_month": billing_month,
+                                "bill_start": str(start_date),
+                                "bill_end": str(end_date),
+                                "amount": total,
+                                "proof_url": proof_url,
+                                "status": "pending",
+                            }, on_conflict="user_id,card_code,billing_month").execute()
+                            st.success("Payment screenshot amount matched and sent to admin approval.")
+                            st.rerun()
+                    except Exception as e:
+                        st.error(f"Payment screenshot amount check failed: {e}")
 
 # =========================
 # USER DASHBOARD
