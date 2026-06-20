@@ -3029,7 +3029,7 @@ def card_user_dashboard():
         st.query_params.clear()
         st.rerun()
     st.sidebar.divider()
-    pages = ["Monthly Bill", "Add Transaction", "History"]
+    pages = ["Monthly Bill", "Pending Bills", "Paid", "Add Transaction", "History"]
     for pg in pages:
         if st.sidebar.button(pg, use_container_width=True, type="primary" if st.session_state.card_user_page == pg else "secondary", key=f"card_nav_{pg}"):
             st.session_state.card_user_page = pg
@@ -3067,6 +3067,75 @@ def card_user_dashboard():
                 }).execute()
                 st.success("Transaction sent to admin for approval.")
                 st.rerun()
+        return
+
+    if st.session_state.card_user_page == "Pending Bills":
+        st.subheader("Pending Bills")
+        found_pending_bill = False
+        for card_code in assigned_cards:
+            start_date, end_date = get_statement_period(card_code)
+            billing_month = end_date.strftime("%Y-%m")
+            approved = supabase.table("card_transactions").select("*").eq("user_id", user_id).eq("card_code", card_code).eq("status", "approved").gte("transaction_date", str(start_date)).lte("transaction_date", str(end_date)).order("transaction_date", desc=False).execute().data or []
+            total = sum(money_value(r.get("amount")) for r in approved)
+            payments = supabase.table("card_payments").select("*").eq("user_id", user_id).eq("card_code", card_code).eq("billing_month", billing_month).order("created_at", desc=True).execute().data or []
+            paid = any(p.get("status") == "paid" for p in payments)
+            pending_pay = any(p.get("status") == "pending" for p in payments)
+            if total <= 0 or paid:
+                continue
+            found_pending_bill = True
+            status_text = "Payment Waiting Admin Approval" if pending_pay else "PAY"
+            with st.container(border=True):
+                st.subheader(f"{get_card_label(card_code)} - {billing_month}")
+                c1, c2, c3 = st.columns(3)
+                c1.metric("Bill period", f"{start_date} to {end_date}")
+                c2.metric("Bill amount", f"Rs.{total:.2f}")
+                c3.metric("Status", status_text)
+                st.dataframe([{
+                    "date": r.get("transaction_date"),
+                    "purpose": r.get("purpose"),
+                    "amount": money_value(r.get("amount")),
+                } for r in approved], use_container_width=True, hide_index=True)
+                if not pending_pay:
+                    with st.form(f"pending_pay_form_{card_code}_{billing_month}"):
+                        pay_file = st.file_uploader("Upload bill paid screenshot", type=["png", "jpg", "jpeg", "webp"], key=f"pending_pay_file_{card_code}_{billing_month}")
+                        submit_pay = st.form_submit_button("Pay / Submit Screenshot", type="primary")
+                    if submit_pay:
+                        proof_url = upload_optional_image(pay_file)
+                        if not proof_url:
+                            st.error("Screenshot upload required.")
+                        else:
+                            supabase.table("card_payments").upsert({
+                                "user_id": user_id,
+                                "card_code": card_code,
+                                "billing_month": billing_month,
+                                "bill_start": str(start_date),
+                                "bill_end": str(end_date),
+                                "amount": total,
+                                "proof_url": proof_url,
+                                "status": "pending",
+                            }, on_conflict="user_id,card_code,billing_month").execute()
+                            st.success("Payment screenshot admin approval ki sent.")
+                            st.rerun()
+        if not found_pending_bill:
+            st.info("Pending bills levu.")
+        return
+
+    if st.session_state.card_user_page == "Paid":
+        st.subheader("Paid Bills")
+        paid_rows = supabase.table("card_payments").select("*").eq("user_id", user_id).eq("status", "paid").order("bill_end", desc=True).execute().data or []
+        if not paid_rows:
+            st.info("Paid bills levu.")
+        else:
+            st.dataframe([{
+                "card": get_card_label(r.get("card_code")),
+                "month": r.get("billing_month"),
+                "period": f"{r.get('bill_start')} to {r.get('bill_end')}",
+                "amount": money_value(r.get("amount")),
+                "paid_at": str(r.get("approved_at") or "")[:19],
+            } for r in paid_rows], use_container_width=True, hide_index=True)
+            for row in paid_rows:
+                if row.get("proof_url"):
+                    st.link_button(f"Open screenshot - {get_card_label(row.get('card_code'))} {row.get('billing_month')}", row["proof_url"])
         return
 
     if st.session_state.card_user_page == "History":
