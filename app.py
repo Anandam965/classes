@@ -1769,6 +1769,49 @@ def check_mcq_correct(user_val, q):
     return False
 
 
+SUPRABHATAM_TEXT = """Source: Tirumala Tirupati Devasthanams official page
+URL: https://www.tirumala.org/Suprabhatam.aspx
+
+Suprabhatam
+
+'Suprabhatam' is the first and foremost pre-dawn seva performed in the temple of Lord Venkateswara.
+
+This ritual is performed at Sayana Mandapam inside sanctum sanctorum to wake up the Lord from His celestial sleep, amidst the rhythmic chanting of vedic hymns. Every day in the early hours acharyapurushas recite the hymns beginning with 'Kausalya Supraja Rama Purva Sandhya Pravarthathe' in front of the main deity at Bangaru Vakili, while on the other hand, a descendant of Tallapaka Annamacharya sings some songs penned by the great saint poet in praise of Lord Venkateswara at the first corridor of the sanctum sanctorum at the same time.
+
+'Suprabhatam' is a Sanskrit term which literally means 'Good Morning'. This particular hymn consists of four parts including Suprabhatam, Stotram, Prapatti and Mangalasasanam.
+
+Suprabhatam - It means the awakening of Lord from His divine sleep and it consists of 29 slokas.
+Stotram - These are the hymns in praise of Lord, consisting 11 slokas.
+Prapatti - Meaning Total Surrender to the Lord and it has 16 stanzas.
+Mangalasasanam - It is the prayer sung in the glory of Lord consisting 14 stanzas.
+
+Thus, Suprabhatam, composed by Prativadi Bhayankara Annan, a disciple of the celebrated Vaishnava Preceptor, Manavala Mamuni consists of a total of 70 slokas.
+
+This arjitha seva is performed before the Bangaru Vakili, after which the Bhoga Srinivasa Murthy, silver replica of the main deity and also known as Dhruva Beram, who was laid to bed in the Sayana Mantapa is shifted back to Garbha Griha to commence His activities for the day.
+
+Archakas, jeeyangars, temple authorities and the Grihastha pilgrims who purchase tickets for Suprabhatam worship the Lord during this early morning seva and feel immense solace with the first glimpse of His Divine Charm that which cannot be described in mere words.
+
+Immediately after completing the Suprabhatam, Bangaru Vakili is kept open. The ritual lasts for over 30 minutes. Suprabhata seva will not be performed in Dhanurmasa. Instead, Tiruppavai is recited during this time.
+
+The worship of Lord Venkateswara during Suprabhatam is considered highly meritorious. Suprabhata seva tickets can be booked in advance.
+
+Sri Venkateswara Suprabhatam (with lyrics and meaning in English)
+
+Kousalya supraja Rama poorva sandhya pravarthathe
+Uttishta Narasardula karthavyamdhaivamanhikam
+
+Meaning:
+O Rama! Great Son of Kausalya, the Sun is about to rise in the Eastern skies; please arise to offer the early morning oblations.
+"""
+
+
+def show_suprabhatam_admin():
+    st.title("Suprabhatam")
+    st.caption("Extracted from Tirumala Tirupati Devasthanams official Suprabhatam page.")
+    st.link_button("Open source page", "https://www.tirumala.org/Suprabhatam.aspx")
+    st.text_area("Suprabhatam text", SUPRABHATAM_TEXT, height=650)
+
+
 def admin_dashboard():
     st.sidebar.title("Admin Workspace")
     if st.sidebar.button("Logout", use_container_width=True):
@@ -1796,12 +1839,15 @@ def admin_dashboard():
     label = f"Group Chat ({unread_admin})" if unread_admin > 0 else "Group Chat"
     
     menu = st.sidebar.selectbox("Navigation Control",
-        ["Manage Course Content", "Manage Exams & Questions", "Student Results & Ranks", "Credit Cards", "chat_menu_label"],
+        ["Manage Course Content", "Manage Exams & Questions", "Student Results & Ranks", "Credit Cards", "Suprabhatam", "chat_menu_label"],
         key="admin_navigation")
     if "Group Chat" in menu:
         menu = "Group Chat"
     if menu == "Credit Cards":
         admin_credit_cards_dashboard()
+        return
+    if menu == "Suprabhatam":
+        show_suprabhatam_admin()
         return
 
     if menu == "Manage Course Content":
