@@ -2855,6 +2855,43 @@ def admin_credit_cards_dashboard():
 
     with tab_payments:
         st.subheader("User bill payment screenshots")
+        st.markdown("### All users pending bills")
+        try:
+            all_card_users = get_card_users()
+            pending_bill_rows = []
+            for card_user in all_card_users:
+                user_cards = get_assigned_cards(card_user["id"])
+                for card_code in user_cards:
+                    start_date, end_date = get_statement_period(card_code)
+                    billing_month = end_date.strftime("%Y-%m")
+                    approved = supabase.table("card_transactions").select("*").eq("user_id", card_user["id"]).eq("card_code", card_code).eq("status", "approved").gte("transaction_date", str(start_date)).lte("transaction_date", str(end_date)).execute().data or []
+                    total = sum(money_value(r.get("amount")) for r in approved)
+                    if total <= 0:
+                        continue
+                    payments_for_bill = supabase.table("card_payments").select("*").eq("user_id", card_user["id"]).eq("card_code", card_code).eq("billing_month", billing_month).order("created_at", desc=True).execute().data or []
+                    paid = any(p.get("status") == "paid" for p in payments_for_bill)
+                    if paid:
+                        continue
+                    pending_pay = any(p.get("status") == "pending" for p in payments_for_bill)
+                    pending_bill_rows.append({
+                        "user": card_user.get("name", "User"),
+                        "mobile": card_user.get("mobile", ""),
+                        "card": get_card_label(card_code),
+                        "month": billing_month,
+                        "period": f"{start_date} to {end_date}",
+                        "amount": round(total, 2),
+                        "status": "Payment uploaded - approval pending" if pending_pay else "Not paid",
+                    })
+            if pending_bill_rows:
+                c1, c2 = st.columns(2)
+                c1.metric("Pending bills", len(pending_bill_rows))
+                c2.metric("Total receivable", f"Rs.{sum(r['amount'] for r in pending_bill_rows):.2f}")
+                st.dataframe(pending_bill_rows, use_container_width=True, hide_index=True)
+            else:
+                st.info("All users pending bills levu.")
+        except Exception as e:
+            st.error(f"Pending bills load failed: {e}")
+        st.divider()
         try:
             payments = supabase.table("card_payments").select("*").order("created_at", desc=True).execute().data or []
         except Exception as e:
