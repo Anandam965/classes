@@ -100,18 +100,94 @@ for key, val in defaults.items():
 # =========================
 # PERSISTENT LOGIN
 # =========================
-if not st.session_state.logged_in:
+def persist_browser_login():
+    if not st.session_state.get("logged_in") or not st.session_state.get("user_id"):
+        return
+    uid = json.dumps(str(st.session_state.user_id))
+    role = json.dumps(str(st.session_state.role))
+    components.html(f"""
+    <script>
+      try {{
+        window.parent.localStorage.setItem("lms_saved_uid", {uid});
+        window.parent.localStorage.setItem("lms_saved_role", {role});
+      }} catch (e) {{}}
+    </script>
+    """, height=0)
+
+
+def restore_browser_login_bridge():
+    components.html("""
+    <script>
+      try {
+        const url = new URL(window.parent.location.href);
+        const hasLogin = url.searchParams.get("uid") && url.searchParams.get("role");
+        const uid = window.parent.localStorage.getItem("lms_saved_uid");
+        const role = window.parent.localStorage.getItem("lms_saved_role");
+        if (!hasLogin && uid && role) {
+          url.searchParams.set("uid", uid);
+          url.searchParams.set("role", role);
+          window.parent.location.replace(url.toString());
+        }
+      } catch (e) {}
+    </script>
+    """, height=0)
+
+
+def show_logout_redirect():
+    st.session_state.logged_in = False
+    st.session_state.role = ""
+    st.session_state.user_id = ""
     try:
-        qp = st.query_params
-        saved_uid = qp.get("uid", "")
-        saved_role = qp.get("role", "")
-        if saved_uid and saved_role:
+        st.query_params.clear()
+    except Exception:
+        pass
+    components.html("""
+    <script>
+      try {
+        window.parent.localStorage.removeItem("lms_saved_uid");
+        window.parent.localStorage.removeItem("lms_saved_role");
+        window.parent.location.replace(window.parent.location.pathname);
+      } catch (e) {
+        window.parent.location.reload();
+      }
+    </script>
+    """, height=0)
+    st.info("Logging out...")
+    st.stop()
+
+
+def apply_saved_login(saved_uid, saved_role):
+    if not saved_uid or not saved_role:
+        return False
+    try:
+        if saved_role == "card_user":
+            card_rows = supabase.table("card_users").select("*").eq("id", saved_uid).execute().data
+            if card_rows and card_rows[0].get("active", True):
+                st.session_state.logged_in = True
+                st.session_state.role = "card_user"
+                st.session_state.user_id = saved_uid
+                st.session_state.pin_verified = True
+                return True
+        else:
             urow_data = supabase.table("users").select("*").eq("id", saved_uid).execute().data
             if urow_data and urow_data[0]["role"] == saved_role:
                 st.session_state.logged_in = True
                 st.session_state.role = saved_role
                 st.session_state.user_id = saved_uid
                 st.session_state.pin_verified = True
+                return True
+    except Exception:
+        pass
+    return False
+
+
+if not st.session_state.logged_in:
+    try:
+        qp = st.query_params
+        saved_uid = qp.get("uid", "")
+        saved_role = qp.get("role", "")
+        if not apply_saved_login(saved_uid, saved_role):
+            restore_browser_login_bridge()
     except Exception:
         pass
 
@@ -2411,11 +2487,11 @@ def show_suprabhatam_admin():
 
 def admin_dashboard():
     st.sidebar.title("Admin Workspace")
+    persist_browser_login()
     if st.sidebar.button("Logout", use_container_width=True):
         for key in defaults:
             st.session_state[key] = defaults[key]
-        st.query_params.clear()
-        st.rerun()
+        show_logout_redirect()
 
     st.sidebar.divider()
     if st.session_state.admin_preview_mode:
@@ -3738,11 +3814,11 @@ def admin_credit_cards_dashboard():
 
 def card_user_dashboard():
     st.sidebar.title("Credit Card Portal")
+    persist_browser_login()
     if st.sidebar.button("Logout", use_container_width=True):
         for key in defaults:
             st.session_state[key] = defaults[key]
-        st.query_params.clear()
-        st.rerun()
+        show_logout_redirect()
     st.sidebar.divider()
     pages = ["Monthly Bill", "Pending Bills", "Paid", "Add Transaction", "History"]
     for pg in pages:
@@ -3919,11 +3995,11 @@ def card_user_dashboard():
 def user_dashboard(preview_mode=False):
     if not preview_mode:
         st.sidebar.title("User Workspace")
+        persist_browser_login()
         if st.sidebar.button("Logout", use_container_width=True):
             for key in defaults:
                 st.session_state[key] = defaults[key]
-            st.query_params.clear()
-            st.rerun()
+            show_logout_redirect()
         st.sidebar.divider()
         pages = ["My Classes", "Programming", "Progress", "Code Practice", "Group Chat", "Attendance"]
         if user_has_suprabhatam_access(st.session_state.user_id):
