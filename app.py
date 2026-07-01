@@ -88,6 +88,8 @@ defaults = {
     "attendance_marked_date": "",
     "ai_generated_qs": None,
     "last_attempt_id": "",
+    "programming_session_loaded": False,
+    "malpractice_reported_keys": set(),
     "suprabhatam_index": 0,
     "suprabhatam_language": "Telugu",
 }
@@ -547,7 +549,89 @@ def is_programming_exam(exam_id):
     except Exception:
         return False
 
+def get_programming_session_sql():
+    return """
+create table if not exists programming_exam_sessions (
+  user_id uuid not null references users(id) on delete cascade,
+  exam_id uuid not null references exams(id) on delete cascade,
+  answers jsonb not null default '{}'::jsonb,
+  question_index integer not null default 0,
+  exam_end_time double precision,
+  program_submissions jsonb not null default '{}'::jsonb,
+  question_time_log jsonb not null default '{}'::jsonb,
+  status text not null default 'active',
+  force_submit boolean not null default false,
+  malpractice_count integer not null default 0,
+  last_malpractice_reason text,
+  updated_at timestamptz default now(),
+  primary key (user_id, exam_id)
+);
+"""
+
+
+def get_active_programming_session(user_id, exam_id):
+    try:
+        rows = supabase.table("programming_exam_sessions").select("*").eq("user_id", str(user_id)).eq("exam_id", str(exam_id)).eq("status", "active").limit(1).execute().data
+        return rows[0] if rows else None
+    except Exception:
+        return None
+
+
+def save_programming_exam_session(status="active", force_submit=None, malpractice_reason=None):
+    if not st.session_state.get("exam_id") or not is_programming_exam(st.session_state.exam_id):
+        return
+    payload = {
+        "user_id": str(st.session_state.user_id),
+        "exam_id": str(st.session_state.exam_id),
+        "answers": st.session_state.get("answers", {}),
+        "question_index": int(st.session_state.get("question_index", 0) or 0),
+        "exam_end_time": float(st.session_state.get("exam_end_time", 0) or 0),
+        "program_submissions": st.session_state.get("program_submissions", {}),
+        "question_time_log": st.session_state.get("question_time_log", {}),
+        "status": status,
+        "updated_at": "now()",
+    }
+    if force_submit is not None:
+        payload["force_submit"] = bool(force_submit)
+    if malpractice_reason:
+        payload["last_malpractice_reason"] = malpractice_reason
+    try:
+        supabase.table("programming_exam_sessions").upsert(payload, on_conflict="user_id,exam_id").execute()
+    except Exception:
+        pass
+
+
+def load_programming_exam_session(user_id, exam, questions):
+    session = get_active_programming_session(user_id, exam["id"])
+    if not session:
+        return None
+    duration = int(exam.get("duration_mins", 30) or 30)
+    end_time = float(session.get("exam_end_time") or 0)
+    if end_time <= time.time():
+        end_time = time.time() + (duration * 60)
+    return {
+        "exam_id": exam["id"],
+        "exam_title": exam["title"],
+        "start_exam": True,
+        "exam_submitted": False,
+        "answers": session.get("answers") or {},
+        "question_index": min(int(session.get("question_index") or 0), max(len(questions) - 1, 0)),
+        "current_questions": questions,
+        "exam_end_time": end_time,
+        "program_run_results": {},
+        "program_custom_results": {},
+        "program_submissions": session.get("program_submissions") or {},
+        "question_time_log": session.get("question_time_log") or {},
+        "question_start_time": {},
+        "programming_session_loaded": True,
+    }
+
+
 def start_exam_with_questions(exam, questions):
+    resumed = load_programming_exam_session(st.session_state.user_id, exam, questions) if is_programming_exam(exam["id"]) else None
+    if resumed:
+        st.session_state.update(resumed)
+        return
     duration = int(exam.get("duration_mins", 30) or 30)
     st.session_state.update({
         "exam_id": exam["id"],
@@ -561,7 +645,34 @@ def start_exam_with_questions(exam, questions):
         "program_run_results": {},
         "program_custom_results": {},
         "program_submissions": {},
+        "question_time_log": {},
+        "question_start_time": {},
+        "programming_session_loaded": True,
     })
+    save_programming_exam_session(status="active", force_submit=False)
+
+
+def report_programming_malpractice(reason):
+    if not st.session_state.get("exam_id") or not is_programming_exam(st.session_state.exam_id):
+        return
+    key = f"{st.session_state.user_id}:{st.session_state.exam_id}:{reason}"
+    if key in st.session_state.malpractice_reported_keys:
+        return
+    st.session_state.malpractice_reported_keys.add(key)
+    try:
+        uinfo = supabase.table("users").select("name, email").eq("id", st.session_state.user_id).execute().data or [{}]
+        uname = uinfo[0].get("name") or uinfo[0].get("email") or "Student"
+        send_admin_notification(f"Malpractice alert: {uname} - {st.session_state.exam_title} - {reason}")
+        session = get_active_programming_session(st.session_state.user_id, st.session_state.exam_id) or {}
+        count = int(session.get("malpractice_count") or 0) + 1
+        save_programming_exam_session(status="active", malpractice_reason=reason)
+        supabase.table("programming_exam_sessions").update({
+            "malpractice_count": count,
+            "last_malpractice_reason": reason,
+            "updated_at": "now()",
+        }).eq("user_id", str(st.session_state.user_id)).eq("exam_id", str(st.session_state.exam_id)).execute()
+    except Exception:
+        pass
 
 def user_attempted_question(user_id, question_id):
     try:
@@ -692,6 +803,8 @@ def submit_exam_attempt(questions, include_time=False, require_programming_submi
         t_spent = st.session_state.question_time_log.get(q["id"], 0) if include_time else None
         insert_user_answer_row(attempt_uuid, q["id"], answer_payloads.get(q["id"], ""), t_spent)
     st.session_state.last_attempt_id = attempt_uuid
+    if is_programming_exam(st.session_state.exam_id):
+        save_programming_exam_session(status="submitted", force_submit=False)
     return attempt_uuid
 
 def get_answer_time_spent(attempt_id, question_id):
@@ -943,6 +1056,17 @@ def send_notification(message, user_id=None):
         "user_id": str(user_id) if user_id else None,
         "message": message,
     }).execute()
+
+def send_admin_notification(message):
+    try:
+        admins = supabase.table("users").select("id").eq("role", "admin").execute().data or []
+        if admins:
+            for admin in admins:
+                send_notification(message, admin["id"])
+        else:
+            send_notification(message)
+    except Exception:
+        send_notification(message)
 
 def get_unread_notifications(user_id):
     try:
@@ -2937,9 +3061,9 @@ def admin_dashboard():
                             st.error("Question text empty!")
 
     elif menu == "Student Results & Ranks":
-        r_tab1, r_tab2, r_tab3, r_tab4, r_tab5, r_tab6 = st.tabs([
+        r_tab1, r_tab2, r_tab3, r_tab4, r_tab5, r_tab6, r_tab7 = st.tabs([
             " Leaderboards", " Manual Evaluation", " Score Summary",
-            " Re-Exam Requests", " Explain Requests", " Attendance"
+            " Re-Exam Requests", " Explain Requests", " Attendance", " Live Programming Exams"
         ])
 
         with r_tab1:
@@ -3076,6 +3200,41 @@ def admin_dashboard():
                 sel_idx = [f"{s['name']} ({s['email']})" for s in all_students].index(sel_student)
                 sel_uid = all_students[sel_idx]["id"]
                 show_attendance_tab(sel_uid)
+
+        with r_tab7:
+            st.title("Live Programming Exams")
+            with st.expander("Programming session database SQL setup"):
+                st.code(get_programming_session_sql(), language="sql")
+            try:
+                sessions = supabase.table("programming_exam_sessions").select("*").eq("status", "active").order("updated_at", desc=True).execute().data or []
+            except Exception as e:
+                sessions = []
+                st.warning(f"Session table ready ledu: {e}")
+            if not sessions:
+                st.info("Active programming exams levu.")
+            for sess in sessions:
+                u_data = supabase.table("users").select("name, email").eq("id", sess["user_id"]).execute().data or [{}]
+                e_data = supabase.table("exams").select("title").eq("id", sess["exam_id"]).execute().data or [{}]
+                uname = u_data[0].get("name") or u_data[0].get("email") or "Student"
+                ename = e_data[0].get("title") or "Programming Exam"
+                with st.container(border=True):
+                    c1, c2, c3 = st.columns([4, 1.5, 1.5])
+                    with c1:
+                        st.markdown(f"**{uname}** - {ename}")
+                        st.caption(f"Question: {int(sess.get('question_index') or 0) + 1} | Malpractice: {sess.get('malpractice_count') or 0} | Last: {sess.get('last_malpractice_reason') or 'None'}")
+                    with c2:
+                        if sess.get("force_submit"):
+                            st.warning("Force submit pending")
+                        else:
+                            if st.button("Submit Exam", key=f"force_submit_{sess['user_id']}_{sess['exam_id']}", type="primary", use_container_width=True):
+                                supabase.table("programming_exam_sessions").update({"force_submit": True, "updated_at": "now()"}).eq("user_id", sess["user_id"]).eq("exam_id", sess["exam_id"]).execute()
+                                send_notification(f"Admin requested submit for {ename}. Mee exam automatic ga submit avuthundi.", sess["user_id"])
+                                st.success("Student exam auto submit ki mark ayyindi.")
+                                st.rerun()
+                    with c3:
+                        if st.button("Refresh", key=f"refresh_sess_{sess['user_id']}_{sess['exam_id']}", use_container_width=True):
+                            st.rerun()
+
 
     elif menu == "Group Chat":
         with st.expander(" Broadcast Notification "):
@@ -3922,7 +4081,7 @@ def user_dashboard(preview_mode=False):
                                             else:
                                                 supabase.table("exam_retake_requests").update({"status":"used"}).eq("id",retake_req[0]["id"]).execute()
                                                 q_data = supabase.table("questions").select("*").eq("exam_id", exam["id"]).execute().data
-                                                st.session_state.update({"exam_id":exam["id"],"exam_title":exam["title"],"start_exam":True,"exam_submitted":False,"answers":{},"question_index":0,"current_questions":q_data,"exam_end_time":time.time()+(int(exam_dur)*60)})
+                                                start_exam_with_questions(exam, q_data)
                                                 st.rerun()
                                 else:
                                     if st.button("Try Again Request", key=f"req_{exam['id']}", use_container_width=True):
@@ -3936,7 +4095,7 @@ def user_dashboard(preview_mode=False):
                                         st.error("Wrong Password!")
                                     else:
                                         q_data = supabase.table("questions").select("*").eq("exam_id", exam["id"]).execute().data
-                                        st.session_state.update({"exam_id":exam["id"],"exam_title":exam["title"],"start_exam":True,"exam_submitted":False,"answers":{},"question_index":0,"current_questions":q_data,"exam_end_time":time.time()+(int(exam_dur)*60)})
+                                        start_exam_with_questions(exam, q_data)
                                         st.rerun()
                     st.divider()
 
@@ -3946,6 +4105,28 @@ def user_dashboard(preview_mode=False):
 def exam_workspace_view():
     questions = st.session_state.current_questions
     total_questions = len(questions)
+    is_prog_exam = is_programming_exam(st.session_state.exam_id) if st.session_state.get("exam_id") else False
+    if is_prog_exam and not st.session_state.exam_submitted:
+        qp = st.query_params
+        if qp.get("malpractice") == "1":
+            reason = qp.get("mal_reason", "Tab switched or exam window lost focus")
+            report_programming_malpractice(reason)
+            try:
+                del st.query_params["malpractice"]
+                del st.query_params["mal_reason"]
+            except Exception:
+                pass
+        session = get_active_programming_session(st.session_state.user_id, st.session_state.exam_id)
+        if session and session.get("force_submit"):
+            st.error("Admin force submit requested. Exam automatic ga submit avuthundi...")
+            try:
+                submit_exam_attempt(questions, include_time=True, require_programming_submitted=False)
+                st.session_state.exam_submitted = True
+                st.rerun()
+            except Exception as e:
+                st.error(f"Auto submit failed: {e}")
+                return
+        save_programming_exam_session(status="active")
     if total_questions == 0:
         st.warning("No questions in this exam.")
         if st.button("Go Back"): st.session_state.start_exam = False; st.rerun()
@@ -3988,6 +4169,7 @@ def exam_workspace_view():
                 render_review_sheet(questions, ans_map, db_attempt)
 
         if st.button("Return to Dashboard", type="primary"):
+            save_programming_exam_session(status="submitted", force_submit=False)
             st.session_state.start_exam = False
             st.session_state.exam_submitted = False
             st.session_state.answers = {}
@@ -4014,6 +4196,18 @@ def exam_workspace_view():
                     document.getElementById('countdown').innerText=m+':'+s;
                     if(total<300){{var el=document.getElementById('timer');el.style.background='#fff3cd';el.style.color='#856404';}}}}
                     setInterval(tick,1000);
+                    setInterval(function(){{ window.parent.location.reload(); }}, 30000);
+                    function flagMalpractice(reason){{
+                        try {{
+                            var url = new URL(window.parent.location.href);
+                            url.searchParams.set('malpractice', '1');
+                            url.searchParams.set('mal_reason', reason);
+                            window.parent.location.href = url.toString();
+                        }} catch(e) {{}}
+                    }}
+                    document.addEventListener('visibilitychange', function(){{
+                        if (document.hidden) flagMalpractice('Tab switched or minimized');
+                    }});
                 </script>""", height=80)
             st.divider()
             st.subheader("Questions")
@@ -4089,12 +4283,14 @@ def exam_workspace_view():
                                  use_container_width=True,
                                  type="primary" if is_selected else "secondary"):
                         st.session_state.answers[question["id"]] = lbl
+                        save_programming_exam_session(status="active")
                         st.rerun()
 
             elif question["type"] == "blank":
                 answer = st.text_input("Your Answer", value=stored_ans, key=f"text_{question['id']}")
                 if answer != stored_ans:
                     st.session_state.answers[question["id"]] = answer
+                    save_programming_exam_session(status="active")
             else:
                 meta = get_programming_meta(question)
                 max_marks = get_question_max_marks(question)
@@ -4127,6 +4323,7 @@ def exam_workspace_view():
                     editor_value = stored_code if stored_code else ""
                     answer = st.text_area(f"{lang_meta['label']} Program", value=editor_value, key=f"code_{question['id']}", height=360)
                     st.session_state.answers[question["id"]] = {"code": answer, "language": selected_language}
+                    save_programming_exam_session(status="active")
                     custom_input = st.text_area(
                         "Custom Input",
                         key=f"custom_input_{question['id']}",
@@ -4150,6 +4347,7 @@ def exam_workspace_view():
                             score_data = run_programming_test_cases(question, answer, selected_language)
                             st.session_state.program_run_results[str(question["id"])] = score_data
                             st.session_state.program_submissions[str(question["id"])] = {"code": answer, "language": selected_language, "score_data": score_data}
+                            save_programming_exam_session(status="active")
                             st.success(f"Program submitted: {score_data['earned']}/{score_data['total']} marks")
 
                     saved_prog = st.session_state.program_submissions.get(str(question["id"]), {})
@@ -4213,17 +4411,25 @@ def exam_workspace_view():
                     st.session_state.question_time_log[qid_cur] = prev + elapsed
                     del st.session_state.question_start_time[qid_cur]
 
-            nav_col1, nav_col2, submit_col = st.columns([1, 1, 2])
+            nav_col1, nav_col2, pause_col, submit_col = st.columns([1, 1, 1.2, 2])
             with nav_col1:
                 if st.button("Previous", disabled=(current==0), use_container_width=True):
-                    save_current_q_time(); st.session_state.question_index -= 1; st.rerun()
+                    save_current_q_time(); st.session_state.question_index -= 1; save_programming_exam_session(status="active"); st.rerun()
             with nav_col2:
                 if st.button("Next ", disabled=(current==total_questions-1), use_container_width=True):
-                    save_current_q_time(); st.session_state.question_index += 1; st.rerun()
+                    save_current_q_time(); st.session_state.question_index += 1; save_programming_exam_session(status="active"); st.rerun()
+            with pause_col:
+                if is_prog_exam and st.button("Pause & Back", use_container_width=True):
+                    save_current_q_time()
+                    save_programming_exam_session(status="active")
+                    st.session_state.start_exam = False
+                    st.session_state.current_questions = []
+                    st.rerun()
             with submit_col:
                 if st.button("Submit Exam", type="primary", use_container_width=True):
                     save_current_q_time()
                     try:
+                        save_programming_exam_session(status="active")
                         submit_exam_attempt(questions, include_time=True, require_programming_submitted=True)
                         st.session_state.question_time_log = {}
                         st.session_state.question_start_time = {}
