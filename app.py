@@ -7,6 +7,7 @@ import requests
 from datetime import date, timedelta
 
 import streamlit as st
+import streamlit.components.v1 as components
 from supabase import create_client
 import google.generativeai as genai
 
@@ -1897,57 +1898,262 @@ def user_has_suprabhatam_access(user_id):
 
 
 def render_suprabhatam_reader(slokas=None):
-    show_suprabhatam_styles()
     slokas = slokas if slokas is not None else fetch_suprabhatam_slokas()
     if not slokas:
         st.info("Inka Suprabhatam slokas add cheyyaledu.")
         return
 
-    st.session_state.suprabhatam_index = min(st.session_state.suprabhatam_index, len(slokas) - 1)
-    idx = st.session_state.suprabhatam_index
-    sloka = slokas[idx]
-
     st.subheader("Suprabhatam")
-    available_languages = [name for name, col in SUPRABHATAM_LANGUAGES.items() if (sloka.get(col) or "").strip()]
-    if not available_languages:
-        available_languages = list(SUPRABHATAM_LANGUAGES.keys())
-    if st.session_state.suprabhatam_language not in available_languages:
-        st.session_state.suprabhatam_language = available_languages[0]
+    sloka_payload = []
+    for i, sloka in enumerate(slokas):
+        sloka_payload.append({
+            "title": sloka.get("title") or f"Slokam {i + 1}",
+            "image_url": sloka.get("image_url") or "",
+            "meaning": sloka.get("meaning") or "",
+            "languages": {
+                lang: sloka.get(col) or ""
+                for lang, col in SUPRABHATAM_LANGUAGES.items()
+            },
+        })
 
-    lang = st.radio(
-        "Language",
-        available_languages,
-        horizontal=True,
-        key="suprabhatam_language",
-    )
-    text_col = SUPRABHATAM_LANGUAGES[lang]
-    sloka_text = (sloka.get(text_col) or "").strip() or "Selected language text inka add cheyyaledu."
-    image_url = (sloka.get("image_url") or "").strip()
-    title = html.escape(sloka.get("title") or f"Slokam {idx + 1}")
-    quote = html.escape(sloka_text)
-    meaning = html.escape(sloka.get("meaning") or "")
-    image_html = f'<img src="{html.escape(image_url)}" alt="{title}">' if image_url else ""
-
-    st.markdown(f"""
-    <div class="supra-reader">
-        <div class="supra-title">{title} ({idx + 1} / {len(slokas)})</div>
-        <div class="supra-frame">
-            <div class="supra-image">{image_html}</div>
-            <div class="supra-quote">"{quote}"</div>
+    component_html = """
+    <div class="book-wrap">
+      <div class="toolbar" id="langButtons"></div>
+      <div class="counter" id="counter"></div>
+      <div class="book" id="book">
+        <div class="page" id="page">
+          <div class="imageBox" id="imageBox"></div>
+          <div class="quoteBox">
+            <div class="slokaTitle" id="slokaTitle"></div>
+            <div class="slokaText" id="slokaText"></div>
+            <div class="meaning" id="meaning"></div>
+          </div>
         </div>
-        {f'<div class="supra-meaning"><b>Meaning:</b> {meaning}</div>' if meaning else ''}
+      </div>
+      <div class="nav">
+        <button id="prevBtn" type="button">Previous Slokam</button>
+        <button id="nextBtn" type="button">Next Slokam</button>
+      </div>
     </div>
-    """, unsafe_allow_html=True)
 
-    prev_col, next_col = st.columns(2)
-    with prev_col:
-        if st.button("Previous Slokam", disabled=idx == 0, use_container_width=True):
-            st.session_state.suprabhatam_index = max(0, idx - 1)
-            st.rerun()
-    with next_col:
-        if st.button("Next Slokam", disabled=idx >= len(slokas) - 1, type="primary", use_container_width=True):
-            st.session_state.suprabhatam_index = min(len(slokas) - 1, idx + 1)
-            st.rerun()
+    <style>
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: "Segoe UI", Arial, sans-serif;
+        color: #263047;
+        background: transparent;
+      }
+      .book-wrap {
+        width: 100%;
+        padding: 8px 4px 18px;
+      }
+      .toolbar {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        margin-bottom: 10px;
+      }
+      .toolbar button, .nav button {
+        border: 1px solid #cfd6e4;
+        background: #ffffff;
+        color: #263047;
+        border-radius: 8px;
+        padding: 9px 13px;
+        cursor: pointer;
+        font-weight: 650;
+      }
+      .toolbar button.active {
+        background: #1168c4;
+        border-color: #1168c4;
+        color: #ffffff;
+      }
+      .counter {
+        font-size: 0.95rem;
+        color: #5f6678;
+        margin-bottom: 10px;
+      }
+      .book {
+        perspective: 1800px;
+      }
+      .page {
+        min-height: 315px;
+        display: grid;
+        grid-template-columns: minmax(155px, 280px) 1fr;
+        gap: 18px;
+        align-items: stretch;
+        padding: 16px;
+        border: 1px solid #d9dde7;
+        border-radius: 8px;
+        background:
+          linear-gradient(90deg, rgba(0,0,0,0.08), rgba(255,255,255,0) 32px),
+          #fffdf9;
+        box-shadow: 0 10px 28px rgba(38, 48, 71, 0.12);
+        transform-origin: left center;
+      }
+      .page.flip-next {
+        animation: pageNext 520ms ease both;
+      }
+      .page.flip-prev {
+        animation: pagePrev 520ms ease both;
+      }
+      @keyframes pageNext {
+        0% { transform: rotateY(0deg); opacity: 1; }
+        48% { transform: rotateY(-78deg); opacity: 0.45; }
+        100% { transform: rotateY(0deg); opacity: 1; }
+      }
+      @keyframes pagePrev {
+        0% { transform: rotateY(0deg); opacity: 1; }
+        48% { transform: rotateY(72deg); opacity: 0.45; }
+        100% { transform: rotateY(0deg); opacity: 1; }
+      }
+      .imageBox {
+        min-height: 230px;
+        border: 5px solid #f49a73;
+        border-radius: 8px;
+        overflow: hidden;
+        background: #f7f0e8;
+      }
+      .imageBox img {
+        width: 100%;
+        height: 100%;
+        min-height: 230px;
+        object-fit: cover;
+        display: block;
+      }
+      .quoteBox {
+        min-height: 230px;
+        border: 1px solid #cfd3dc;
+        border-right: 8px solid #f05a28;
+        border-bottom: 8px solid #f05a28;
+        padding: 24px 28px;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        text-align: center;
+        background: #ffffff;
+      }
+      .slokaTitle {
+        margin-bottom: 12px;
+        color: #263047;
+        font-weight: 750;
+        font-size: 1.05rem;
+      }
+      .slokaText {
+        color: #1168c4;
+        font-size: 1.55rem;
+        line-height: 1.8;
+        white-space: pre-wrap;
+      }
+      .meaning {
+        margin-top: 14px;
+        color: #3b4254;
+        line-height: 1.6;
+        white-space: pre-wrap;
+        text-align: left;
+      }
+      .nav {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+        margin-top: 14px;
+      }
+      .nav button:last-child {
+        background: #1168c4;
+        border-color: #1168c4;
+        color: #ffffff;
+      }
+      button:disabled {
+        opacity: 0.45;
+        cursor: not-allowed;
+      }
+      @media (max-width: 760px) {
+        .page { grid-template-columns: 1fr; }
+        .slokaText { font-size: 1.15rem; }
+        .quoteBox { padding: 20px; }
+      }
+    </style>
+
+    <script>
+      const slokas = __SLOKAS__;
+      const languageOrder = __LANGUAGES__;
+      let index = 0;
+      let language = languageOrder.includes("Telugu") ? "Telugu" : languageOrder[0];
+
+      const page = document.getElementById("page");
+      const titleEl = document.getElementById("slokaTitle");
+      const textEl = document.getElementById("slokaText");
+      const meaningEl = document.getElementById("meaning");
+      const imageBox = document.getElementById("imageBox");
+      const counter = document.getElementById("counter");
+      const prevBtn = document.getElementById("prevBtn");
+      const nextBtn = document.getElementById("nextBtn");
+      const langButtons = document.getElementById("langButtons");
+
+      slokas.forEach((sloka) => {
+        if (sloka.image_url) {
+          const img = new Image();
+          img.src = sloka.image_url;
+        }
+      });
+
+      function availableLanguages() {
+        const current = slokas[index];
+        return languageOrder.filter((lang) => (current.languages[lang] || "").trim().length > 0);
+      }
+
+      function drawLanguageButtons() {
+        const available = availableLanguages();
+        if (!available.includes(language)) {
+          language = available.includes("Telugu") ? "Telugu" : (available[0] || languageOrder[0]);
+        }
+        langButtons.innerHTML = "";
+        available.forEach((lang) => {
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.textContent = lang;
+          btn.className = lang === language ? "active" : "";
+          btn.addEventListener("click", () => {
+            language = lang;
+            render();
+          });
+          langButtons.appendChild(btn);
+        });
+      }
+
+      function render() {
+        const sloka = slokas[index];
+        drawLanguageButtons();
+        titleEl.textContent = sloka.title || `Slokam ${index + 1}`;
+        const text = (sloka.languages[language] || "").trim() || "Selected language text inka add cheyyaledu.";
+        textEl.textContent = `“${text}”`;
+        meaningEl.textContent = sloka.meaning ? `Meaning: ${sloka.meaning}` : "";
+        imageBox.innerHTML = sloka.image_url ? `<img src="${sloka.image_url}" alt="">` : "";
+        counter.textContent = `Slokam ${index + 1} / ${slokas.length}`;
+        prevBtn.disabled = index === 0;
+        nextBtn.disabled = index === slokas.length - 1;
+      }
+
+      function turnPage(direction) {
+        const nextIndex = index + direction;
+        if (nextIndex < 0 || nextIndex >= slokas.length) return;
+        page.classList.remove("flip-next", "flip-prev");
+        void page.offsetWidth;
+        page.classList.add(direction > 0 ? "flip-next" : "flip-prev");
+        setTimeout(() => {
+          index = nextIndex;
+          render();
+        }, 230);
+      }
+
+      prevBtn.addEventListener("click", () => turnPage(-1));
+      nextBtn.addEventListener("click", () => turnPage(1));
+      render();
+    </script>
+    """
+    component_html = component_html.replace("__SLOKAS__", json.dumps(sloka_payload, ensure_ascii=False))
+    component_html = component_html.replace("__LANGUAGES__", json.dumps(list(SUPRABHATAM_LANGUAGES.keys()), ensure_ascii=False))
+    components.html(component_html, height=690, scrolling=True)
 
 
 def show_suprabhatam_admin():
@@ -4044,4 +4250,5 @@ else:
         exam_workspace_view()
     else:
         user_dashboard(preview_mode=False)
+
 
