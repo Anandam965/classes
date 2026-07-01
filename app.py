@@ -2,6 +2,7 @@ import os
 import uuid
 import time
 import json
+import html
 import requests
 from datetime import date, timedelta
 
@@ -86,6 +87,8 @@ defaults = {
     "attendance_marked_date": "",
     "ai_generated_qs": None,
     "last_attempt_id": "",
+    "suprabhatam_index": 0,
+    "suprabhatam_language": "Telugu",
 }
 for key, val in defaults.items():
     if key not in st.session_state:
@@ -1769,155 +1772,311 @@ def check_mcq_correct(user_val, q):
     return False
 
 
-SUPRABHATAM_TEXT = """Source: Tirumala Tirupati Devasthanams official page
-URL: https://www.tirumala.org/Suprabhatam.aspx
+SUPRABHATAM_LANGUAGES = {
+    "Telugu": "telugu_text",
+    "English": "english_text",
+    "Sanskrit": "sanskrit_text",
+    "Hindi": "hindi_text",
+    "Tamil": "tamil_text",
+    "Kannada": "kannada_text",
+}
 
-Suprabhatam
 
-'Suprabhatam' is the first and foremost pre-dawn seva performed in the temple of Lord Venkateswara.
+def get_suprabhatam_sql():
+    return """
+create table if not exists suprabhatam_slokas (
+  id uuid primary key default gen_random_uuid(),
+  display_order integer not null,
+  title text,
+  image_url text,
+  telugu_text text,
+  english_text text,
+  sanskrit_text text,
+  hindi_text text,
+  tamil_text text,
+  kannada_text text,
+  meaning text,
+  created_at timestamptz default now()
+);
 
-This ritual is performed at Sayana Mandapam inside sanctum sanctorum to wake up the Lord from His celestial sleep, amidst the rhythmic chanting of vedic hymns. Every day in the early hours acharyapurushas recite the hymns beginning with 'Kausalya Supraja Rama Purva Sandhya Pravarthathe' in front of the main deity at Bangaru Vakili, while on the other hand, a descendant of Tallapaka Annamacharya sings some songs penned by the great saint poet in praise of Lord Venkateswara at the first corridor of the sanctum sanctorum at the same time.
+create index if not exists suprabhatam_slokas_display_order_idx
+on suprabhatam_slokas(display_order);
 
-'Suprabhatam' is a Sanskrit term which literally means 'Good Morning'. This particular hymn consists of four parts including Suprabhatam, Stotram, Prapatti and Mangalasasanam.
-
-Suprabhatam - It means the awakening of Lord from His divine sleep and it consists of 29 slokas.
-Stotram - These are the hymns in praise of Lord, consisting 11 slokas.
-Prapatti - Meaning Total Surrender to the Lord and it has 16 stanzas.
-Mangalasasanam - It is the prayer sung in the glory of Lord consisting 14 stanzas.
-
-Thus, Suprabhatam, composed by Prativadi Bhayankara Annan, a disciple of the celebrated Vaishnava Preceptor, Manavala Mamuni consists of a total of 70 slokas.
-
-This arjitha seva is performed before the Bangaru Vakili, after which the Bhoga Srinivasa Murthy, silver replica of the main deity and also known as Dhruva Beram, who was laid to bed in the Sayana Mantapa is shifted back to Garbha Griha to commence His activities for the day.
-
-Archakas, jeeyangars, temple authorities and the Grihastha pilgrims who purchase tickets for Suprabhatam worship the Lord during this early morning seva and feel immense solace with the first glimpse of His Divine Charm that which cannot be described in mere words.
-
-Immediately after completing the Suprabhatam, Bangaru Vakili is kept open. The ritual lasts for over 30 minutes. Suprabhata seva will not be performed in Dhanurmasa. Instead, Tiruppavai is recited during this time.
-
-The worship of Lord Venkateswara during Suprabhatam is considered highly meritorious. Suprabhata seva tickets can be booked in advance.
-
-Sri Venkateswara Suprabhatam (with lyrics and meaning in English)
-
-Kousalya supraja Rama poorva sandhya pravarthathe
-Uttishta Narasardula karthavyamdhaivamanhikam
-
-Meaning:
-O Rama! Great Son of Kausalya, the Sun is about to rise in the Eastern skies; please arise to offer the early morning oblations.
+create table if not exists suprabhatam_access (
+  user_id uuid primary key references users(id) on delete cascade,
+  enabled boolean not null default true,
+  updated_at timestamptz default now()
+);
 """
 
 
-def show_suprabhatam_admin():
+def show_suprabhatam_styles():
     st.markdown("""
     <style>
-    .supra-hero {
-        border: 1px solid #ead8bf;
-        background: #fff8ed;
-        padding: 24px 28px;
-        border-radius: 8px;
-        margin-bottom: 18px;
-    }
-    .supra-hero h1 { margin: 0 0 8px 0; font-size: 2.1rem; color: #5b2d0c; }
-    .supra-hero p { margin: 0; color: #4d3b2a; line-height: 1.65; }
-    .supra-card {
-        border: 1px solid #e6e8ee;
+    .supra-reader {
+        border: 1px solid #d9dde7;
         background: #ffffff;
-        padding: 18px 20px;
         border-radius: 8px;
-        margin: 12px 0;
-    }
-    .supra-card h3 { margin-top: 0; color: #263047; }
-    .supra-card p, .supra-card li { line-height: 1.7; color: #2f3545; }
-    .supra-verse {
-        background: #f6f7fb;
-        border-left: 4px solid #c46a2b;
-        padding: 16px 18px;
-        border-radius: 6px;
-        font-size: 1.05rem;
-        line-height: 1.8;
-        color: #1f2533;
-    }
-    .supra-meta {
-        display: grid;
-        grid-template-columns: repeat(4, minmax(120px, 1fr));
-        gap: 12px;
+        padding: 18px;
         margin: 12px 0 18px 0;
     }
-    .supra-meta div {
-        border: 1px solid #e6e8ee;
-        border-radius: 8px;
-        padding: 14px;
-        background: #ffffff;
+    .supra-frame {
+        display: grid;
+        grid-template-columns: minmax(140px, 260px) 1fr;
+        gap: 18px;
+        align-items: stretch;
     }
-    .supra-meta strong { display: block; color: #5b2d0c; font-size: 1.2rem; }
-    .supra-meta span { color: #5f6678; font-size: 0.9rem; }
+    .supra-image {
+        width: 100%;
+        min-height: 180px;
+        border: 5px solid #f49a73;
+        border-radius: 8px;
+        overflow: hidden;
+        background: #f7f0e8;
+    }
+    .supra-image img {
+        width: 100%;
+        height: 100%;
+        min-height: 180px;
+        object-fit: cover;
+        display: block;
+    }
+    .supra-quote {
+        min-height: 180px;
+        border: 1px solid #cfd3dc;
+        border-right: 8px solid #f05a28;
+        border-bottom: 8px solid #f05a28;
+        padding: 26px 28px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+        color: #1168c4;
+        font-size: 1.55rem;
+        line-height: 1.85;
+        white-space: pre-wrap;
+    }
+    .supra-title {
+        margin: 0 0 12px 0;
+        color: #263047;
+        font-size: 1.15rem;
+        font-weight: 700;
+    }
+    .supra-meaning {
+        margin-top: 14px;
+        color: #3b4254;
+        line-height: 1.7;
+        white-space: pre-wrap;
+    }
+    @media (max-width: 760px) {
+        .supra-frame { grid-template-columns: 1fr; }
+        .supra-quote { font-size: 1.15rem; padding: 20px; }
+    }
     </style>
-    <div class="supra-hero">
-        <h1>Suprabhatam</h1>
-        <p>Extracted from Tirumala Tirupati Devasthanams official Suprabhatam page. This page presents the text neatly for reading inside the admin portal.</p>
-    </div>
-    """, unsafe_allow_html=True)
-    st.link_button("Open TTD source page", "https://www.tirumala.org/Suprabhatam.aspx")
-
-    st.markdown("""
-    <div class="supra-card">
-        <h3>About the Seva</h3>
-        <p>'Suprabhatam' is the first and foremost pre-dawn seva performed in the temple of Lord Venkateswara.</p>
-        <p>This ritual is performed at Sayana Mandapam inside sanctum sanctorum to wake up the Lord from His celestial sleep, amidst the rhythmic chanting of vedic hymns. Every day in the early hours acharyapurushas recite the hymns beginning with 'Kausalya Supraja Rama Purva Sandhya Pravarthathe' in front of the main deity at Bangaru Vakili, while on the other hand, a descendant of Tallapaka Annamacharya sings songs penned by the saint poet in praise of Lord Venkateswara at the first corridor of the sanctum sanctorum.</p>
-    </div>
     """, unsafe_allow_html=True)
 
-    st.markdown("""
-    <div class="supra-meta">
-        <div><strong>29</strong><span>Suprabhatam slokas</span></div>
-        <div><strong>11</strong><span>Stotram slokas</span></div>
-        <div><strong>16</strong><span>Prapatti stanzas</span></div>
-        <div><strong>14</strong><span>Mangalasasanam stanzas</span></div>
-    </div>
-    """, unsafe_allow_html=True)
 
-    col1, col2 = st.columns(2)
-    with col1:
-        st.markdown("""
-        <div class="supra-card">
-            <h3>Meaning and Structure</h3>
-            <p>'Suprabhatam' is a Sanskrit term which literally means 'Good Morning'. This hymn consists of four parts: Suprabhatam, Stotram, Prapatti and Mangalasasanam.</p>
-            <ul>
-                <li><b>Suprabhatam:</b> awakening the Lord from divine sleep.</li>
-                <li><b>Stotram:</b> hymns in praise of the Lord.</li>
-                <li><b>Prapatti:</b> total surrender to the Lord.</li>
-                <li><b>Mangalasasanam:</b> prayer sung in the glory of the Lord.</li>
-            </ul>
+def fetch_suprabhatam_slokas():
+    try:
+        return supabase.table("suprabhatam_slokas").select("*").order("display_order").execute().data or []
+    except Exception as e:
+        st.warning("Suprabhatam tables database lo create cheyyali. Admin SQL run cheyyandi.")
+        with st.expander("Suprabhatam database SQL"):
+            st.code(get_suprabhatam_sql(), language="sql")
+        return []
+
+
+def user_has_suprabhatam_access(user_id):
+    if st.session_state.get("role") == "admin":
+        return True
+    try:
+        rows = supabase.table("suprabhatam_access").select("enabled").eq("user_id", user_id).eq("enabled", True).limit(1).execute().data
+        return bool(rows)
+    except Exception:
+        return False
+
+
+def render_suprabhatam_reader(slokas=None):
+    show_suprabhatam_styles()
+    slokas = slokas if slokas is not None else fetch_suprabhatam_slokas()
+    if not slokas:
+        st.info("Inka Suprabhatam slokas add cheyyaledu.")
+        return
+
+    st.session_state.suprabhatam_index = min(st.session_state.suprabhatam_index, len(slokas) - 1)
+    idx = st.session_state.suprabhatam_index
+    sloka = slokas[idx]
+
+    st.subheader("Suprabhatam")
+    available_languages = [name for name, col in SUPRABHATAM_LANGUAGES.items() if (sloka.get(col) or "").strip()]
+    if not available_languages:
+        available_languages = list(SUPRABHATAM_LANGUAGES.keys())
+    if st.session_state.suprabhatam_language not in available_languages:
+        st.session_state.suprabhatam_language = available_languages[0]
+
+    lang = st.radio(
+        "Language",
+        available_languages,
+        horizontal=True,
+        key="suprabhatam_language",
+    )
+    text_col = SUPRABHATAM_LANGUAGES[lang]
+    sloka_text = (sloka.get(text_col) or "").strip() or "Selected language text inka add cheyyaledu."
+    image_url = (sloka.get("image_url") or "").strip()
+    title = html.escape(sloka.get("title") or f"Slokam {idx + 1}")
+    quote = html.escape(sloka_text)
+    meaning = html.escape(sloka.get("meaning") or "")
+    image_html = f'<img src="{html.escape(image_url)}" alt="{title}">' if image_url else ""
+
+    st.markdown(f"""
+    <div class="supra-reader">
+        <div class="supra-title">{title} ({idx + 1} / {len(slokas)})</div>
+        <div class="supra-frame">
+            <div class="supra-image">{image_html}</div>
+            <div class="supra-quote">"{quote}"</div>
         </div>
-        """, unsafe_allow_html=True)
-    with col2:
-        st.markdown("""
-        <div class="supra-card">
-            <h3>Tradition</h3>
-            <p>Suprabhatam was composed by Prativadi Bhayankara Annan, a disciple of the celebrated Vaishnava preceptor Manavala Mamuni, and consists of a total of 70 slokas.</p>
-            <p>The worship of Lord Venkateswara during Suprabhatam is considered highly meritorious. Suprabhata seva tickets can be booked in advance.</p>
-        </div>
-        """, unsafe_allow_html=True)
-
-    st.markdown("""
-    <div class="supra-card">
-        <h3>Ritual Notes</h3>
-        <p>This arjitha seva is performed before the Bangaru Vakili. After the seva, the Bhoga Srinivasa Murthy, the silver replica of the main deity also known as Dhruva Beram, is shifted back from the Sayana Mantapa to the Garbha Griha to commence the Lord's activities for the day.</p>
-        <p>Immediately after completing Suprabhatam, Bangaru Vakili is kept open. The ritual lasts for over 30 minutes. Suprabhata seva is not performed in Dhanurmasa; instead, Tiruppavai is recited during that time.</p>
+        {f'<div class="supra-meaning"><b>Meaning:</b> {meaning}</div>' if meaning else ''}
     </div>
     """, unsafe_allow_html=True)
 
-    st.markdown("""
-    <div class="supra-card">
-        <h3>Sri Venkateswara Suprabhatam</h3>
-        <div class="supra-verse">
-            Kousalya supraja Rama poorva sandhya pravarthathe<br>
-            Uttishta Narasardula karthavyamdhaivamanhikam
-        </div>
-        <p><b>Meaning:</b> O Rama! Great Son of Kausalya, the Sun is about to rise in the Eastern skies; please arise to offer the early morning oblations.</p>
-    </div>
-    """, unsafe_allow_html=True)
+    prev_col, next_col = st.columns(2)
+    with prev_col:
+        if st.button("Previous Slokam", disabled=idx == 0, use_container_width=True):
+            st.session_state.suprabhatam_index = max(0, idx - 1)
+            st.rerun()
+    with next_col:
+        if st.button("Next Slokam", disabled=idx >= len(slokas) - 1, type="primary", use_container_width=True):
+            st.session_state.suprabhatam_index = min(len(slokas) - 1, idx + 1)
+            st.rerun()
 
-    with st.expander("Plain extracted text"):
-        st.text(SUPRABHATAM_TEXT)
+
+def show_suprabhatam_admin():
+    st.title("Suprabhatam")
+    st.caption("Manual ga slokas add cheyyandi. Display order prakaram book laga users ki kanipistundi.")
+
+    with st.expander("Database SQL setup"):
+        st.code(get_suprabhatam_sql(), language="sql")
+
+    slokas = fetch_suprabhatam_slokas()
+    tab_add, tab_manage, tab_access, tab_preview = st.tabs(["Add Slokam", "Manage Slokas", "User Access", "Preview"])
+
+    with tab_add:
+        next_order = (max([int(s.get("display_order") or 0) for s in slokas]) + 1) if slokas else 1
+        with st.form("add_suprabhatam_slokam"):
+            order = st.number_input("Display Order", min_value=1, value=next_order, step=1)
+            title = st.text_input("Slokam Title", value=f"Slokam {next_order}")
+            image_file = st.file_uploader("Slokam mundu image upload", type=["png", "jpg", "jpeg", "webp"])
+            image_url = st.text_input("Leda image URL paste cheyyandi")
+            telugu_text = st.text_area("Telugu", height=120)
+            english_text = st.text_area("English", height=120)
+            sanskrit_text = st.text_area("Sanskrit", height=120)
+            hindi_text = st.text_area("Hindi", height=100)
+            tamil_text = st.text_area("Tamil", height=100)
+            kannada_text = st.text_area("Kannada", height=100)
+            meaning = st.text_area("Meaning / Notes", height=90)
+            submitted = st.form_submit_button("Add Slokam", type="primary")
+        if submitted:
+            final_image_url = image_url.strip()
+            if image_file:
+                uploaded_url = upload_image_to_imgbb(image_file)
+                final_image_url = uploaded_url or final_image_url
+            payload = {
+                "display_order": int(order),
+                "title": title.strip() or f"Slokam {int(order)}",
+                "image_url": final_image_url,
+                "telugu_text": telugu_text.strip(),
+                "english_text": english_text.strip(),
+                "sanskrit_text": sanskrit_text.strip(),
+                "hindi_text": hindi_text.strip(),
+                "tamil_text": tamil_text.strip(),
+                "kannada_text": kannada_text.strip(),
+                "meaning": meaning.strip(),
+            }
+            try:
+                supabase.table("suprabhatam_slokas").insert(payload).execute()
+                st.success("Slokam add ayyindi.")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Slokam add avvaledu: {e}")
+
+    with tab_manage:
+        if not slokas:
+            st.info("Inka slokas levu.")
+        for sloka in slokas:
+            with st.expander(f"{sloka.get('display_order')}. {sloka.get('title') or 'Slokam'}"):
+                with st.form(f"edit_suprabhatam_{sloka['id']}"):
+                    order = st.number_input("Display Order", min_value=1, value=int(sloka.get("display_order") or 1), step=1, key=f"order_{sloka['id']}")
+                    title = st.text_input("Slokam Title", value=sloka.get("title") or "", key=f"title_{sloka['id']}")
+                    image_file = st.file_uploader("Replace image", type=["png", "jpg", "jpeg", "webp"], key=f"img_{sloka['id']}")
+                    image_url = st.text_input("Image URL", value=sloka.get("image_url") or "", key=f"url_{sloka['id']}")
+                    telugu_text = st.text_area("Telugu", value=sloka.get("telugu_text") or "", height=100, key=f"te_{sloka['id']}")
+                    english_text = st.text_area("English", value=sloka.get("english_text") or "", height=100, key=f"en_{sloka['id']}")
+                    sanskrit_text = st.text_area("Sanskrit", value=sloka.get("sanskrit_text") or "", height=100, key=f"sa_{sloka['id']}")
+                    hindi_text = st.text_area("Hindi", value=sloka.get("hindi_text") or "", height=80, key=f"hi_{sloka['id']}")
+                    tamil_text = st.text_area("Tamil", value=sloka.get("tamil_text") or "", height=80, key=f"ta_{sloka['id']}")
+                    kannada_text = st.text_area("Kannada", value=sloka.get("kannada_text") or "", height=80, key=f"ka_{sloka['id']}")
+                    meaning = st.text_area("Meaning / Notes", value=sloka.get("meaning") or "", height=80, key=f"meaning_{sloka['id']}")
+                    save_col, delete_col = st.columns(2)
+                    save_clicked = save_col.form_submit_button("Save Changes", type="primary")
+                    delete_clicked = delete_col.form_submit_button("Delete")
+                if save_clicked:
+                    final_image_url = image_url.strip()
+                    if image_file:
+                        uploaded_url = upload_image_to_imgbb(image_file)
+                        final_image_url = uploaded_url or final_image_url
+                    try:
+                        supabase.table("suprabhatam_slokas").update({
+                            "display_order": int(order),
+                            "title": title.strip(),
+                            "image_url": final_image_url,
+                            "telugu_text": telugu_text.strip(),
+                            "english_text": english_text.strip(),
+                            "sanskrit_text": sanskrit_text.strip(),
+                            "hindi_text": hindi_text.strip(),
+                            "tamil_text": tamil_text.strip(),
+                            "kannada_text": kannada_text.strip(),
+                            "meaning": meaning.strip(),
+                        }).eq("id", sloka["id"]).execute()
+                        st.success("Slokam update ayyindi.")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Update avvaledu: {e}")
+                if delete_clicked:
+                    try:
+                        supabase.table("suprabhatam_slokas").delete().eq("id", sloka["id"]).execute()
+                        st.success("Slokam delete ayyindi.")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Delete avvaledu: {e}")
+
+    with tab_access:
+        try:
+            users = supabase.table("users").select("id, name, email, role").eq("role", "user").order("name").execute().data or []
+            access_rows = supabase.table("suprabhatam_access").select("*").execute().data or []
+            access_map = {str(row["user_id"]): bool(row.get("enabled")) for row in access_rows}
+        except Exception as e:
+            users = []
+            access_map = {}
+            st.warning(f"Access table ready ledu: {e}")
+        if not users:
+            st.info("Users dorakaledu.")
+        for user in users:
+            uid = str(user["id"])
+            label = f"{user.get('name') or 'No name'} - {user.get('email') or ''}"
+            enabled = st.checkbox(label, value=access_map.get(uid, False), key=f"supra_access_{uid}")
+            current = access_map.get(uid, False)
+            if enabled != current:
+                try:
+                    if enabled:
+                        supabase.table("suprabhatam_access").upsert({"user_id": uid, "enabled": True}, on_conflict="user_id").execute()
+                    else:
+                        supabase.table("suprabhatam_access").delete().eq("user_id", uid).execute()
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Access update avvaledu: {e}")
+
+    with tab_preview:
+        render_suprabhatam_reader(slokas)
 
 
 def admin_dashboard():
@@ -1947,7 +2106,7 @@ def admin_dashboard():
     label = f"Group Chat ({unread_admin})" if unread_admin > 0 else "Group Chat"
     
     menu = st.sidebar.selectbox("Navigation Control",
-        ["Manage Course Content", "Manage Exams & Questions", "Student Results & Ranks", "Credit Cards", "Suprabhatam", "chat_menu_label"],
+        ["Manage Course Content", "Manage Exams & Questions", "Student Results & Ranks", "Credit Cards", "Suprabhatam", label],
         key="admin_navigation")
     if "Group Chat" in menu:
         menu = "Group Chat"
@@ -3402,6 +3561,8 @@ def user_dashboard(preview_mode=False):
             st.rerun()
         st.sidebar.divider()
         pages = ["My Classes", "Programming", "Progress", "Code Practice", "Group Chat", "Attendance"]
+        if user_has_suprabhatam_access(st.session_state.user_id):
+            pages.append("Suprabhatam")
         for pg in pages:
             if pg == "Group Chat":
                 unread = get_unread_count(st.session_state.user_id)
@@ -3433,6 +3594,10 @@ def user_dashboard(preview_mode=False):
         show_programming_questions_tab(st.session_state.user_id); return
     if user_page == "Attendance":
         show_attendance_tab(st.session_state.user_id); return
+    if user_page == "Suprabhatam":
+        if user_has_suprabhatam_access(st.session_state.user_id):
+            render_suprabhatam_reader(); return
+        st.error("Suprabhatam access ledu. Admin ni contact cheyyandi."); return
 
     # My Classes
     modules = supabase.table("modules").select("*").execute().data
@@ -3879,3 +4044,4 @@ else:
         exam_workspace_view()
     else:
         user_dashboard(preview_mode=False)
+
