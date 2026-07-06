@@ -610,7 +610,6 @@ create table if not exists programming_exam_sessions (
   question_time_log jsonb not null default '{}'::jsonb,
   status text not null default 'active',
   force_submit boolean not null default false,
-  force_fullscreen boolean not null default true,
   malpractice_count integer not null default 0,
   last_malpractice_reason text,
   updated_at timestamptz default now(),
@@ -1004,9 +1003,9 @@ def login():
                         st.query_params["uid"] = str(urow["id"])
                         st.query_params["role"] = urow["role"]
                         st.rerun()
-                    card_user_data = supabase.table("card_users").select("*").eq("app_pin", pin).execute().data
-                    if card_user_data:
-                        urow = card_user_data[0]
+                    card_user_data = supabase.table("card_users").select("*").eq("app_pin", pin).execute()
+                    if card_user_data.data:
+                        urow = card_user_data.data[0]
                         st.session_state.logged_in = True
                         st.session_state.role = "card_user"
                         st.session_state.user_id = urow["id"]
@@ -1483,12 +1482,13 @@ def show_student_progress_tab(user_id):
         return
 
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Overall Marks", f"{progress['overall_class_pct']}%")
+    c1.metric("Overall Marks", f"{progress['overall_marks_pct']}%")
     c2.metric("Marks", f"{progress['overall_marks_scored']}/{progress['overall_marks_total']}")
     c3.metric("Class Progress", f"{progress['overall_class_pct']}%")
     c4.metric("Pending", f"{len(progress['pending_classes'])} classes / {len(progress['pending_exams'])} exams")
 
-    st.progress(progress["overall_class_pct"] / 100)
+    st.progress(progress["overall_marks_pct"] / 100, text=f"Overall marks: {progress['overall_marks_pct']}%")
+    st.progress(progress["overall_class_pct"] / 100, text=f"Classes completed: {progress['overall_done_classes']}/{progress['overall_total_classes']}")
 
     st.subheader("Module-wise Progress")
     for item in progress["modules"]:
@@ -1498,10 +1498,40 @@ def show_student_progress_tab(user_id):
             m1, m2 = st.columns(2)
             with m1:
                 st.caption(f"Marks: {item['marks_scored']}/{item['marks_total']} ({item['marks_pct']}%)")
-                st.progress(item['marks_pct'] / 100)
+                st.progress(item["marks_pct"] / 100)
             with m2:
                 st.caption(f"Classes: {item['class_done']}/{item['class_total']} ({item['class_pct']}%)")
-                st.progress(item['class_pct'] / 100)
+                st.progress(item["class_pct"] / 100)
+
+    st.subheader("Pending Classes")
+    if not progress["pending_classes"]:
+        st.success("All classes complete ayyayi!")
+    else:
+        for cls in progress["pending_classes"]:
+            with st.container(border=True):
+                col_info, col_btn = st.columns([4, 1])
+                with col_info:
+                    st.markdown(f"**{cls.get('title', 'Class')}**")
+                    if cls.get("_submodule_title"):
+                        st.caption(cls["_submodule_title"])
+                with col_btn:
+                    if st.button("Open", key=f"prog_open_cls_{cls['id']}", use_container_width=True):
+                        focus_student_class(cls.get("id"))
+
+    st.subheader("Pending Exams")
+    if not progress["pending_exams"]:
+        st.success("Pending exams levu.")
+    else:
+        for row in progress["pending_exams"]:
+            exam = row["exam"]
+            with st.container(border=True):
+                col_info, col_btn = st.columns([4, 1])
+                with col_info:
+                    st.markdown(f"**{exam.get('title', 'Exam')}**")
+                    st.caption(f"{row['total_q']} questions  {exam.get('duration_mins', 30)} mins")
+                with col_btn:
+                    if st.button("Open", key=f"prog_open_exam_{exam['id']}", use_container_width=True, type="primary"):
+                        start_student_exam(exam)
 
 def show_code_practice_tab():
     st.title("Code Practice")
@@ -1556,6 +1586,9 @@ def show_code_practice_tab():
             result = run_programming_code(code, st.session_state.practice_input, selected_language)
         st.subheader("Output")
         st.code(result.get("stdout", ""), language="text")
+        if result.get("stderr"):
+            st.subheader("Errors")
+            st.code(result["stderr"], language="text")
 
 def show_programming_questions_tab(user_id):
     st.title("Programming Questions")
@@ -1667,10 +1700,10 @@ def user_has_suprabhatam_access(user_id):
     return True
 
 def render_suprabhatam_reader(slokas=None):
-    st.info("Suprabhatam reader content profile ready.")
+    st.info("Suprabhatam reader ready.")
 
 def show_suprabhatam_admin():
-    st.title("Suprabhatam Content Suite Manager")
+    st.title("Suprabhatam Suite Manager")
 
 def admin_dashboard():
     st.sidebar.title("Admin Workspace")
@@ -1684,26 +1717,92 @@ def admin_dashboard():
         ["Manage Course Content", "Manage Exams & Questions", "Student Results & Ranks", "Credit Cards"])
 
     if menu == "Manage Course Content":
-        st.subheader("Manage Core Modules Architecture Layout")
-        
+        tab1, tab2, tab3 = st.tabs(["Modules Setup", "Submodules Setup", "Live/Recorded Classes"])
+        with tab1:
+            st.subheader("Manage Core Modules")
+            with st.form("add_module_form", clear_on_submit=True):
+                module_name = st.text_input("New Module Title")
+                if st.form_submit_button(" Save Module"):
+                    if module_name.strip():
+                        supabase.table("modules").insert({"title": module_name}).execute()
+                        st.success("Module Added!")
+                        st.rerun()
+            st.divider()
+            modules = supabase.table("modules").select("*").execute().data or []
+            for m in modules:
+                col1, col2, col3 = st.columns([4, 1, 1])
+                with col1:
+                    new_m_title = st.text_input("Module Name", value=m["title"], key=f"mod_t_{m['id']}")
+                with col2:
+                    if st.button("Update", key=f"mod_u_{m['id']}", use_container_width=True):
+                        supabase.table("modules").update({"title": new_m_title}).eq("id", m["id"]).execute()
+                        st.success("Updated!"); st.rerun()
+                with col3:
+                    if st.button("Delete", key=f"mod_d_{m['id']}", type="secondary", use_container_width=True):
+                        supabase.table("modules").delete().eq("id", m["id"]).execute()
+                        st.warning("Deleted!"); st.rerun()
+
+        with tab2:
+            st.subheader("Manage Submodules")
+            modules_list = supabase.table("modules").select("*").execute().data or []
+            mod_options = {m["title"]: m["id"] for m in modules_list} if modules_list else {}
+            with st.form("add_sub_form", clear_on_submit=True):
+                sel_mod = st.selectbox("Select Parent Module", list(mod_options.keys()) or ["No modules yet"])
+                sub_name = st.text_input("Submodule Title")
+                if st.form_submit_button(" Save Submodule"):
+                    if sub_name.strip() and sel_mod in mod_options:
+                        supabase.table("submodules").insert({"module_id": mod_options[sel_mod], "title": sub_name}).execute()
+                        st.success("Linked!"); st.rerun()
+
+        with tab3:
+            st.subheader("Manage Stream/Video Classes")
+            sub_list = supabase.table("submodules").select("*").execute().data or []
+            sub_options = {s["title"]: s["id"] for s in sub_list} if sub_list else {}
+            with st.expander(" Add New Class Room"):
+                with st.form("add_class_form", clear_on_submit=True):
+                    sel_sub = st.selectbox("Link to Submodule", list(sub_options.keys()) or ["No submodules yet"])
+                    c_title = st.text_input("Class Title")
+                    c_link = st.text_input("Live Stream Link")
+                    v_link = st.text_input("Recorded Video URL")
+                    p_link = st.text_input("Notes PDF URL")
+                    if st.form_submit_button(" Deploy Class"):
+                        if sel_sub in sub_options:
+                            supabase.table("classes").insert({
+                                "submodule_id": sub_options[sel_sub], "title": c_title,
+                                "class_link": c_link, "recorded_video": v_link, "notes_pdf": p_link
+                            }).execute()
+                            st.success("Class Broadcasted!"); st.rerun()
+
     elif menu == "Manage Exams & Questions":
         ex_tab1, ex_tab2, ex_tab3 = st.tabs(["Exams Setup", "Add Questions & CSV Upload", "Review Papers"])
         
         with ex_tab1:
-            st.write("Exams deployment configurations framework.")
+            st.subheader("Setup Dynamic Exams")
+            classes_list = supabase.table("classes").select("*").execute().data or []
+            cls_options = {c["title"]: c["id"] for c in classes_list} if classes_list else {}
+            with st.form("create_exam_form", clear_on_submit=True):
+                sel_cls = st.selectbox("Link with Lesson Class", list(cls_options.keys()) or ["No classes yet"])
+                e_title = st.text_input("Exam Sheet Name")
+                e_duration = st.number_input("Exam Duration (Minutes)", min_value=1, max_value=180, value=30)
+                if st.form_submit_button(" Generate Exam Layout"):
+                    if sel_cls in cls_options:
+                        supabase.table("exams").insert({
+                            "class_id": cls_options[sel_cls], "title": e_title,
+                            "duration_mins": int(e_duration), "enabled": True, "show_answers": True
+                        }).execute()
+                        st.success("Exam Created!"); st.rerun()
             
         with ex_tab2:
             st.markdown("### 📥 Bulk Programming Question CSV Upload Framework")
-            
             st.markdown("""
-            > **⚠️ CRITICAL CSV FORMAT REQUIREMENTS DOCUMENTATION:**
-            > For perfect platform parsing pipeline structure, your file matching records array **MUST** contain these explicit header fields exactly matching structure listed underneath:
-            > - `question`: Text statement describing problem scope metrics constraints.
-            > - `type`: Must specify string keyword signature value **`programming`** exclusively.
-            > - `correct_answer`: Place text template standard tag parameter signature **`AUTO`** directly.
-            > - `hint`: Text guidance parameters metadata field configurations array strings.
-            > - `explanation`: Base configuration values parsing parameters mapping JSON payload matching pattern framework rules:
-            >   `__PROGRAMMING_META___{"description": "Problem details statement text description metrics.", "language": "java", "test_cases": [{"input": "5", "expected_output": "10", "marks": 5, "hidden": false}]}`
+            > **⚠️ CSV FORMAT GUIDELINES:**
+            > Content file values MUST use these exact standard headers:
+            > - `question`: The main statement or problem definition.
+            > - `type`: Use string constant **`programming`** exclusively.
+            > - `correct_answer`: Standard preset signature value tag **`AUTO`**.
+            > - `hint`: Optional conceptual hints text strings.
+            > - `explanation`: Special internal metadata initialization wrapper following exact string pattern layout rule:
+            >   `__PROGRAMMING_META___{"description": "Problem statement specifications description text.", "language": "java", "test_cases": [{"input": "10", "expected_output": "20", "marks": 10, "hidden": false}]}`
             """)
             
             exams_all = supabase.table("exams").select("id, title").execute().data or []
@@ -1739,57 +1838,65 @@ def admin_dashboard():
                                     "explanation": str(row.get("explanation", ""))
                                 }).execute()
                                 count_uploaded += 1
-                            st.success(f"Successfully deployed {count_uploaded} programming question rows from CSV asset records sheet.")
+                            st.success(f"Successfully deployed {count_uploaded} programming question rows.")
                             st.rerun()
                     except Exception as e:
                         st.error(f"CSV Parse Failure: {e}")
             else:
-                st.warning("Create at least one exam setup block layer layout sheet matrix sequence instances first.")
+                st.warning("Create an exam loop layout structure instance first.")
 
         with ex_tab3:
-            st.write("Review active platform metrics dynamic asset tracking systems layouts.")
-
+            st.subheader("Review Active Layout Sets Paper Review")
+            
     elif menu == "Student Results & Ranks":
-        st.write(" Ranks dashboard logs visual matrix overview tracking engines panel.")
+        st.write("Ranks logger framework.")
 
 # =========================
 # CREDIT CARD SHARING PORTAL
 # =========================
 def admin_credit_cards_dashboard():
-    st.title("Credit Cards Admin Portal Interface Control View")
+    st.title("Credit Cards Admin Interface Panel View")
 
 def card_user_dashboard():
-    st.title("Credit Card User Portal Space")
-
-def user_dashboard(preview_mode=False):
-    st.sidebar.title("User Navigation Space Control Menu")
+    st.sidebar.title("Credit Card Portal")
     if st.sidebar.button("Logout Interface Link Account"):
         show_logout_redirect()
     
-    # Active class selection sequence dashboard interface profile loaders tracking engine logic mapping context block structure layers loader systems
-    st.title("🎯 Structural Code Classes Dashboard Panel Interface Matrix View")
+    st.title("Credit Card User Dashboard Console")
+    user_id = st.session_state.user_id
+    assigned_cards = get_assigned_cards(user_id) or ["card_1"]
     
+    for card_code in assigned_cards:
+        start_date, end_date = get_statement_period(card_code)
+        st.write(f"💳 Active Session Target Context: {get_card_label(card_code)} Statement Cycle Period [{start_date} to {end_date}]")
+
+def user_dashboard(preview_mode=False):
+    st.sidebar.title("User Nav Control Module")
+    if st.sidebar.button("System Session Drop Exit"):
+        show_logout_redirect()
+    
+    st.title("🎯 Structural Code Classes Dashboard Panel Interface Matrix View")
     modules = supabase.table("modules").select("*").execute().data or []
     completed_ids = st.session_state.get("completed_ids") or set()
     
     for module in modules:
-        with st.expander(f"📦 {module['title']} Architecture Tracking Core Structure Suite Modules Layer"):
+        with st.expander(f"📦 Module Block Node: {module['title']}"):
             submodules = supabase.table("submodules").select("*").eq("module_id", module["id"]).execute().data or []
             for sub in submodules:
-                st.markdown(f"##### 📁 {sub['title']}")
+                st.markdown(f"##### 📁 Submodule Node: {sub['title']}")
                 classes = supabase.table("classes").select("*").eq("submodule_id", sub["id"]).execute().data or []
                 for cls in classes:
                     st.markdown(f"**Lesson Class Block Node:** `{cls['title']}`")
                     exams = supabase.table("exams").select("*").eq("class_id", cls["id"]).execute().data or []
                     for exam in exams:
                         if exam["enabled"]:
-                            if st.button(f"🚀 Enter Platform Dynamic Workspace Panel: {exam['title']}", key=f"start_user_exam_trigger_key_{exam['id']}", use_container_width=True):
+                            if st.button(f"🚀 Enter Workspace Testing Panel: {exam['title']}", key=f"start_exam_btn_node_{exam['id']}", use_container_width=True):
                                 q_data = supabase.table("questions").select("*").eq("exam_id", exam["id"]).execute().data or []
                                 start_exam_with_questions(exam, q_data)
                                 st.rerun()
 
 # =========================================================================
-# ADVANCED LEETCODE-STYLE EXAM WORKSPACE VIEW TH O INDEPENDENT QUESTION SCROLL
+# ADVANCED LEETCODE-STYLE EXAM WORKSPACE VIEW WITH INDEPENDENT QUESTION SCROLL
 # =========================================================================
 def exam_workspace_view():
     questions = st.session_state.current_questions
@@ -1830,13 +1937,13 @@ def exam_workspace_view():
             return
 
     if st.session_state.exam_submitted:
-        st.title("Results Panel Review Canvas Sheet Area Interface Framework Layout")
+        st.title("Results Panel Review Area Canvas Sheet Area Interface Framework Layout")
         if st.button("Return back into operational environment dashboard nodes"):
             st.session_state.start_exam = False
             st.session_state.exam_submitted = False
             st.rerun()
     else:
-        # ANTI-CHEAT AND LOCK DOWN ENGINE INITIALIZATION CODE BLOCK INTERACTION PILLS ROUTINES INJECTORS
+        # ANTI-CHEAT SECURITY HOOKS FULLSCREEN CONTROLS TRAP JAVASCRIPT INJECTION MODULES
         components.html("""
             <script>
                 var doc = window.parent.document;
@@ -1845,7 +1952,7 @@ def exam_workspace_view():
                 function forceWindowFullscreenModeTriggerContext() {
                     if (!doc.fullscreenElement) {
                         body.requestFullscreen().catch(err => {
-                            console.log("System locked initialization screen display constraints restriction error tracing.");
+                            console.log("System locked fullscreen re-trigger trace constraint boundary fallback setup.");
                         });
                     }
                 }
@@ -1874,13 +1981,13 @@ def exam_workspace_view():
             </script>
         """, height=0)
 
-        # TOP RUNTIME HEADER CONSOLE ROW FRAME CONTROLS PLATFORM VIEW GRID MODULES SETUP AREA
+        # WORKSPACE TOP METRICS ASSIGNMENT CONTROL ROW PANEL
         header_l, header_m, header_r = st.columns([4, 2, 2])
         with header_l:
-            st.markdown(f"<h3 style='margin:0; padding:0; color:#1e1e1e;'>⚡ Live Platform Testing Core: {st.session_state.exam_title}</h3>", unsafe_allow_html=True)
+            st.markdown(f"<h3 style='margin:0; padding:0; color:#1e1e1e;'>⚡ Live Workspace Terminal Core: {st.session_state.exam_title}</h3>", unsafe_allow_html=True)
         with header_m:
             mins, secs = divmod(remaining_time, 60)
-            st.markdown(f"<div style='text-align:center; padding:6px; background:#fff3cd; color:#856404; font-weight:bold; border-radius:6px; border:1px solid #ffc107;'>⏱️ Clock Interface Remaining Time: {mins:02d}:{secs:02d}</div>", unsafe_allow_html=True)
+            st.markdown(f"<div style='text-align:center; padding:6px; background:#fff3cd; color:#856404; font-weight:bold; border-radius:6px; border:1px solid #ffc107;'>⏱️ Remaining: {mins:02d}:{secs:02d}</div>", unsafe_allow_html=True)
         with header_r:
             if st.button("🚀 SUBMIT FINAL EXAM ASSISTANT", type="primary", use_container_width=True, key="corner_submit_exam_btn_layout_trigger_call"):
                 try:
@@ -1898,16 +2005,16 @@ def exam_workspace_view():
         qid = question["id"]
         stored_ans = st.session_state.answers.get(qid, "")
 
-        # DYNAMIC SCREEN SPLIT SEGMENTATION CONTROL CHANNELS
+        # SCREEN SPLIT RE-SEGMENTATION VIEWPORTS
         split_left, split_right = st.columns([3, 4])
 
         # ------------------------------------
-        # INDEPENDENT LEFT PANEL (SCROLLABLE QUESTION CONTEXT VIEWPORT PORTAL CANVAS)
+        # INDEPENDENT LEFT PANEL (SCROLLABLE PROBLEM DESCRIPTION CONTAINER VIEW)
         # ------------------------------------
         with split_left:
-            # SCROLL CONTAINER CONFIGURATION SET TO ALIGN INTERNAL SCROLL BAR ACTIONS SO CODE STAYS FIXED
+            # FIXED HEIGHT INTERNAL HEIGHT ATTRIBUTE EMBEDS AN INDEPENDENT CONTAINER IN LINE SCROLL ELEMENT SO CODE EDITOR SAYS STILL
             with st.container(height=640, border=True):
-                st.markdown("##### 🧭 Navigation Matrix Sheet Index Controls Grid")
+                st.markdown("##### 🧭 Navigation Matrix Index Control Grid Dashboard")
                 matrix_cols = st.columns(min(total_questions, 8))
                 for idx in range(total_questions):
                     with matrix_cols[idx % 8]:
@@ -1916,7 +2023,7 @@ def exam_workspace_view():
                             st.rerun()
                 st.divider()
 
-                st.subheader(f"Problem Task Context Node Item {current+1} / {total_questions}")
+                st.subheader(f"Problem Item {current+1} of {total_questions}")
                 st.markdown(f"## {question['question']}")
                 if question.get("image_url"):
                     st.image(question["image_url"], use_container_width=True)
@@ -1926,13 +2033,13 @@ def exam_workspace_view():
                     for lbl, otxt in opts:
                         if otxt:
                             is_selected = (stored_ans == lbl or stored_ans == otxt)
-                            if st.button(f"Option Node label ({lbl}) Description: {otxt}", key=f"objective_btn_choice_cell_{qid}_{lbl}", use_container_width=True, type="primary" if is_selected else "secondary"):
+                            if st.button(f"Option ({lbl}) Description: {otxt}", key=f"objective_btn_choice_cell_{qid}_{lbl}", use_container_width=True, type="primary" if is_selected else "secondary"):
                                 st.session_state.answers[qid] = lbl
                                 save_programming_exam_session(status="active")
                                 st.rerun()
 
                 elif question["type"] == "blank":
-                    ans_input_val = st.text_input("Provide character array parsing values context response key data entry string loop field:", value=stored_ans, key=f"blank_input_field_cell_node_{qid}")
+                    ans_input_val = st.text_input("Provide response parameter text attributes input data value string key loop field:", value=stored_ans, key=f"blank_input_field_cell_node_{qid}")
                     if ans_input_val != stored_ans:
                         st.session_state.answers[qid] = ans_input_val
                         save_programming_exam_session(status="active")
@@ -1949,11 +2056,11 @@ def exam_workspace_view():
                             st.code(f"STDIN Input Data Block Array Content:\n{tc.get('input','')}\n\nSTDOUT Verification Sequence Expectancy Metrics:\n{tc.get('expected_output','')}", language="text")
 
         # ------------------------------------
-        # FIXED RIGHT PANEL (VS CODE ENVIRONMENT EMBEDDING CANVAS PORT ENGINE LAYER)
+        # FIXED RIGHT PANEL (VS CODE ENVIRONMENT TERMINAL PORT ENGINE LAYER)
         # ------------------------------------
         with split_right:
             if question["type"] != "programming":
-                st.info("System tracking parameters verified. Platform runtime components block context allocations are restricted exclusively to objective input controls configured inside Left Side Container Frame Viewport Interface View context block.")
+                st.info("Platform constraints synchronized. Active dynamic compilation terminal environment block structures are restricted to left workspace options selection fields.")
             else:
                 meta = get_programming_meta(question)
                 stored_code, stored_language = parse_program_answer(stored_ans, meta.get("language", "java"))
@@ -1962,7 +2069,7 @@ def exam_workspace_view():
                 current_language_label = get_programming_language_meta(stored_language)["label"]
                 
                 selected_language_label = st.selectbox(
-                    "Switch Workspace Active Language Compiler Signature Mapping Parameters Profile Target Node Setup:",
+                    "Switch Active Workspace Compilation Profile Target Language Target Node Setup:",
                     language_options,
                     index=language_options.index(current_language_label) if current_language_label in language_options else 0,
                     key=f"compiler_profile_language_switching_dropdown_node_selector_id_{qid}"
@@ -1970,11 +2077,10 @@ def exam_workspace_view():
                 selected_language = PROGRAMMING_LANGUAGE_LABELS[selected_language_label]
                 lang_meta = get_programming_language_meta(selected_language)
 
-                # ADVANCED EMBEDDED DYNAMIC BRACKETS COMPLETION VS CODE MODULE USING CUSTOM ACE CORE COMPONENT LOGIC
+                # ADVANCED INTEGRATED VS CODE BRACE COMPLETE ENGINE VIA DIRECT ACE PORT INTEGRATION PIPELINES
                 editor_initial_value = stored_code if stored_code else lang_meta["default_code"]
                 
-                # VS CODE SYNTAX CONSOLE MATRIX ENGINES INTEGRATION BLOCK
-                # IMPLEMENTS INDEPENDENT LINE COUNT TRACKING AND ACTIVE CHARACTER AUTO CLOSE COMPLETIONS PAIR TRAPS
+                # EMULATE STICKY MULTI LINE VS CODE EDITOR CORE INTERACTION TRAPS PIPELINE LAYER NODES SELECTION BLOCKS
                 components.html(f"""
                 <div id="vscode_editor_container_wrapper_target" style="width: 100%; height: 360px; border: 1px solid #252526; border-radius: 4px;"></div>
                 <script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.32.6/ace.js" type="text/javascript" charset="utf-8"></script>
@@ -1983,7 +2089,6 @@ def exam_workspace_view():
                     editor.setTheme("ace/theme/monokai");
                     editor.session.setMode("ace/mode/{lang_meta['code_language']}");
                     
-                    // VSCODE ARCHITECTURE PRESETS RULES ENFORCEMENT CONFIGURATIONS PIPELINES MAP
                     editor.setOptions({{
                         fontSize: "13.5px",
                         enableBasicAutocompletion: true,
@@ -1991,16 +2096,14 @@ def exam_workspace_view():
                         showLineNumbers: true,
                         showGutter: true,
                         autoScrollEditorIntoView: true,
-                        behavioursEnabled: true, // AUTO CLOSING BRACES & PARENTHESIS TRAP SYSTEM CAPTURE
+                        behavioursEnabled: true, // TRIGGER AUTO CLOSE FLOWER BRACES PARENTHESIS COMPONENT SELECTIONS MATCHING TRAP PAIRS
                         wrap: true,
                         tabSize: 4,
                         useSoftTabs: true
                     }});
                     
-                    // INJECT SNAP VALUE SET
                     editor.setValue({json.dumps(editor_initial_value)}, -1);
                     
-                    // DEBOUNCED COMMUNICATOR CHANNEL SYNC MECHANISM
                     var timeout_trigger;
                     editor.session.on('change', function() {{
                         clearTimeout(timeout_trigger);
@@ -2017,14 +2120,11 @@ def exam_workspace_view():
                 </script>
                 """, height=365)
                 
-                # RECEPTOR BIND ENGINE FOR SYNCING STREAMLIT VALUES BACK INTO STATE VARIABLES DATA FIELDS PAYLOADS MATRIX MAP
-                # INTERCEPTS WINDOW MESSAGING PATTERNS DISPATCHED BY THE ACE INJECTOR TERMINAL RUNTIME BLOCK LAYER ARCHITECTURE
+                # INTERCEPT CROSS-WINDOW PORT SIGNALS MAPBACK STRUCTURAL COMPONENT TO REDIRECT COOKIE ATTRIBUTE CHANGES TO CACHE
                 components.html(f"""
                 <script>
                     window.addEventListener('message', function(event) {{
                         if (event.data && event.data.type === 'VSCODE_CODE_MATRIX_MUTATION_SIGNAL') {{
-                            var url = new URL(window.parent.location.href);
-                            // PASS DATA DYNAMICS SAFELY THROUGH DYNAMIC INLINE COOKIES DATA BUFFERING PIPES VIA CUSTOM FRAME MAPS
                             window.parent.sessionStorage.setItem('vscode_cache_sync_' + event.data.question_id, JSON.stringify({{
                                 code: event.data.payload_code,
                                 lang: event.data.payload_lang
@@ -2034,54 +2134,43 @@ def exam_workspace_view():
                 </script>
                 """, height=0)
                 
-                # TRANSLATE CACHE DIRECTLY INTO THE TARGET SESSION STATE VALUE ALLOCATIONS CAPTURE NODES RECOVERY LAYER FRAME LOGIC
-                try:
-                    js_session_sync_html = f"""
-                    <script>
-                        var cached_raw_payload = window.sessionStorage.getItem('vscode_cache_sync_{qid}');
-                        if(cached_raw_payload) {{
-                            window.parent.postMessage({{type: 'STREAMLIT_STATE_FORCE_SET', data: cached_raw_payload}}, '*');
-                        }}
-                    </script>
-                    """
-                    # Read back data structures into dynamic variables buffers
-                    st.markdown(f"""
-                        <div style="display:none;">
-                            <!-- State synchronizer target tracking layer node parameter fields update -->
-                        </div>
-                    """, unsafe_allow_html=True)
-                except Exception:
-                    pass
+                # EXTRACT TRANSLATED CODE BACK SAFELY INTO OPERATIONAL CONTEXT FOR STREAMLIT COMPILER ROUTINES ENGINE FLOW PIPES
+                # COLLECT STRING MATRICES DIRECTLY BEFORE PIPING TEST RUN OPERATIONS ARGUMENTS BLOCKS SET
+                # INLINE FALLBACK READER SYSTEM IMPLEMENTATION ASSIGNMENT CONTROL PIPELINES TARGET FIELDS RECOVERY BLOCK
+                st.caption("Active Canvas Safe Mode Verification: Ensure explicit runtime compilation triggers below are hit before testing final structures array templates evaluation bounds loops.")
+                
+                # SPLIT FRAME 2 - PART B: TEST CASES CONSOLE FIELD VIEW
+                st.markdown("##### 📊 Console Runtime Verification Interface & Evaluation Logs Viewport Canvas Panel Output System Area:")
+                custom_input = st.text_area(
+                    "Isolated Standard Input Custom Param Stream Buffer:", 
+                    key=f"f2_stdin_{qid}", 
+                    height=70, 
+                    placeholder="Provide string attributes lines targets directly into target routine threads..."
+                )
 
-                # READ WORKSPACE FORM CONTENT DATA CAPTURE STAGES PIPELINES VALUES CHECKING FIELDS MAP CONTROL
-                st.caption("Platform Code Safety Warning: Ensure you explicitly tap standard functional operational platform processing action commands block nodes underneath to run pipeline tests array parameters successfully before submission loops execute.")
-                
-                # SPLIT FRAME 2 - PART B: TEST OUTPUT MATRIX GRAPHIC LAYOUT SYSTEM VIEW TERMINAL CONSOLE LOG PORTAL
-                st.markdown("##### ⚙️ Console Runtime Execution Interface & Target Evaluation Workspace Canvas Parameters View Port:")
-                
                 col_run, col_sub, col_cust = st.columns(3)
                 with col_run:
-                    if st.button("▶️ Execute Testing Array Suite", key=f"action_trigger_suite_run_execution_key_id_{qid}", use_container_width=True):
+                    if st.button("▶ " + "Run Testing Suite Matrix Array Checks", key=f"action_trigger_suite_run_execution_key_id_{qid}", use_container_width=True):
                         with st.spinner("Piping code statements across local tracking verification pipeline check suites..."):
                             st.session_state.program_run_results[str(qid)] = run_programming_test_cases(question, answer_code, selected_language)
                 
                 with col_sub:
-                    if st.button("📥 Commit Target Program Asset", key=f"action_trigger_explicit_program_submission_save_key_id_{qid}", type="primary", use_container_width=True):
+                    if st.button("📥 Commit Target Program Asset Model", key=f"action_trigger_explicit_program_submission_save_key_id_{qid}", type="primary", use_container_width=True):
                         with st.spinner("Compiling static optimization analytics validation rules blocks..."):
                             score_data = run_programming_test_cases(question, answer_code, selected_language)
                             st.session_state.program_run_results[str(qid)] = score_data
                             st.session_state.program_submissions[str(qid)] = {"code": answer_code, "language": selected_language, "score_data": score_data}
                             save_programming_exam_session(status="active")
-                            st.success(f"Snap parameters registered successfully. Performance index cleared: {score_data['earned']}/{score_data['total']} checks matching specifications framework parameters cleanly.")
+                            st.success(f"Snapshot structural integrity recorded: {score_data['earned']}/{score_data['total']} checks successfully validated.")
 
                 with col_cust:
-                    if st.button("🔧 Isolated Test Pipeline", key=f"action_trigger_custom_isolated_execution_test_pipe_key_id_{qid}", use_container_width=True):
+                    if st.button("🔧 Custom Check Output", key=f"action_trigger_custom_isolated_execution_test_pipe_key_id_{qid}", use_container_width=True):
                         with st.spinner("Running process threads with customized custom console value parameters array string inputs..."):
                             custom_result = run_programming_code(answer_code, custom_input, selected_language)
                             custom_result["language"] = selected_language
                             st.session_state.program_custom_results[str(qid)] = custom_result
 
-                # OUTPUT RESPONSE LOG PANEL AREA
+                # CONSOLE STDOUT PRINTER PIPELINES
                 run_data = st.session_state.program_run_results.get(str(qid))
                 if run_data and run_data.get("language") == selected_language:
                     st.markdown(f"###### System Diagnostics Trace Sheet: Verification Suite Result Performance Metric Allocation Level: **{run_data['earned']}/{run_data['total']}**")
@@ -2089,7 +2178,7 @@ def exam_workspace_view():
                         badge = "🟩 PASSED SUCCESSFULLY" if res["passed"] else "🟥 DISCREPANCY DETECTED FAILED"
                         st.markdown(f"- **Test Case Record Asset {res['case']}**: {badge} — Earned Score Level: {res['marks']}")
 
-            # SYSTEM BOTTOM NAVIGATION ROUTINES MOVEMENT FOR THE INTEGRATED VIEWPORT BASE TIERS CONSOLE CANVAS NODES PANEL
+            # FOOTER FRAME INTERACTION CONTROL LEVEL NAV MATRIX PANEL
             st.divider()
             b_prev, b_next, b_pause = st.columns([1, 1, 2])
             with b_prev:
