@@ -899,7 +899,6 @@ def extract_question_from_image(image_source):
     import re
 
     def parse_ocr_text(raw_text):
-        # Normalize line endings and clean up
         lines = [l.strip() for l in raw_text.replace("\r\n", "\n").replace("\r", "\n").splitlines()]
         lines = [l for l in lines if l]
 
@@ -907,7 +906,6 @@ def extract_question_from_image(image_source):
         question_lines = []
         option_found_at = None
 
-        # Pattern: line starts with A) / A. / A: / (A) / 1) / 1. etc.
         opt_line_pat = re.compile(
             r"^(?:option\s*)?([A-Da-d]|[1-4])\s*[\)\]\.:\-]\s*(.+)", re.IGNORECASE
         )
@@ -924,15 +922,12 @@ def extract_question_from_image(image_source):
                     if option_found_at is None:
                         option_found_at = i
             else:
-                # Only add to question if we haven't hit options yet
                 if option_found_at is None:
-                    # Skip "Answer:" lines
                     if not re.match(r"(?i)^(answer|correct\s*answer|ans)\s*[:\-]", line):
                         question_lines.append(line)
 
         question = " ".join(question_lines).strip()
 
-        # Try to detect correct answer from text
         answer = ""
         full_text = "\n".join(lines)
         ans_m = re.search(
@@ -945,7 +940,7 @@ def extract_question_from_image(image_source):
             if lbl in ["1","2","3","4"]:
                 lbl = chr(ord("A") + int(lbl) - 1)
             if lbl in options:
-                answer = lbl  # store as label A/B/C/D
+                answer = lbl
             else:
                 answer = raw_ans
 
@@ -1276,15 +1271,6 @@ def show_attendance_tab(user_id):
         attended = {str(r["attendance_date"]) for r in rows if r.get("attendance_date")}
     except Exception as e:
         st.warning("Attendance table database  . Admin SQL run .")
-        with st.expander(" SQL to create attendance table"):
-            st.code("""
-CREATE TABLE IF NOT EXISTS attendance (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  attendance_date date NOT NULL,
-  created_at timestamptz DEFAULT now(),
-  UNIQUE(user_id, attendance_date)
-);""", language="sql")
         return
 
     total = len(attended)
@@ -1294,7 +1280,6 @@ CREATE TABLE IF NOT EXISTS attendance (
         streak += 1
         cursor -= timedelta(days=1)
 
-    # Longest streak
     longest = 0
     run = 0
     prev_d = None
@@ -1315,14 +1300,11 @@ CREATE TABLE IF NOT EXISTS attendance (
 
     st.divider()
 
-    # Build heatmap  weeks as columns, days as rows (Sun=0 .. Sat=6)
-    # Align start to Sunday
-    offset = start_day.isoweekday() % 7  # Sun=0
+    offset = start_day.isoweekday() % 7
     grid_start = start_day - timedelta(days=offset)
     all_days = [grid_start + timedelta(days=i) for i in range((today - grid_start).days + 1)]
     weeks = [all_days[i:i+7] for i in range(0, len(all_days), 7)]
 
-    # Month labels row
     month_labels = []
     last_m = ""
     for week in weeks:
@@ -1710,7 +1692,6 @@ def render_review_sheet(questions, ans_map, db_attempt):
         is_correct = str(u_ans).strip().lower() == c_ans.lower()
 
         with st.container(border=True):
-            # Header row: Q number + badge +  button
             hcol, bcol = st.columns([7, 1])
             with hcol:
                 badge_style = (
@@ -1740,26 +1721,22 @@ def render_review_sheet(questions, ans_map, db_attempt):
                         st.session_state.explain_selected.add(qid)
                         st.rerun()
 
-            # Time spent
             t_spent = get_answer_time_spent(db_attempt[0]["id"], q["id"])
             if t_spent and t_spent > 0:
                 mins_s, secs_s = divmod(t_spent, 60)
                 tstr = f"{mins_s}m {secs_s}s" if mins_s > 0 else f"{secs_s}s"
                 st.caption(f" Time spent: **{tstr}**")
 
-            # MCQ styled options
             if q["type"] == "mcq":
                 opts = [("A", q.get("option_a","")), ("B", q.get("option_b","")),
                         ("C", q.get("option_c","")), ("D", q.get("option_d",""))]
                 correct_display = c_ans
                 opts_html = ""
                 for lbl, otxt in opts:
-                    # Is this the correct option?
                     is_opt_correct = (
                         c_ans.upper() == lbl
                         or c_ans.lower() == str(otxt).strip().lower()
                     )
-                    # Is this what the user picked?
                     is_user_pick = (
                         str(u_ans).strip().upper() == lbl
                         or str(u_ans).strip().lower() == str(otxt).strip().lower()
@@ -1768,7 +1745,7 @@ def render_review_sheet(questions, ans_map, db_attempt):
                         correct_display = f"{lbl}. {otxt}"
                         bg, br, col, suffix, fw = "#eafaf0","#27ae60","#1b5e34","  ","700"
                     elif is_user_pick and not is_correct:
-                        bg, br, col, suffix, fw = "#fdecea","#e74c3c","#c0392b","  (Your Answer) ","700"
+                        bg, br, col, suffix, fw = "#fdecea","#e74c3c","#c0392b","  (Your Answer) Bell System ","700"
                     else:
                         bg, br, col, suffix, fw = "#ffffff","#dfe6ee","#2c3e50","","400"
                     opts_html += (
@@ -1815,9 +1792,8 @@ def render_review_sheet(questions, ans_map, db_attempt):
                         unsafe_allow_html=True
                     )
 
-            # Answer Explanation box
             explanation = str(q.get("explanation", "") or "").strip()
-            if explanation:
+            if explanation and not explanation.startswith(PROGRAMMING_META_PREFIX):
                 st.markdown(
                     f"<div style='background:#f5f6fa;border:1px solid #d0d8e8;border-radius:10px;"
                     f"padding:14px 16px;margin-top:6px;'>"
@@ -1826,7 +1802,6 @@ def render_review_sheet(questions, ans_map, db_attempt):
                     unsafe_allow_html=True
                 )
 
-            # Report Question link style
             st.markdown(
                 "<div style='margin-top:8px;'>"
                 "<span style='color:#e74c3c;font-size:0.82rem;cursor:pointer;'> Report Question</span>"
@@ -1834,7 +1809,6 @@ def render_review_sheet(questions, ans_map, db_attempt):
                 unsafe_allow_html=True
             )
 
-    # Explain request send
     st.divider()
     selected_count = len(st.session_state.explain_selected)
     if selected_count > 0:
@@ -1952,22 +1926,18 @@ def generate_exam_ppt(questions, exam_title, q_requesters=None):
     return buf.read()
 
 def check_mcq_correct(user_val, q):
-    """MCQ answer check  user_val can be label (A/B/C/D) or full text"""
     correct = str(q.get("correct_answer","")).strip()
     user = str(user_val).strip()
     if not user or not correct:
         return False
-    # Direct match
     if user.lower() == correct.lower():
         return True
-    # User answered as label, correct stored as text
     label_map = {
         "A": str(q.get("option_a","")), "B": str(q.get("option_b","")),
         "C": str(q.get("option_c","")), "D": str(q.get("option_d","")),
     }
     if user.upper() in label_map:
         return label_map[user.upper()].strip().lower() == correct.lower()
-    # User answered as text, correct stored as label
     if correct.upper() in label_map:
         return label_map[correct.upper()].strip().lower() == user.lower()
     return False
@@ -2082,8 +2052,6 @@ def fetch_suprabhatam_slokas():
         return supabase.table("suprabhatam_slokas").select("*").order("display_order").execute().data or []
     except Exception as e:
         st.warning("Suprabhatam tables database lo create cheyyali. Admin SQL run cheyyandi.")
-        with st.expander("Suprabhatam database SQL"):
-            st.code(get_suprabhatam_sql(), language="sql")
         return []
 
 
@@ -2360,9 +2328,6 @@ def show_suprabhatam_admin():
     st.title("Suprabhatam")
     st.caption("Manual ga slokas add cheyyandi. Display order prakaram book laga users ki kanipistundi.")
 
-    with st.expander("Database SQL setup"):
-        st.code(get_suprabhatam_sql(), language="sql")
-
     slokas = fetch_suprabhatam_slokas()
     tab_add, tab_manage, tab_access, tab_preview = st.tabs(["Add Slokam", "Manage Slokas", "User Access", "Preview"])
 
@@ -2463,9 +2428,6 @@ def show_suprabhatam_admin():
         except Exception as e:
             users = []
             access_map = {}
-            st.warning(f"Access table ready ledu: {e}")
-        if not users:
-            st.info("Users dorakaledu.")
         for user in users:
             uid = str(user["id"])
             label = f"{user.get('name') or 'No name'} - {user.get('email') or ''}"
@@ -2507,7 +2469,6 @@ def admin_dashboard():
             st.rerun()
     st.sidebar.divider()
 
-    
     unread_admin = get_unread_count(st.session_state.user_id)
     label = f"Group Chat ({unread_admin})" if unread_admin > 0 else "Group Chat"
     
@@ -2654,11 +2615,10 @@ def admin_dashboard():
                             "enabled": c_en, "show_answers": c_ans
                         }).execute()
                         st.success("Exam Created!"); st.rerun()
-            with st.expander("Programming Exam Builder - existing questions nundi create cheyyandi"):
-                st.caption("Already add chesina programming questions select chesi, new exam create cheyyachu.")
+            with st.expander("Programming Exam Builder"):
                 prog_questions = supabase.table("questions").select("*").eq("type", "programming").execute().data or []
                 if not prog_questions:
-                    st.info("Existing programming questions levu. First Add Questions tab lo programming question add cheyyandi.")
+                    st.info("Existing programming questions levu.")
                 else:
                     builder_cls = st.selectbox("Class select cheyyandi", list(cls_options.keys()) or ["No classes yet"], key="prog_builder_class")
                     builder_title = st.text_input("Programming Exam Name", key="prog_builder_title")
@@ -2694,9 +2654,7 @@ def admin_dashboard():
                             if not new_exam:
                                 matches = supabase.table("exams").select("*").eq("title", builder_title.strip()).eq("class_id", cls_options[builder_cls]).execute().data or []
                                 new_exam = matches[-1] if matches else None
-                            if not new_exam:
-                                st.error("Exam create ayindi kani id fetch avvaledu. Page refresh chesi check cheyyandi.")
-                            else:
+                            if new_exam:
                                 for label in selected_labels:
                                     src = q_options[label]
                                     supabase.table("questions").insert({
@@ -2753,15 +2711,12 @@ def admin_dashboard():
             st.markdown("####  Add Question")
             sel_ex = st.selectbox("Select Exam", list(ex_options.keys()) or ["No exams yet"], key="add_q_exam")
 
-            #  Image upload / URL 
-            st.caption("Upload image to automatically extract question and options.")
             img_col1, img_col2 = st.columns(2)
             with img_col1:
                 img_url_input = st.text_input("Image URL", key="add_img_url", placeholder="https://...")
             with img_col2:
                 img_file = st.file_uploader("Image upload", type=["jpg","jpeg","png","gif","webp"], key="add_img_file")
 
-            # Image preview
             if img_file:
                 st.image(img_file, width=380)
             elif img_url_input.strip():
@@ -2774,7 +2729,6 @@ def admin_dashboard():
                     with st.spinner("OCR processing..."):
                         extracted = extract_question_from_image(extract_source)
                     if extracted:
-                        # Set widget keys DIRECTLY before they render  widgets not yet on screen
                         st.session_state["aq_q_text"] = extracted.get("question", "")
                         st.session_state["aq_opt_A"]  = extracted.get("option_a", "")
                         st.session_state["aq_opt_B"]  = extracted.get("option_b", "")
@@ -2786,16 +2740,14 @@ def admin_dashboard():
                             st.session_state["aq_correct_lbl"] = ans
                         q_type_ocr = extracted.get("type","mcq")
                         st.session_state["aq_q_type_idx"] = ["mcq","blank","programming"].index(q_type_ocr) if q_type_ocr in ["mcq","blank","programming"] else 0
-                        st.rerun()  # ONE rerun  widgets will now render with pre-filled values
+                        st.rerun()
 
             st.divider()
 
-            #  Question Type 
             type_idx_default = st.session_state.get("aq_q_type_idx", 0)
             q_type = st.selectbox("Question Type", ["mcq","blank","programming"],
                                    index=type_idx_default, key="aq_q_type")
 
-            #  Question Text 
             q_text = st.text_area("Question / Title", key="aq_q_text")
 
             opt_vals = {"A": "", "B": "", "C": "", "D": ""}
@@ -2808,8 +2760,7 @@ def admin_dashboard():
             if q_type == "programming":
                 prog_language_label = st.selectbox("Programming Language", list(PROGRAMMING_LANGUAGE_LABELS.keys()), key="aq_prog_language")
                 prog_language = PROGRAMMING_LANGUAGE_LABELS[prog_language_label]
-                prog_description = st.text_area("Programming Description", key="aq_prog_desc",
-                    placeholder="Problem statement, constraints, input/output format ikkada rayandi...")
+                prog_description = st.text_area("Programming Description", key="aq_prog_desc")
                 st.markdown("**Test Cases & Marks**")
                 tc_count = st.number_input("Number of test cases", min_value=1, max_value=10, value=3, step=1, key="aq_tc_count")
                 for idx in range(int(tc_count)):
@@ -2832,9 +2783,7 @@ def admin_dashboard():
                         })
                 correct_lbl = "AUTO"
             else:
-                #  4 Options +  Set Correct button 
                 if q_type == "mcq":
-                    st.markdown("**Options**   option  ** Set Correct** ")
                     for lbl in ["A","B","C","D"]:
                         c1, c2, c3 = st.columns([1, 6, 2])
                         with c1:
@@ -2862,8 +2811,7 @@ def admin_dashboard():
                 else:
                     correct_lbl = st.text_input("Correct Answer", key="aq_blank_correct")
 
-                exp_text = st.text_area(" Answer Explanation (optional)", key="aq_explanation",
-                                         placeholder="   correct  ...")
+                exp_text = st.text_area(" Answer Explanation (optional)", key="aq_explanation")
 
             if st.button("Add Question", type="primary", key="add_q_btn", use_container_width=True):
                 if sel_ex in ex_options and q_text.strip():
@@ -2886,7 +2834,6 @@ def admin_dashboard():
                         "image_url": final_img_url,
                         "explanation": explanation_value
                     }).execute()
-                    # Clear all aq_ keys
                     for k in list(st.session_state.keys()):
                         if str(k).startswith("aq_tc_"):
                             st.session_state.pop(k, None)
@@ -2895,8 +2842,6 @@ def admin_dashboard():
                         st.session_state.pop(k, None)
                     st.success("Question added.")
                     st.rerun()
-                else:
-                    st.error("Exam select   question text enter .")
 
         with ex_tab4:
             st.subheader("Bulk Upload Questions (CSV)")
@@ -2916,11 +2861,8 @@ def admin_dashboard():
                         missing = [col for col in required if col not in df.columns]
                         if missing:
                             st.error(f"CSV   columns : {missing}")
-                            st.caption("Expected: question, type, option_a..d, correct_answer, hint, explanation")
                         else:
                             df = df.fillna("")
-                            st.success(f" {len(df)} rows loaded!")
-                            st.write("Preview:", df.head())
                             if st.button("Upload to DB"):
                                 try:
                                     for _, row in df.iterrows():
@@ -2942,8 +2884,6 @@ def admin_dashboard():
                                     st.error(f"Upload Error: {e}")
                     except Exception as e:
                         st.error(f"CSV : {e}")
-            else:
-                st.warning("Create an exam first.")
 
         with ex_tab5:
             st.subheader("AI Question Generator (Gemini)")
@@ -2976,14 +2916,6 @@ def admin_dashboard():
                         st.error(f"AI Error: {e}")
 
             if st.session_state.get("ai_generated_qs"):
-                st.subheader("Generated Questions Preview")
-                for gi, gq in enumerate(st.session_state.ai_generated_qs):
-                    with st.container(border=True):
-                        st.markdown(f"**Q{gi+1}. {gq.get('question','')}**")
-                        st.caption(f"A: {gq.get('option_a','')} | B: {gq.get('option_b','')} | C: {gq.get('option_c','')} | D: {gq.get('option_d','')}")
-                        st.caption(f" Correct: {gq.get('correct_answer','')}")
-                        if gq.get("explanation"):
-                            st.caption(f" {gq.get('explanation','')}")
                 if sel_ai_ex in ai_ex_options:
                     if st.button("Save to DB", type="primary", use_container_width=True):
                         try:
@@ -2996,7 +2928,7 @@ def admin_dashboard():
                                     "correct_answer": gq.get("correct_answer",""), "hint": "",
                                     "explanation": gq.get("explanation","") or None
                                 }).execute()
-                            st.success(f" {len(st.session_state.ai_generated_qs)} questions saved!")
+                            st.success(f" saved!")
                             st.session_state.ai_generated_qs = None
                             st.rerun()
                         except Exception as e:
@@ -3063,7 +2995,7 @@ def admin_dashboard():
                             if q["type"] == "mcq":
                                 st.caption(f"A: {q['option_a']} | B: {q['option_b']} | C: {q['option_c']} | D: {q['option_d']}")
                             st.caption(f" Answer: {q['correct_answer']} |  Hint: {q.get('hint','')}")
-                            if q.get("explanation"):
+                            if q.get("explanation") and not q.get("explanation").startswith(PROGRAMMING_META_PREFIX):
                                 st.caption(f" Explanation: {q['explanation']}")
                         with col_q2:
                             if st.button("Edit", key=f"edit_btn_{q['id']}", use_container_width=True):
@@ -3133,8 +3065,6 @@ def admin_dashboard():
                                 "explanation": exp_new.strip() if exp_new.strip() else None
                             }).execute()
                             st.success("Added!"); st.rerun()
-                        else:
-                            st.error("Question text empty!")
 
     elif menu == "Student Results & Ranks":
         r_tab1, r_tab2, r_tab3, r_tab4, r_tab5, r_tab6, r_tab7 = st.tabs([
@@ -3152,10 +3082,7 @@ def admin_dashboard():
                     board = get_exam_leaderboard(target_ex["id"])
                     if board:
                         for rank, st_row in enumerate(board):
-                            medal = "" if rank==0 else "" if rank==1 else "" if rank==2 else f"{rank+1}."
-                            st.write(f"{medal} **{st_row['Name']}** ({st_row['Email']})  Score: **{st_row['Score']}**")
-                    else:
-                        st.info("No attempts yet.")
+                            st.write(f" **{st_row['Name']}** ({st_row['Email']})  Score: **{st_row['Score']}**")
 
         with r_tab2:
             st.title("Manual Evaluator")
@@ -3171,14 +3098,10 @@ def admin_dashboard():
                             col_s1, col_s2 = st.columns([3, 1])
                             with col_s1:
                                 st.markdown(f"#####  **{u_data[0]['name']}** |  **{e_data[0]['title']}**")
-                                st.code(att.get("submitted_answers","# No code submitted."), language="python")
                             with col_s2:
                                 current_score = int(att.get("score") or 0)
-                                try:
-                                    exam_questions = supabase.table("questions").select("*").eq("exam_id", att["exam_id"]).execute().data or []
-                                    exam_max_score = get_exam_max_marks(exam_questions)
-                                except Exception:
-                                    exam_max_score = 100
+                                exam_questions = supabase.table("questions").select("*").eq("exam_id", att["exam_id"]).execute().data or []
+                                exam_max_score = get_exam_max_marks(exam_questions)
                                 score_max = max(100, int(exam_max_score or 0), current_score)
                                 new_score = st.number_input("Score", min_value=0, max_value=score_max, value=current_score, step=1, key=f"score_in_{att['id']}")
                                 if st.button("Save", key=f"btn_score_{att['id']}", type="primary", use_container_width=True):
@@ -3188,9 +3111,7 @@ def admin_dashboard():
         with r_tab3:
             st.title("Score Logger")
             attempts = supabase.table("exam_attempts").select("*").execute().data
-            if not attempts:
-                st.warning("No submissions yet.")
-            else:
+            if attempts:
                 for att in attempts:
                     u_prof = supabase.table("users").select("*").eq("id", att["user_id"]).execute().data
                     e_prof = supabase.table("exams").select("*").eq("id", att["exam_id"]).execute().data
@@ -3235,12 +3156,11 @@ def admin_dashboard():
                     ename = e_info[0]["title"] if e_info else "Unknown Exam"
                     qids = json.loads(req["question_ids"]) if req.get("question_ids") else []
                     status = req.get("status","pending")
-                    status_color = {"pending":"","done":"","rejected":""}.get(status,"")
                     with st.container(border=True):
                         col1, col2, col3 = st.columns([4, 1, 1])
                         with col1:
                             st.markdown(f"** {uname}** ({u_info[0]['email'] if u_info else ''})")
-                            st.caption(f" {ename} | {len(qids)} questions | {status_color} {status} | {str(req.get('created_at',''))[:10]}")
+                            st.caption(f" {ename} | {len(qids)} questions | {status} | {str(req.get('created_at',''))[:10]}")
                         with col2:
                             if qids:
                                 marked_qs = supabase.table("questions").select("*").in_("id", qids).execute().data
@@ -3269,9 +3189,7 @@ def admin_dashboard():
         with r_tab6:
             st.title("Student Attendance")
             all_students = supabase.table("users").select("id, name, email").eq("role","user").execute().data
-            if not all_students:
-                st.info("Students .")
-            else:
+            if all_students:
                 sel_student = st.selectbox("Student select ", [f"{s['name']} ({s['email']})" for s in all_students])
                 sel_idx = [f"{s['name']} ({s['email']})" for s in all_students].index(sel_student)
                 sel_uid = all_students[sel_idx]["id"]
@@ -3279,13 +3197,10 @@ def admin_dashboard():
 
         with r_tab7:
             st.title("Live Programming Exams")
-            with st.expander("Programming session database SQL setup"):
-                st.code(get_programming_session_sql(), language="sql")
             try:
                 sessions = supabase.table("programming_exam_sessions").select("*").eq("status", "active").order("updated_at", desc=True).execute().data or []
             except Exception as e:
                 sessions = []
-                st.warning(f"Session table ready ledu: {e}")
             if not sessions:
                 st.info("Active programming exams levu.")
             for sess in sessions:
@@ -3299,18 +3214,15 @@ def admin_dashboard():
                         st.markdown(f"**{uname}** - {ename}")
                         st.caption(f"Question: {int(sess.get('question_index') or 0) + 1} | Malpractice: {sess.get('malpractice_count') or 0} | Last: {sess.get('last_malpractice_reason') or 'None'}")
                     with c2:
-                        if sess.get("force_submit"):
-                            st.warning("Force submit pending")
-                        else:
+                        if not sess.get("force_submit"):
                             if st.button("Submit Exam", key=f"force_submit_{sess['user_id']}_{sess['exam_id']}", type="primary", use_container_width=True):
                                 supabase.table("programming_exam_sessions").update({"force_submit": True, "updated_at": "now()"}).eq("user_id", sess["user_id"]).eq("exam_id", sess["exam_id"]).execute()
-                                send_notification(f"Admin requested submit for {ename}. Mee exam automatic ga submit avuthundi.", sess["user_id"])
+                                send_notification(f"Admin requested submit for {ename}.", sess["user_id"])
                                 st.success("Student exam auto submit ki mark ayyindi.")
                                 st.rerun()
                     with c3:
                         if st.button("Refresh", key=f"refresh_sess_{sess['user_id']}_{sess['exam_id']}", use_container_width=True):
                             st.rerun()
-
 
     elif menu == "Group Chat":
         with st.expander(" Broadcast Notification "):
@@ -3319,10 +3231,8 @@ def admin_dashboard():
                 if notif_msg.strip():
                     send_notification(notif_msg.strip())
                     st.success(" !"); st.rerun()
-                else:
-                    st.warning("Message enter .")
-            st.divider()
-            group_chat()
+        st.divider()
+        group_chat()
 
 # =========================
 # CREDIT CARD SHARING PORTAL
@@ -3368,83 +3278,10 @@ def money_value(value):
         return 0.0
 
 
-def show_credit_card_sql_help():
-    with st.expander("Credit Cards database SQL setup"):
-        st.code("""
-create table if not exists card_users (
-  id uuid primary key default gen_random_uuid(),
-  name text not null,
-  mobile text,
-  app_pin text not null unique,
-  active boolean not null default true,
-  created_at timestamptz default now()
-);
-
-create table if not exists card_user_cards (
-  id uuid primary key default gen_random_uuid(),
-  user_id uuid not null references card_users(id) on delete cascade,
-  card_code text not null check (card_code in ('card_1','card_2')),
-  created_at timestamptz default now(),
-  unique(user_id, card_code)
-);
-
-create table if not exists card_transactions (
-  id uuid primary key default gen_random_uuid(),
-  user_id uuid not null references card_users(id) on delete cascade,
-  card_code text not null check (card_code in ('card_1','card_2')),
-  purpose text not null,
-  amount numeric not null default 0,
-  transaction_date date not null,
-  proof_url text,
-  source_key text unique,
-  status text not null default 'pending' check (status in ('pending','approved','rejected')),
-  admin_note text,
-  approved_by uuid references users(id),
-  approved_at timestamptz,
-  created_at timestamptz default now()
-);
-
-create table if not exists card_payments (
-  id uuid primary key default gen_random_uuid(),
-  user_id uuid not null references card_users(id) on delete cascade,
-  card_code text not null check (card_code in ('card_1','card_2')),
-  billing_month text not null,
-  bill_start date not null,
-  bill_end date not null,
-  amount numeric not null default 0,
-  proof_url text not null,
-  status text not null default 'pending' check (status in ('pending','paid','rejected')),
-  admin_note text,
-  approved_by uuid references users(id),
-  approved_at timestamptz,
-  created_at timestamptz default now(),
-  unique(user_id, card_code, billing_month)
-);
-
-create table if not exists card_recurring_transactions (
-  id uuid primary key default gen_random_uuid(),
-  user_id uuid not null references card_users(id) on delete cascade,
-  card_code text not null check (card_code in ('card_1','card_2')),
-  purpose text not null,
-  amount numeric not null default 0,
-  start_date date not null default current_date,
-  end_date date,
-  active boolean not null default true,
-  created_at timestamptz default now()
-);
-
-alter table card_transactions add column if not exists source_key text;
-create unique index if not exists card_transactions_source_key_idx
-  on card_transactions(source_key)
-  where source_key is not null;
-""", language="sql")
-
-
 def get_card_users():
     try:
         return supabase.table("card_users").select("id, name, mobile, app_pin, active").order("name").execute().data or []
     except Exception as e:
-        st.error(f"Card users load failed: {e}")
         return []
 
 
@@ -3469,7 +3306,6 @@ def generate_recurring_transactions(user_id=None):
             query = query.eq("user_id", user_id)
         recurring_rows = query.execute().data or []
     except Exception as e:
-        st.error(f"Monthly auto payments load failed: {e}")
         return 0
 
     created_count = 0
@@ -3509,13 +3345,12 @@ def generate_recurring_transactions(user_id=None):
             }).execute()
             created_count += 1
         except Exception as e:
-            st.error(f"Monthly auto payment create failed: {e}")
+            pass
     return created_count
 
 
 def admin_credit_cards_dashboard():
     st.title("Credit Cards Admin")
-    show_credit_card_sql_help()
     generate_recurring_transactions()
     tab_users, tab_txns, tab_payments, tab_recurring, tab_manual = st.tabs(["Users & Cards", "Approve Transactions", "Payment Screenshots", "Monthly Auto Payments", "Add/Edit Transactions"])
 
@@ -3538,7 +3373,7 @@ def admin_credit_cards_dashboard():
                     existing_lms = supabase.table("users").select("id").eq("app_pin", pin).execute().data
                     existing_card = supabase.table("card_users").select("id").eq("app_pin", pin).execute().data
                     if existing_lms or existing_card:
-                        st.error("Ee PIN already another user ki undi. Vere PIN try cheyyandi.")
+                        st.error("Ee PIN already used.")
                     else:
                         created = supabase.table("card_users").insert({
                             "name": name.strip(),
@@ -3549,12 +3384,10 @@ def admin_credit_cards_dashboard():
                         if not created_data:
                             created_data = supabase.table("card_users").select("*").eq("app_pin", pin).execute().data or []
                         new_user_id = created_data[0]["id"] if created_data else None
-                        if not new_user_id:
-                            raise Exception("Card user create failed.")
                         for card_code in assigned:
                             supabase.table("card_user_cards").insert({"user_id": new_user_id, "card_code": card_code}).execute()
                         created_user = created_data[0] if created_data else {"id": new_user_id, "name": name.strip(), "mobile": mobile.strip(), "app_pin": pin, "active": True}
-                        st.success(f"Card user created: {name.strip()} | PIN: {pin}")
+                        st.success(f"Card user created: {name.strip()}")
                 except Exception as e:
                     st.error(f"Create user failed: {e}")
 
@@ -3562,8 +3395,6 @@ def admin_credit_cards_dashboard():
         users = get_card_users()
         if created_user and not any(u.get("id") == created_user.get("id") for u in users):
             users = [created_user] + users
-        if not users:
-            st.info("No card users yet.")
         for user in users:
             with st.expander(f"{user.get('name','User')} - {user.get('mobile','')}"):
                 current_cards = get_assigned_cards(user["id"])
@@ -3580,19 +3411,14 @@ def admin_credit_cards_dashboard():
 
     with tab_txns:
         st.subheader("Pending user transactions")
-        try:
-            rows = supabase.table("card_transactions").select("*").eq("status", "pending").order("transaction_date", desc=True).execute().data or []
-        except Exception as e:
-            st.error(f"Transactions load failed: {e}")
-            rows = []
+        rows = supabase.table("card_transactions").select("*").eq("status", "pending").order("transaction_date", desc=True).execute().data or []
         if not rows:
             st.info("Pending transactions levu.")
         for row in rows:
             user = supabase.table("card_users").select("name, mobile").eq("id", row["user_id"]).execute().data or [{}]
-            with st.expander(f"{get_card_label(row['card_code'])} | {user[0].get('name','User')} | Rs.{money_value(row.get('amount')):.2f} | {row.get('transaction_date')}"):
+            with st.expander(f"{get_card_label(row['card_code'])} | {user[0].get('name','User')} | Rs.{money_value(row.get('amount')):.2f}"):
                 st.write(row.get("purpose", ""))
                 if row.get("proof_url"):
-                    st.link_button("Open screenshot", row["proof_url"])
                     st.image(row["proof_url"], width=300)
                 note = st.text_input("Admin note", value=row.get("admin_note") or "", key=f"txn_note_{row['id']}")
                 col1, col2 = st.columns(2)
@@ -3609,54 +3435,38 @@ def admin_credit_cards_dashboard():
 
     with tab_payments:
         st.subheader("User bill payment screenshots")
-        st.markdown("### All users pending bills")
-        try:
-            all_card_users = get_card_users()
-            pending_bill_rows = []
-            for card_user in all_card_users:
-                user_cards = get_assigned_cards(card_user["id"])
-                for card_code in user_cards:
-                    start_date, end_date = get_statement_period(card_code)
-                    billing_month = end_date.strftime("%Y-%m")
-                    approved = supabase.table("card_transactions").select("*").eq("user_id", card_user["id"]).eq("card_code", card_code).eq("status", "approved").gte("transaction_date", str(start_date)).lte("transaction_date", str(end_date)).execute().data or []
-                    total = sum(money_value(r.get("amount")) for r in approved)
-                    if total <= 0:
-                        continue
-                    payments_for_bill = supabase.table("card_payments").select("*").eq("user_id", card_user["id"]).eq("card_code", card_code).eq("billing_month", billing_month).order("created_at", desc=True).execute().data or []
-                    paid = any(p.get("status") == "paid" for p in payments_for_bill)
-                    if paid:
-                        continue
-                    pending_pay = any(p.get("status") == "pending" for p in payments_for_bill)
-                    pending_bill_rows.append({
-                        "user": card_user.get("name", "User"),
-                        "mobile": card_user.get("mobile", ""),
-                        "card": get_card_label(card_code),
-                        "month": billing_month,
-                        "period": f"{start_date} to {end_date}",
-                        "amount": round(total, 2),
-                        "status": "Payment uploaded - approval pending" if pending_pay else "Not paid",
-                    })
-            if pending_bill_rows:
-                c1, c2 = st.columns(2)
-                c1.metric("Pending bills", len(pending_bill_rows))
-                c2.metric("Total receivable", f"Rs.{sum(r['amount'] for r in pending_bill_rows):.2f}")
-                st.dataframe(pending_bill_rows, use_container_width=True, hide_index=True)
-            else:
-                st.info("All users pending bills levu.")
-        except Exception as e:
-            st.error(f"Pending bills load failed: {e}")
+        all_card_users = get_card_users()
+        pending_bill_rows = []
+        for card_user in all_card_users:
+            user_cards = get_assigned_cards(card_user["id"])
+            for card_code in user_cards:
+                start_date, end_date = get_statement_period(card_code)
+                billing_month = end_date.strftime("%Y-%m")
+                approved = supabase.table("card_transactions").select("*").eq("user_id", card_user["id"]).eq("card_code", card_code).eq("status", "approved").gte("transaction_date", str(start_date)).lte("transaction_date", str(end_date)).execute().data or []
+                total = sum(money_value(r.get("amount")) for r in approved)
+                if total <= 0:
+                    continue
+                payments_for_bill = supabase.table("card_payments").select("*").eq("user_id", card_user["id"]).eq("card_code", card_code).eq("billing_month", billing_month).order("created_at", desc=True).execute().data or []
+                paid = any(p.get("status") == "paid" for p in payments_for_bill)
+                if paid:
+                    continue
+                pending_pay = any(p.get("status") == "pending" for p in payments_for_bill)
+                pending_bill_rows.append({
+                    "user": card_user.get("name", "User"),
+                    "card": get_card_label(card_code),
+                    "month": billing_month,
+                    "amount": round(total, 2),
+                    "status": "Pending approval" if pending_pay else "Not paid",
+                })
+        if pending_bill_rows:
+            st.dataframe(pending_bill_rows, use_container_width=True, hide_index=True)
         st.divider()
-        try:
-            payments = supabase.table("card_payments").select("*").order("created_at", desc=True).execute().data or []
-        except Exception as e:
-            st.error(f"Payments load failed: {e}")
-            payments = []
+        payments = supabase.table("card_payments").select("*").order("created_at", desc=True).execute().data or []
         for pay in payments:
             user = supabase.table("card_users").select("name, mobile").eq("id", pay["user_id"]).execute().data or [{}]
-            with st.expander(f"{pay.get('status','pending').upper()} | {get_card_label(pay['card_code'])} | {user[0].get('name','User')} | {pay.get('billing_month')} | Rs.{money_value(pay.get('amount')):.2f}"):
-                st.write(f"Bill period: {pay.get('bill_start')} to {pay.get('bill_end')}")
-                st.link_button("Open payment screenshot", pay["proof_url"])
-                st.image(pay["proof_url"], width=320)
+            with st.expander(f"{pay.get('status','pending').upper()} | {get_card_label(pay['card_code'])} | {user[0].get('name','User')} | Rs.{money_value(pay.get('amount')):.2f}"):
+                if pay.get("proof_url"):
+                    st.image(pay["proof_url"], width=320)
                 note = st.text_input("Payment admin note", value=pay.get("admin_note") or "", key=f"pay_note_{pay['id']}")
                 col1, col2 = st.columns(2)
                 with col1:
@@ -3673,26 +3483,22 @@ def admin_credit_cards_dashboard():
     with tab_recurring:
         st.subheader("One-time setup for monthly payments")
         users = get_card_users()
-        if not users:
-            st.info("Create card users first.")
-        else:
+        if users:
             labels = {f"{u.get('name','User')} ({u.get('mobile','')})": u for u in users}
             selected_label = st.selectbox("User", list(labels.keys()), key="rec_user")
             selected_user = labels[selected_label]
             user_cards = get_assigned_cards(selected_user["id"]) or ["card_1", "card_2"]
             with st.form("recurring_payment_form", clear_on_submit=True):
                 rec_card = st.selectbox("Card", user_cards, format_func=get_card_label, key="rec_card")
-                rec_purpose = st.text_input("Purpose", placeholder="Example: EMI, Netflix, Rent")
+                rec_purpose = st.text_input("Purpose")
                 rec_amount = st.number_input("Monthly amount", min_value=0.0, step=1.0, key="rec_amount")
                 rec_start = st.date_input("Start from", value=date.today(), key="rec_start")
-                has_end = st.checkbox("End date unda?")
+                has_end = st.checkbox("End date?")
                 rec_end = st.date_input("End date", value=add_months(date.today(), 12), key="rec_end") if has_end else None
                 rec_submit = st.form_submit_button("Add Monthly Auto Payment", type="primary")
             if rec_submit:
                 if not rec_purpose.strip() or rec_amount <= 0:
                     st.error("Purpose and amount required.")
-                elif rec_end and rec_end < rec_start:
-                    st.error("End date start date kante mundu undakudadhu.")
                 else:
                     try:
                         supabase.table("card_recurring_transactions").insert({
@@ -3705,50 +3511,30 @@ def admin_credit_cards_dashboard():
                             "active": True,
                         }).execute()
                         made = generate_recurring_transactions(selected_user["id"])
-                        st.success(f"Monthly auto payment added. Current month entries created: {made}")
+                        st.success(f"Monthly auto payment added.")
                         st.rerun()
                     except Exception as e:
                         st.error(f"Monthly auto payment add failed: {e}")
 
         st.divider()
         st.subheader("Manage monthly auto payments")
-        try:
-            recurring_rows = supabase.table("card_recurring_transactions").select("*").order("created_at", desc=True).execute().data or []
-        except Exception as e:
-            st.error(f"Monthly auto payments load failed: {e}")
-            recurring_rows = []
-        if not recurring_rows:
-            st.info("Monthly auto payments levu.")
+        recurring_rows = supabase.table("card_recurring_transactions").select("*").order("created_at", desc=True).execute().data or []
         for rec in recurring_rows:
             user = supabase.table("card_users").select("name, mobile").eq("id", rec["user_id"]).execute().data or [{}]
             status = "Active" if rec.get("active") else "Paused"
-            with st.expander(f"{status} | {user[0].get('name','User')} | {get_card_label(rec.get('card_code'))} | {rec.get('purpose')} | Rs.{money_value(rec.get('amount')):.2f}"):
+            with st.expander(f"{status} | {user[0].get('name','User')} | Rs.{money_value(rec.get('amount')):.2f}"):
                 c1, c2, c3 = st.columns([2, 1, 1])
                 new_purpose = c1.text_input("Purpose", value=rec.get("purpose") or "", key=f"rec_purpose_{rec['id']}")
                 new_amount = c2.number_input("Amount", min_value=0.0, value=money_value(rec.get("amount")), step=1.0, key=f"rec_amount_{rec['id']}")
                 new_active = c3.checkbox("Active", value=bool(rec.get("active")), key=f"rec_active_{rec['id']}")
-                c4, c5 = st.columns(2)
-                new_start = c4.date_input("Start date", value=date.fromisoformat(str(rec.get("start_date"))), key=f"rec_start_{rec['id']}")
-                default_end = date.fromisoformat(str(rec["end_date"])) if rec.get("end_date") else add_months(date.today(), 12)
-                use_end = c5.checkbox("Use end date", value=bool(rec.get("end_date")), key=f"rec_use_end_{rec['id']}")
-                new_end = c5.date_input("End date", value=default_end, key=f"rec_end_{rec['id']}") if use_end else None
-                col_save, col_delete = st.columns(2)
-                with col_save:
-                    if st.button("Save auto payment", key=f"save_rec_{rec['id']}", type="primary"):
-                        supabase.table("card_recurring_transactions").update({
-                            "purpose": new_purpose.strip(),
-                            "amount": new_amount,
-                            "start_date": str(new_start),
-                            "end_date": str(new_end) if new_end else None,
-                            "active": new_active,
-                        }).eq("id", rec["id"]).execute()
-                        st.success("Monthly auto payment updated.")
-                        st.rerun()
-                with col_delete:
-                    if st.button("Delete auto payment", key=f"del_rec_{rec['id']}"):
-                        supabase.table("card_recurring_transactions").delete().eq("id", rec["id"]).execute()
-                        st.warning("Monthly auto payment deleted.")
-                        st.rerun()
+                if st.button("Save auto payment", key=f"save_rec_{rec['id']}", type="primary"):
+                    supabase.table("card_recurring_transactions").update({
+                        "purpose": new_purpose.strip(),
+                        "amount": new_amount,
+                        "active": new_active,
+                    }).eq("id", rec["id"]).execute()
+                    st.success("Monthly auto payment updated.")
+                    st.rerun()
 
     with tab_manual:
         st.subheader("Add transaction for a user")
@@ -3786,11 +3572,7 @@ def admin_credit_cards_dashboard():
 
         st.divider()
         st.subheader("Edit existing transactions")
-        try:
-            txns = supabase.table("card_transactions").select("*").order("transaction_date", desc=True).limit(100).execute().data or []
-        except Exception as e:
-            st.error(f"Transactions load failed: {e}")
-            txns = []
+        txns = supabase.table("card_transactions").select("*").order("transaction_date", desc=True).limit(100).execute().data or []
         for row in txns:
             user = supabase.table("card_users").select("name, mobile").eq("id", row["user_id"]).execute().data or [{}]
             with st.expander(f"{get_card_label(row['card_code'])} | {user[0].get('name','User')} | {row.get('purpose','')}"):
@@ -3798,14 +3580,10 @@ def admin_credit_cards_dashboard():
                 new_purpose = col1.text_input("Purpose", value=row.get("purpose") or "", key=f"edit_purpose_{row['id']}")
                 new_amount = col2.number_input("Amount", min_value=0.0, value=money_value(row.get("amount")), step=1.0, key=f"edit_amount_{row['id']}")
                 new_status = col3.selectbox("Status", ["pending", "approved", "rejected"], index=["pending", "approved", "rejected"].index(row.get("status", "pending")), key=f"edit_status_{row['id']}")
-                new_date = st.date_input("Date", value=date.fromisoformat(str(row.get("transaction_date"))), key=f"edit_date_{row['id']}")
-                if row.get("proof_url"):
-                    st.link_button("Open screenshot", row["proof_url"], key=f"edit_link_{row['id']}")
                 if st.button("Save transaction", key=f"save_txn_{row['id']}"):
                     supabase.table("card_transactions").update({
                         "purpose": new_purpose.strip(),
                         "amount": new_amount,
-                        "transaction_date": str(new_date),
                         "status": new_status,
                     }).eq("id", row["id"]).execute()
                     st.success("Transaction updated.")
@@ -3829,7 +3607,7 @@ def card_user_dashboard():
     user_id = st.session_state.user_id
     assigned_cards = get_assigned_cards(user_id)
     if not assigned_cards:
-        st.warning("No cards assigned yet. Admin ni contact cheyyandi.")
+        st.warning("No cards assigned yet.")
         return
     generate_recurring_transactions(user_id)
 
@@ -3856,7 +3634,7 @@ def card_user_dashboard():
                     "proof_url": proof_url,
                     "status": "pending",
                 }).execute()
-                st.success("Transaction sent to admin for approval.")
+                st.success("Transaction sent to admin.")
                 st.rerun()
         return
 
@@ -3874,27 +3652,17 @@ def card_user_dashboard():
             if total <= 0 or paid:
                 continue
             found_pending_bill = True
-            status_text = "Payment Waiting Admin Approval" if pending_pay else "PAY"
+            status_text = "Pending approval" if pending_pay else "PAY"
             with st.container(border=True):
                 st.subheader(f"{get_card_label(card_code)} - {billing_month}")
-                c1, c2, c3 = st.columns(3)
-                c1.metric("Bill period", f"{start_date} to {end_date}")
-                c2.metric("Bill amount", f"Rs.{total:.2f}")
-                c3.metric("Status", status_text)
-                st.dataframe([{
-                    "date": r.get("transaction_date"),
-                    "purpose": r.get("purpose"),
-                    "amount": money_value(r.get("amount")),
-                } for r in approved], use_container_width=True, hide_index=True)
+                st.metric("Bill amount", f"Rs.{total:.2f}")
                 if not pending_pay:
                     with st.form(f"pending_pay_form_{card_code}_{billing_month}"):
-                        pay_file = st.file_uploader("Upload bill paid screenshot", type=["png", "jpg", "jpeg", "webp"], key=f"pending_pay_file_{card_code}_{billing_month}")
-                        submit_pay = st.form_submit_button("Pay / Submit Screenshot", type="primary")
+                        pay_file = st.file_uploader("Upload screenshot", type=["png", "jpg", "jpeg", "webp"], key=f"pending_pay_file_{card_code}_{billing_month}")
+                        submit_pay = st.form_submit_button("Pay Now", type="primary")
                     if submit_pay:
                         proof_url = upload_optional_image(pay_file)
-                        if not proof_url:
-                            st.error("Screenshot upload required.")
-                        else:
+                        if proof_url:
                             supabase.table("card_payments").upsert({
                                 "user_id": user_id,
                                 "card_code": card_code,
@@ -3905,7 +3673,7 @@ def card_user_dashboard():
                                 "proof_url": proof_url,
                                 "status": "pending",
                             }, on_conflict="user_id,card_code,billing_month").execute()
-                            st.success("Payment screenshot admin approval ki sent.")
+                            st.success("Payment screenshot uploaded.")
                             st.rerun()
         if not found_pending_bill:
             st.info("Pending bills levu.")
@@ -3920,13 +3688,8 @@ def card_user_dashboard():
             st.dataframe([{
                 "card": get_card_label(r.get("card_code")),
                 "month": r.get("billing_month"),
-                "period": f"{r.get('bill_start')} to {r.get('bill_end')}",
                 "amount": money_value(r.get("amount")),
-                "paid_at": str(r.get("approved_at") or "")[:19],
             } for r in paid_rows], use_container_width=True, hide_index=True)
-            for row in paid_rows:
-                if row.get("proof_url"):
-                    st.link_button(f"Open screenshot - {get_card_label(row.get('card_code'))} {row.get('billing_month')}", row["proof_url"])
         return
 
     if st.session_state.card_user_page == "History":
@@ -3940,7 +3703,6 @@ def card_user_dashboard():
                 "purpose": r.get("purpose"),
                 "amount": money_value(r.get("amount")),
                 "status": r.get("status"),
-                "admin_note": r.get("admin_note") or "",
             } for r in rows], use_container_width=True, hide_index=True)
         return
 
@@ -3952,30 +3714,17 @@ def card_user_dashboard():
         payments = supabase.table("card_payments").select("*").eq("user_id", user_id).eq("card_code", card_code).eq("billing_month", billing_month).order("created_at", desc=True).execute().data or []
         paid = any(p.get("status") == "paid" for p in payments)
         pending_pay = any(p.get("status") == "pending" for p in payments)
-        status_text = "PAID" if paid else "Payment Waiting Admin Approval" if pending_pay else "PAY"
+        status_text = "PAID" if paid else "Waiting Approval" if pending_pay else "PAY"
         with st.container(border=True):
             st.subheader(f"{get_card_label(card_code)} - Bill date {get_card_bill_day(card_code)}")
-            c1, c2, c3 = st.columns(3)
-            c1.metric("Bill period", f"{start_date} to {end_date}")
-            c2.metric("Approved amount", f"Rs.{total:.2f}")
-            c3.metric("Status", status_text)
-            if approved:
-                st.dataframe([{
-                    "date": r.get("transaction_date"),
-                    "purpose": r.get("purpose"),
-                    "amount": money_value(r.get("amount")),
-                } for r in approved], use_container_width=True, hide_index=True)
-            else:
-                st.info("Ee bill period lo approved transactions levu.")
-            if not paid and total > 0:
+            st.metric("Approved amount", f"Rs.{total:.2f}")
+            if not paid and total > 0 and not pending_pay:
                 with st.form(f"pay_form_{card_code}_{billing_month}"):
-                    pay_file = st.file_uploader("Upload bill paid screenshot", type=["png", "jpg", "jpeg", "webp"], key=f"pay_file_{card_code}_{billing_month}")
-                    submit_pay = st.form_submit_button("Pay / Submit Screenshot", type="primary")
+                    pay_file = st.file_uploader("Upload screenshot", type=["png", "jpg", "jpeg", "webp"], key=f"pay_file_{card_code}_{billing_month}")
+                    submit_pay = st.form_submit_button("Submit Screenshot", type="primary")
                 if submit_pay:
                     proof_url = upload_optional_image(pay_file)
-                    if not proof_url:
-                        st.error("Screenshot upload required.")
-                    else:
+                    if proof_url:
                         supabase.table("card_payments").upsert({
                             "user_id": user_id,
                             "card_code": card_code,
@@ -3986,7 +3735,7 @@ def card_user_dashboard():
                             "proof_url": proof_url,
                             "status": "pending",
                         }, on_conflict="user_id,card_code,billing_month").execute()
-                        st.success("Payment screenshot admin approval ki sent.")
+                        st.success("Uploaded successfully.")
                         st.rerun()
 
 # =========================
@@ -4016,7 +3765,6 @@ def user_dashboard(preview_mode=False):
                 st.session_state.user_page = pg
                 st.rerun()
         user_page = st.session_state.user_page
-        # Mark today's attendance on every login
         mark_today_attendance(st.session_state.user_id)
     else:
         st.info("Student Preview Mode")
@@ -4038,9 +3786,8 @@ def user_dashboard(preview_mode=False):
     if user_page == "Suprabhatam":
         if user_has_suprabhatam_access(st.session_state.user_id):
             render_suprabhatam_reader(); return
-        st.error("Suprabhatam access ledu. Admin ni contact cheyyandi."); return
+        return
 
-    # My Classes
     modules = supabase.table("modules").select("*").execute().data
     if st.session_state.completed_ids is None:
         all_completions = supabase.table("class_completions").select("class_id").eq("user_id", st.session_state.user_id).execute().data
@@ -4064,7 +3811,7 @@ def user_dashboard(preview_mode=False):
 
         with st.expander(f"{module['title']}    {module_done}/{module_total} classes  ({pct}%)", expanded=module_has_focus):
             if module_total > 0:
-                st.progress(pct / 100, text=f"Module Progress: {pct}%")
+                st.progress(pct / 100)
             submodules = supabase.table("submodules").select("*").eq("module_id", module["id"]).execute().data
             for sub in submodules:
                 sub_classes = supabase.table("classes").select("id").eq("submodule_id", sub["id"]).execute().data
@@ -4072,14 +3819,10 @@ def user_dashboard(preview_mode=False):
                 sub_done = sum(1 for c in sub_classes if str(c["id"]) in completed_ids)
                 sub_pct = int((sub_done / sub_total * 100)) if sub_total > 0 else 0
                 st.subheader(f"{sub['title']}   {sub_done}/{sub_total}")
-                if sub_total > 0: st.progress(sub_pct / 100)
                 classes = supabase.table("classes").select("*").eq("submodule_id", sub["id"]).execute().data
                 for cls in classes:
                     is_done = str(cls.get("id")) in completed_ids
-                    is_focused_class = focus_class_id and str(cls.get("id")) == focus_class_id
-                    st.markdown(f"### {'' if is_done else ''} {cls['title']}")
-                    if is_focused_class:
-                        st.info("Progress tab nundi open chesina class idi.")
+                    st.markdown(f"### {cls['title']}")
                     col_link1, col_link2, col_link3 = st.columns(3)
                     with col_link1:
                         if cls.get("class_link"): st.link_button("Join Class", cls["class_link"], use_container_width=True)
@@ -4092,14 +3835,13 @@ def user_dashboard(preview_mode=False):
                     if class_id:
                         try: cid = int(class_id)
                         except (ValueError, TypeError): cid = str(class_id)
-                        if str(class_id) in completed_ids:
-                            st.success("     !")
-                        else:
+                        if str(class_id) not in completed_ids:
                             if st.button("Mark as Completed", key=f"btn_done_{cls['id']}"):
                                 try:
                                     supabase.table("class_completions").insert({"user_id": str(st.session_state.user_id), "class_id": cid}).execute()
                                     st.session_state.completed_ids.add(str(class_id))
-                                    st.success("   !")
+                                    st.success("Success!")
+                                    st.rerun()
                                 except Exception as e:
                                     st.error(f"Insert Error: {e}")
 
@@ -4107,29 +3849,22 @@ def user_dashboard(preview_mode=False):
                     for exam in exams:
                         if not exam["enabled"]: continue
                         exam_dur = exam.get("duration_mins", 30)
-                        is_focused_exam = focus_exam_id and str(exam.get("id")) == focus_exam_id
                         st.write(f" **Exam: {exam['title']}** ({exam_dur} Mins)")
-                        if is_focused_exam:
-                            st.info("Progress tab nundi open chesina exam idi. Password unte access code enter  start cheyyandi.")
                         btn_col, lb_col = st.columns([2, 2])
                         with lb_col:
                             board = get_exam_leaderboard(exam["id"])
                             if board:
                                 st.markdown(" **Top Performers:**")
                                 for idx, student in enumerate(board[:3]):
-                                    medal = "" if idx==0 else "" if idx==1 else ""
-                                    st.caption(f"{medal} {student['Name']}  {student['Score']}")
-                            else:
-                                st.caption("Be the first! ")
+                                    st.caption(f"{student['Name']}  {student['Score']}")
                         with btn_col:
                             check_attempt = supabase.table("exam_attempts").select("*").eq("user_id", st.session_state.user_id).eq("exam_id", exam["id"]).execute().data
                             if check_attempt:
                                 q_count = supabase.table("questions").select("*").eq("exam_id", exam["id"]).execute().data
                                 total_q = get_exam_max_marks(q_count)
-                                st.markdown("**  Attempts:**")
                                 for idx, att in enumerate(check_attempt):
-                                    pct = int((int(att.get("score") or 0) / total_q) * 100) if total_q else 0
-                                    st.caption(f"Attempt {idx+1}: **{att['score']}/{total_q}** ({pct}%)")
+                                    pct_a = int((int(att.get("score") or 0) / total_q) * 100) if total_q else 0
+                                    st.caption(f"Attempt {idx+1}: **{att['score']}/{total_q}** ({pct_a}%)")
                                 if st.button("Show Answers", key=f"view_{exam['id']}", use_container_width=True):
                                     st.session_state.exam_id = exam["id"]
                                     st.session_state.exam_title = exam["title"]
@@ -4137,35 +3872,9 @@ def user_dashboard(preview_mode=False):
                                     st.session_state.exam_submitted = True
                                     st.session_state.current_questions = supabase.table("questions").select("*").eq("exam_id", exam["id"]).execute().data
                                     st.rerun()
-                                retake_req = supabase.table("exam_retake_requests").select("*").eq("user_id", st.session_state.user_id).eq("exam_id", exam["id"]).order("requested_at",desc=True).limit(1).execute().data
-                                if retake_req:
-                                    status = retake_req[0]["status"]
-                                    if status == "pending":
-                                        st.warning("Re-exam request pending...")
-                                    elif status == "rejected":
-                                        st.error("Re-exam rejected.")
-                                        if st.button("Request", key=f"retry_req_{exam['id']}", use_container_width=True):
-                                            supabase.table("exam_retake_requests").insert({"user_id": st.session_state.user_id, "exam_id": exam["id"], "status":"pending"}).execute()
-                                            st.success("Request !"); st.rerun()
-                                    elif status == "approved":
-                                        st.success("Re-exam approved.")
-                                        has_pwd = exam.get("password") and str(exam["password"]).strip()
-                                        entered_pwd = st.text_input(f"Access Code", type="password", key=f"repwd_{exam['id']}") if has_pwd else ""
-                                        if st.button("Start Re-Exam", key=f"rebtn_{exam['id']}", use_container_width=True, type="primary"):
-                                            if has_pwd and entered_pwd.strip() != str(exam["password"]).strip():
-                                                st.error("Wrong Password!")
-                                            else:
-                                                supabase.table("exam_retake_requests").update({"status":"used"}).eq("id",retake_req[0]["id"]).execute()
-                                                q_data = supabase.table("questions").select("*").eq("exam_id", exam["id"]).execute().data
-                                                start_exam_with_questions(exam, q_data)
-                                                st.rerun()
-                                else:
-                                    if st.button("Try Again Request", key=f"req_{exam['id']}", use_container_width=True):
-                                        supabase.table("exam_retake_requests").insert({"user_id": st.session_state.user_id, "exam_id": exam["id"], "status":"pending"}).execute()
-                                        st.success("Request sent."); st.rerun()
                             else:
                                 has_pwd = exam.get("password") and str(exam["password"]).strip()
-                                entered_pwd = st.text_input(f"Access Code for {exam['title']}", type="password", key=f"pwd_{exam['id']}") if has_pwd else ""
+                                entered_pwd = st.text_input(f"Access Code", type="password", key=f"pwd_{exam['id']}") if has_pwd else ""
                                 if st.button("Start Exam", key=f"btn_{exam['id']}", use_container_width=True):
                                     if has_pwd and entered_pwd.strip() != str(exam["password"]).strip():
                                         st.error("Wrong Password!")
@@ -4175,13 +3884,14 @@ def user_dashboard(preview_mode=False):
                                         st.rerun()
                     st.divider()
 
-# =========================
-# EXAM WORKSPACE
-# =========================
+# =========================================================================
+# ADVANCED LEETCODE-STYLE EXAM WORKSPACE VIEW WITH ANTI-CHEAT FULLSCREEN
+# =========================================================================
 def exam_workspace_view():
     questions = st.session_state.current_questions
     total_questions = len(questions)
     is_prog_exam = is_programming_exam(st.session_state.exam_id) if st.session_state.get("exam_id") else False
+    
     if is_prog_exam and not st.session_state.exam_submitted:
         qp = st.query_params
         if qp.get("malpractice") == "1":
@@ -4203,9 +3913,12 @@ def exam_workspace_view():
                 st.error(f"Auto submit failed: {e}")
                 return
         save_programming_exam_session(status="active")
+
     if total_questions == 0:
         st.warning("No questions in this exam.")
-        if st.button("Go Back"): st.session_state.start_exam = False; st.rerun()
+        if st.button("Go Back"): 
+            st.session_state.start_exam = False
+            st.rerun()
         return
 
     remaining_time = 0
@@ -4216,11 +3929,13 @@ def exam_workspace_view():
             time.sleep(1)
             try:
                 submit_exam_attempt(questions, include_time=False)
-                st.session_state.exam_submitted = True; st.rerun()
+                st.session_state.exam_submitted = True
+                st.rerun()
             except Exception as e:
                 st.error(f"Submit failed: {e}")
                 return
 
+    # RESULTS DISPLAY SHEET VIEW
     if st.session_state.exam_submitted:
         st.title(f" Results: {st.session_state.exam_title}")
         db_attempt = supabase.table("exam_attempts").select("*").eq("user_id", st.session_state.user_id).eq("exam_id", st.session_state.exam_id).execute().data
@@ -4229,7 +3944,7 @@ def exam_workspace_view():
             db_attempt = sorted(db_attempt, key=lambda att: 0 if att.get("id") == last_id else 1)
         if db_attempt:
             max_marks = get_exam_max_marks(questions)
-            st.markdown("###    Attempts")
+            st.markdown("### Attempts History")
             for idx, att in enumerate(reversed(db_attempt)):
                 pct = int((int(att.get("score") or 0) / max_marks) * 100) if max_marks else 0
                 st.info(f"Attempt {idx+1}: **{att['score']}/{max_marks}** ({pct}%)")
@@ -4252,268 +3967,286 @@ def exam_workspace_view():
             st.session_state.question_index = 0
             st.session_state.current_questions = []
             st.rerun()
+
+    # ACTIVE INTERACTIVE FRAME MATRIX VIEW
     else:
-        st.title(st.session_state.exam_title)
-        current = st.session_state.question_index
-        question = questions[current]
-        left, right = st.columns([4, 1])
-        with right:
-            mins, secs = divmod(remaining_time, 60)
-            st.components.v1.html(f"""
-                <div id="timer" style="font-size:2rem;font-weight:600;text-align:center;padding:12px;border-radius:8px;
-                    background:{'#fff3cd' if remaining_time<300 else '#e8f4fd'};
-                    color:{'#856404' if remaining_time<300 else '#0c63e4'};
-                    border:1px solid {'#ffc107' if remaining_time<300 else '#b6d4fe'};">
-                     <span id="countdown">{mins:02d}:{secs:02d}</span></div>
-                <script>
-                    var total={remaining_time};
-                    function tick(){{if(total<=0){{document.getElementById('countdown').innerText="00:00";return;}}
-                    total--;var m=Math.floor(total/60).toString().padStart(2,'0');var s=(total%60).toString().padStart(2,'0');
-                    document.getElementById('countdown').innerText=m+':'+s;
-                    if(total<300){{var el=document.getElementById('timer');el.style.background='#fff3cd';el.style.color='#856404';}}}}
-                    setInterval(tick,1000);
-                    setInterval(function(){{ window.parent.location.reload(); }}, 30000);
-                    function flagMalpractice(reason){{
-                        try {{
-                            var url = new URL(window.parent.location.href);
+        # FORCED INTERCEPT JS ENGINES (FOR ALL MULTI-TYPE EXAMS AS REQUESTED)
+        components.html(f"""
+            <div style="display:none;">Anti-Cheat Loaded</div>
+            <script>
+                var doc = window.parent.document;
+                var body = doc.body;
+
+                function triggerFullscreen() {{
+                    if (!doc.fullscreenElement) {{
+                        body.requestFullscreen().catch(err => {{
+                            console.log("Fullscreen activation failed: " + err.message);
+                        }});
+                    }}
+                }}
+
+                doc.addEventListener('click', triggerFullscreen);
+                triggerFullscreen();
+
+                function flagMalpractice(reason){{
+                    try {{
+                        var url = new URL(window.parent.location.href);
+                        if (url.searchParams.get('malpractice') !== '1') {{
                             url.searchParams.set('malpractice', '1');
                             url.searchParams.set('mal_reason', reason);
                             window.parent.location.href = url.toString();
-                        }} catch(e) {{}}
+                        }}
+                    }} catch(e) {{}}
+                }}
+
+                doc.addEventListener('visibilitychange', function(){{
+                    if (doc.hidden) flagMalpractice('Tab Switched / Screen Lost Focus');
+                }});
+
+                window.parent.addEventListener('blur', function() {{
+                    flagMalpractice('Window Focus Lost (Alt+Tab or Application Switch)');
+                }});
+            </script>
+        """, height=0)
+
+        # CONTROL CONTAINER COMPONENT PANELS
+        t_left, t_mid, t_right = st.columns([4, 2, 2])
+        with t_left:
+            st.markdown(f"<h2 style='margin:0; padding:0;'>💻 {st.session_state.exam_title}</h2>", unsafe_allow_html=True)
+        with t_mid:
+            mins, secs = divmod(remaining_time, 60)
+            components.html(f"""
+                <div id="timer" style="font-size:1.3rem; font-weight:600; text-align:center; padding:6px; border-radius:6px;
+                    background:{'#fff3cd' if remaining_time<300 else '#e8f4fd'};
+                    color:{'#856404' if remaining_time<300 else '#0c63e4'};
+                    border:1px solid {'#ffc107' if remaining_time<300 else '#b6d4fe'}; font-family:sans-serif;">
+                     ⏱️ Time Remaining: <span id="countdown">{mins:02d}:{secs:02d}</span>
+                </div>
+                <script>
+                    var total={remaining_time};
+                    function tick(){{
+                        if(total<=0){{document.getElementById('countdown').innerText="00:00";return;}}
+                        total--;var m=Math.floor(total/60).toString().padStart(2,'0');
+                        var s=(total%60).toString().padStart(2,'0');
+                        document.getElementById('countdown').innerText=m+':'+s;
                     }}
-                    document.addEventListener('visibilitychange', function(){{
-                        if (document.hidden) flagMalpractice('Tab switched or minimized');
-                    }});
-                </script>""", height=80)
-            st.divider()
-            st.subheader("Questions")
-            cols = st.columns(3)
-            for i in range(total_questions):
-                with cols[i % 3]:
-                    q_id = questions[i]["id"]
-                    label = f" {i+1}" if i==current else (f" {i+1}" if q_id in st.session_state.answers and st.session_state.answers[q_id] else f" {i+1}")
-                    if st.button(label, key=f"qnav_{i}", use_container_width=True):
-                        st.session_state.question_index = i; st.rerun()
-
-        with left:
-            hcol1, hcol2 = st.columns([4, 1])
-            with hcol1: st.subheader(f"Question {current+1}/{total_questions}")
-            with hcol2:
-                qid = question["id"]
-                already_spent = st.session_state.question_time_log.get(qid, 0)
-                st.components.v1.html(f"""
-                    <div style="background:#f0f4ff;border:1px solid #b6d4fe;border-radius:8px;padding:6px 10px;
-                        text-align:center;font-family:monospace;font-size:1.1rem;font-weight:600;color:#0c63e4;margin-top:8px;">
-                         <span id="qtimer">00:00</span></div>
-                    <script>var elapsed={already_spent};var qtimer=document.getElementById('qtimer');
-                    function qtick(){{elapsed++;var m=Math.floor(elapsed/60).toString().padStart(2,'0');var s=(elapsed%60).toString().padStart(2,'0');qtimer.innerText=m+':'+s;}}
-                    setInterval(qtick,1000);</script>""", height=55)
-
-            if question["type"] != "programming":
-                st.write(question["question"])
-            if question.get("image_url"): st.image(question["image_url"], width=350)
-            if qid not in st.session_state.question_start_time:
-                st.session_state.question_start_time[qid] = time.time()
-            stored_ans = st.session_state.answers.get(question["id"],"")
-
-            if question["type"] == "mcq":
-                opts = [
-                    ("A", question.get("option_a","")),
-                    ("B", question.get("option_b","")),
-                    ("C", question.get("option_c","")),
-                    ("D", question.get("option_d","")),
-                ]
-                # Custom CSS for option buttons
-                st.markdown("""
-                <style>
-                div[data-testid="stButton"] > button[kind="primary"] {
-                    background-color: #1a73e8 !important;
-                    color: white !important;
-                    border: 2px solid #1a73e8 !important;
-                    border-radius: 10px !important;
-                    padding: 12px 18px !important;
-                    font-size: 1rem !important;
-                    text-align: left !important;
-                    white-space: normal !important;
-                    height: auto !important;
-                }
-                div[data-testid="stButton"] > button[kind="secondary"] {
-                    background-color: #ffffff !important;
-                    color: #2c3e50 !important;
-                    border: 2px solid #d0d8e8 !important;
-                    border-radius: 10px !important;
-                    padding: 12px 18px !important;
-                    font-size: 1rem !important;
-                    text-align: left !important;
-                    white-space: normal !important;
-                    height: auto !important;
-                }
-                </style>""", unsafe_allow_html=True)
-                st.markdown("")
-                for lbl, otxt in opts:
-                    if not otxt:
-                        continue
-                    is_selected = (stored_ans == lbl or stored_ans == otxt)
-                    btn_label = f"{' ' if is_selected else ''}{lbl}. {otxt}"
-                    if st.button(btn_label, key=f"opt_{question['id']}_{lbl}",
-                                 use_container_width=True,
-                                 type="primary" if is_selected else "secondary"):
-                        st.session_state.answers[question["id"]] = lbl
-                        save_programming_exam_session(status="active")
-                        st.rerun()
-
-            elif question["type"] == "blank":
-                answer = st.text_input("Your Answer", value=stored_ans, key=f"text_{question['id']}")
-                if answer != stored_ans:
-                    st.session_state.answers[question["id"]] = answer
-                    save_programming_exam_session(status="active")
-            else:
-                meta = get_programming_meta(question)
-                max_marks = get_question_max_marks(question)
-                stored_code, stored_language = parse_program_answer(stored_ans, meta.get("language", "java"))
-                language_options = list(PROGRAMMING_LANGUAGE_LABELS.keys())
-                current_language_label = get_programming_language_meta(stored_language)["label"]
-                p_left, p_right = st.columns([1, 1])
-                with p_left:
-                    st.markdown("#### Problem")
-                    st.markdown(f"**{question['question']}**")
-                    if meta.get("description"):
-                        st.markdown(meta["description"])
-                    st.caption(f"Total Marks: {max_marks}")
-                    with st.expander("Sample test cases"):
-                        for idx, tc in enumerate(meta.get("test_cases", []), start=1):
-                            if tc.get("hidden", False):
-                                continue
-                            st.markdown(f"**Case {idx}**  {tc.get('marks', 0)} marks")
-                            st.code(f"Input:\n{tc.get('input','')}\n\nExpected Output:\n{tc.get('expected_output','')}", language="text")
-                with p_right:
-                    selected_language_label = st.selectbox(
-                        "Language",
-                        language_options,
-                        index=language_options.index(current_language_label) if current_language_label in language_options else 0,
-                        key=f"prog_language_{question['id']}"
-                    )
-                    selected_language = PROGRAMMING_LANGUAGE_LABELS[selected_language_label]
-                    lang_meta = get_programming_language_meta(selected_language)
-                    enable_textarea_tab_support()
-                    editor_value = stored_code if stored_code else ""
-                    answer = st.text_area(f"{lang_meta['label']} Program", value=editor_value, key=f"code_{question['id']}", height=360)
-                    st.session_state.answers[question["id"]] = {"code": answer, "language": selected_language}
-                    save_programming_exam_session(status="active")
-                    custom_input = st.text_area(
-                        "Custom Input",
-                        key=f"custom_input_{question['id']}",
-                        height=110,
-                        placeholder="Mee own input ikkada enter chesi Run Custom Input click cheyyandi..."
-                    )
-                    run_col, submit_prog_col, custom_col = st.columns(3)
-                    with run_col:
-                        run_tests_clicked = st.button("Run Tests", key=f"run_prog_{question['id']}", use_container_width=True)
-                    with submit_prog_col:
-                        submit_program_clicked = st.button("Submit Program", key=f"submit_prog_{question['id']}", type="primary", use_container_width=True)
-                    with custom_col:
-                        run_custom_clicked = st.button("Run Custom", key=f"run_custom_{question['id']}", use_container_width=True)
-
-                    if run_tests_clicked:
-                        with st.spinner("Program run avuthundi..."):
-                            st.session_state.program_run_results[str(question["id"])] = run_programming_test_cases(question, answer, selected_language)
-
-                    if submit_program_clicked:
-                        with st.spinner("Program submit avuthundi..."):
-                            score_data = run_programming_test_cases(question, answer, selected_language)
-                            st.session_state.program_run_results[str(question["id"])] = score_data
-                            st.session_state.program_submissions[str(question["id"])] = {"code": answer, "language": selected_language, "score_data": score_data}
-                            save_programming_exam_session(status="active")
-                            st.success(f"Program submitted: {score_data['earned']}/{score_data['total']} marks")
-
-                    saved_prog = st.session_state.program_submissions.get(str(question["id"]), {})
-                    if saved_prog.get("code") == answer and normalize_programming_language(saved_prog.get("language", selected_language)) == selected_language and saved_prog.get("score_data"):
-                        saved_score = saved_prog["score_data"]
-                        st.success(f"Saved for final submit: {saved_score['earned']}/{saved_score['total']} marks")
-                    elif saved_prog:
-                        st.warning("Code changed after Submit Program. Please submit this program again before final submit.")
-                    else:
-                        st.info("Final exam submit fast ga undali ante ee program ki Submit Program click cheyyandi.")
-
-                    if run_custom_clicked:
-                        with st.spinner("Custom input tho program run avuthundi..."):
-                            custom_result = run_programming_code(answer, custom_input, selected_language)
-                            custom_result["language"] = selected_language
-                            st.session_state.program_custom_results[str(question["id"])] = custom_result
-
-                    custom_data = st.session_state.program_custom_results.get(str(question["id"]))
-                    if custom_data and normalize_programming_language(custom_data.get("language", selected_language)) != selected_language:
-                        custom_data = None
-                    if custom_data:
-                        st.markdown("#### Custom Output")
-                        st.caption(f"Status: {custom_data.get('status','')}")
-                        if custom_data.get("stdout"):
-                            st.code(custom_data.get("stdout", ""), language="text")
-                        if custom_data.get("stderr"):
-                            st.caption("Error")
-                            st.code(custom_data.get("stderr", ""), language="text")
-
-                    run_data = st.session_state.program_run_results.get(str(question["id"]))
-                    if run_data and normalize_programming_language(run_data.get("language", selected_language)) != selected_language:
-                        run_data = None
-                    if run_data:
-                        st.markdown(f"#### Result: {run_data['earned']}/{run_data['total']} marks ({run_data['percentage']}%)")
-                        for res in run_data["results"]:
-                            with st.container(border=True):
-                                is_hidden = bool(res.get("hidden", False))
-                                badge = " Passed" if res["passed"] else " Failed"
-                                title = f"Hidden Test Case {res['case']}" if is_hidden else f"Test Case {res['case']}"
-                                st.markdown(f"**{title}**  {badge}  {res['marks']} marks")
-                                if is_hidden:
-                                    st.caption("Input/output hidden. Marks lo count avuthundi.")
-                                elif not res["passed"]:
-                                    st.caption(f"Status: {res.get('status','')}")
-                                    c_exp, c_act = st.columns(2)
-                                    with c_exp:
-                                        st.caption("Expected")
-                                        st.code(res.get("expected_output", ""), language="text")
-                                    with c_act:
-                                        st.caption("Your Output")
-                                        st.code(res.get("actual_output", ""), language="text")
-                                    if res.get("error"):
-                                        st.caption("Error")
-                                        st.code(res["error"], language="text")
-
-            def save_current_q_time():
-                qid_cur = question["id"]
+                    setInterval(tick,1000);
+                </script>""", height=45)
+        with t_right:
+            def save_current_q_time_action():
+                qid_cur = questions[st.session_state.question_index]["id"]
                 if qid_cur in st.session_state.question_start_time:
                     elapsed = int(time.time() - st.session_state.question_start_time[qid_cur])
                     prev = st.session_state.question_time_log.get(qid_cur, 0)
                     st.session_state.question_time_log[qid_cur] = prev + elapsed
                     del st.session_state.question_start_time[qid_cur]
 
-            nav_col1, nav_col2, pause_col, submit_col = st.columns([1, 1, 1.2, 2])
-            with nav_col1:
-                if st.button("Previous", disabled=(current==0), use_container_width=True):
-                    save_current_q_time(); st.session_state.question_index -= 1; save_programming_exam_session(status="active"); st.rerun()
-            with nav_col2:
-                if st.button("Next ", disabled=(current==total_questions-1), use_container_width=True):
-                    save_current_q_time(); st.session_state.question_index += 1; save_programming_exam_session(status="active"); st.rerun()
-            with pause_col:
-                if is_prog_exam and st.button("Pause & Back", use_container_width=True):
-                    save_current_q_time()
+            if st.button("🚀 SUBMIT FINAL TEST", type="primary", use_container_width=True, key="corner_submit_exam_btn"):
+                save_current_q_time_action()
+                try:
+                    save_programming_exam_session(status="active")
+                    submit_exam_attempt(questions, include_time=True, require_programming_submitted=is_prog_exam)
+                    st.session_state.question_time_log = {}
+                    st.session_state.question_start_time = {}
+                    st.session_state.program_run_results = {}
+                    st.session_state.program_submissions = {}
+                    st.session_state.exam_submitted = True
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Submit failed: {e}")
+
+        st.divider()
+
+        current = st.session_state.question_index
+        question = questions[current]
+        qid = question["id"]
+        
+        if qid not in st.session_state.question_start_time:
+            st.session_state.question_start_time[qid] = time.time()
+        stored_ans = st.session_state.answers.get(question["id"], "")
+
+        # LEETCODE FRAMES LOGIC DESIGN LAYOUT SETUP
+        frame_left, frame_right = st.columns([3, 4])
+
+        # ------------------------------------
+        # FRAME 1 (LEFT PANEL): QUESTION PORT
+        # ------------------------------------
+        with frame_left:
+            st.markdown("""
+                <div style="background-color:#1e1e1e; padding:8px; border-radius:6px; color:#ffffff; font-weight:bold; text-align:center; margin-bottom:10px;">
+                    📝 FRAME 1: QUESTION PORTAL
+                </div>
+            """, unsafe_allow_html=True)
+            
+            st.markdown("##### Navigation Dashboard Matrix")
+            nav_cols = st.columns(min(total_questions, 8))
+            for idx in range(total_questions):
+                with nav_cols[idx % 8]:
+                    if st.button(f"{idx+1}", key=f"f1_nav_{idx}", use_container_width=True, type="primary" if idx == current else "secondary"):
+                        save_current_q_time_action()
+                        st.session_state.question_index = idx
+                        st.rerun()
+            st.divider()
+
+            st.subheader(f"Question Item {current+1} / {total_questions}")
+            st.markdown(f"### {question['question']}")
+            if question.get("image_url"):
+                st.image(question["image_url"], use_container_width=True)
+            
+            if question["type"] == "mcq":
+                opts = [("A", question.get("option_a","")), ("B", question.get("option_b","")), ("C", question.get("option_c","")), ("D", question.get("option_d",""))]
+                for lbl, otxt in opts:
+                    if otxt:
+                        is_selected = (stored_ans == lbl or stored_ans == otxt)
+                        if st.button(f"{lbl}. {otxt}", key=f"f1_mcq_{qid}_{lbl}", use_container_width=True, type="primary" if is_selected else "secondary"):
+                            st.session_state.answers[qid] = lbl
+                            save_programming_exam_session(status="active")
+                            st.rerun()
+
+            elif question["type"] == "blank":
+                ans = st.text_input("Type localized response text parameters here:", value=stored_ans, key=f"f1_blank_{qid}")
+                if ans != stored_ans:
+                    st.session_state.answers[qid] = ans
+                    save_programming_exam_session(status="active")
+                    
+            else:
+                meta = get_programming_meta(question)
+                if meta.get("description"):
+                    st.markdown("#### Problem Description Constraints")
+                    st.info(meta["description"])
+                
+                st.markdown("#### Structural Testing Platform Assets")
+                for idx, tc in enumerate(meta.get("test_cases", []), start=1):
+                    if not tc.get("hidden", False):
+                        st.markdown(f"**Sample Setup Case {idx}:**")
+                        st.code(f"Input Data Stream:\n{tc.get('input','')}\n\nExpected Output Return:\n{tc.get('expected_output','')}", language="text")
+
+        # ------------------------------------
+        # FRAME 2 (RIGHT PANEL): CODE & TEST CASES CONSOLE
+        # ------------------------------------
+        with frame_right:
+            if question["type"] != "programming":
+                st.info("Isolated secondary workspace framework panels targeting objective index selections remain passive. Configure context metrics entirely using left viewport configurations.")
+            else:
+                meta = get_programming_meta(question)
+                stored_code, stored_language = parse_program_answer(stored_ans, meta.get("language", "java"))
+                
+                language_options = list(PROGRAMMING_LANGUAGE_LABELS.keys())
+                current_language_label = get_programming_language_meta(stored_language)["label"]
+                
+                selected_language_label = st.selectbox(
+                    "Target Platform Compilation Language Profile",
+                    language_options,
+                    index=language_options.index(current_language_label) if current_language_label in language_options else 0,
+                    key=f"f2_lang_{qid}"
+                )
+                selected_language = PROGRAMMING_LANGUAGE_LABELS[selected_language_label]
+                lang_meta = get_programming_language_meta(selected_language)
+
+                # FRAME 2 - PART A: CODE FRAME
+                st.markdown("""
+                    <div style="background-color:#0e1117; padding:8px; border-radius:6px; color:#4a90d9; font-weight:bold; font-size:0.9rem; margin-bottom:5px;">
+                        💻 FRAME 2 - PART 1: CODE EDITOR CANVAS
+                    </div>
+                """, unsafe_allow_html=True)
+                
+                enable_textarea_tab_support()
+                editor_value = stored_code if stored_code else lang_meta["default_code"]
+                answer_code = st.text_area(
+                    f"Platform Console {lang_meta['label']} Compiler Environment Interface:", 
+                    value=editor_value, 
+                    key=f"f2_editor_{qid}", 
+                    height=320
+                )
+                
+                st.session_state.answers[qid] = {"code": answer_code, "language": selected_language}
+                save_programming_exam_session(status="active")
+                
+                # FRAME 2 - PART B: TEST CASES CONSOLE LOG
+                st.markdown("""
+                    <div style="background-color:#0e1117; padding:8px; border-radius:6px; color:#2ea043; font-weight:bold; font-size:0.9rem; margin-top:15px; margin-bottom:5px;">
+                        📊 FRAME 2 - PART 2: CONSOLE LOG & TEST VERIFICATIONS
+                    </div>
+                """, unsafe_allow_html=True)
+                
+                custom_input = st.text_area(
+                    "Isolated Standard Input Custom Param Stream Buffer:", 
+                    key=f"f2_stdin_{qid}", 
+                    height=70, 
+                    placeholder="Provide string attributes lines targets directly into target routine threads..."
+                )
+
+                col_btn_run, col_btn_sub, col_btn_cust = st.columns(3)
+                with col_btn_run:
+                    if st.button("▶️ Run Test Cases", key=f"f2_action_run_{qid}", use_container_width=True):
+                        with st.spinner("Piping attributes through check routines..."):
+                            st.session_state.program_run_results[str(qid)] = run_programming_test_cases(question, answer_code, selected_language)
+                
+                with col_btn_sub:
+                    if st.button("📥 Submit Program", key=f"f2_action_sub_{qid}", type="primary", use_container_width=True):
+                        with st.spinner("Saving structural architecture rules assets..."):
+                            score_data = run_programming_test_cases(question, answer_code, selected_language)
+                            st.session_state.program_run_results[str(qid)] = score_data
+                            st.session_state.program_submissions[str(qid)] = {"code": answer_code, "language": selected_language, "score_data": score_data}
+                            save_programming_exam_session(status="active")
+                            st.success(f"Program registered metrics: {score_data['earned']}/{score_data['total']} passed.")
+
+                with col_btn_cust:
+                    if st.button("⚙️ Custom Run Check", key=f"f2_action_cust_{qid}", use_container_width=True):
+                        with st.spinner("Injecting static variables across runtime pipelines..."):
+                            custom_result = run_programming_code(answer_code, custom_input, selected_language)
+                            custom_result["language"] = selected_language
+                            st.session_state.program_custom_results[str(qid)] = custom_result
+
+                saved_prog = st.session_state.program_submissions.get(str(qid), {})
+                if saved_prog.get("code") == answer_code and saved_prog.get("score_data"):
+                    st.success("✅ Program integrity synchronized. Compilation snapshots aligned cleanly.")
+                elif saved_prog:
+                    st.warning("⚠️ Code structural asset parameters modified post explicit target snapshot save operations. Re-trigger validation loops.")
+
+                custom_data = st.session_state.program_custom_results.get(str(qid))
+                if custom_data and custom_data.get("language") == selected_language:
+                    st.markdown("##### 🚀 Runtime Custom System Output Profile:")
+                    st.code(custom_data.get("stdout","").strip(), language="text")
+                    if custom_data.get("stderr"):
+                        st.error(custom_data.get("stderr"))
+
+                run_data = st.session_state.program_run_results.get(str(qid))
+                if run_data and run_data.get("language") == selected_language:
+                    st.markdown(f"##### 🎯 Matrix Suite Validation: **{run_data['earned']}/{run_data['total']}** Marks Cleared")
+                    for res in run_data["results"]:
+                        is_hidden = bool(res.get("hidden", False))
+                        badge_status = "🟩 PASSED" if res["passed"] else "🟥 FAILED"
+                        title_label = f"Secure Hidden Case {res['case']}" if is_hidden else f"Public Sample Case {res['case']}"
+                        
+                        with st.container(border=True):
+                            st.markdown(f"**{title_label}** — {badge_status} ({res['marks']} Marks)")
+                            if is_hidden and not res["passed"]:
+                                st.caption("Isolated execution context target parameters mismatch detected.")
+                            elif not res["passed"]:
+                                st.text(f"Expected:\n{res.get('expected_output')}\nReceived Output:\n{res.get('actual_output')}")
+
+            st.divider()
+            f_prev, f_next, f_pause = st.columns([1, 1, 2])
+            with f_prev:
+                if st.button("⬅️ Previous Question", disabled=(current == 0), use_container_width=True, key="workspace_footer_prev"):
+                    save_current_q_time_action()
+                    st.session_state.question_index -= 1
+                    save_programming_exam_session(status="active")
+                    st.rerun()
+            with f_next:
+                if st.button("Next Question ➡️", disabled=(current == total_questions - 1), use_container_width=True, key="workspace_footer_next"):
+                    save_current_q_time_action()
+                    st.session_state.question_index += 1
+                    save_programming_exam_session(status="active")
+                    st.rerun()
+            with f_pause:
+                if is_prog_exam and st.button("⏸️ Save Session & Pause Workspace", use_container_width=True, key="workspace_footer_pause"):
+                    save_current_q_time_action()
                     save_programming_exam_session(status="active")
                     st.session_state.start_exam = False
                     st.session_state.current_questions = []
                     st.rerun()
-            with submit_col:
-                if st.button("Submit Exam", type="primary", use_container_width=True):
-                    save_current_q_time()
-                    try:
-                        save_programming_exam_session(status="active")
-                        submit_exam_attempt(questions, include_time=True, require_programming_submitted=True)
-                        st.session_state.question_time_log = {}
-                        st.session_state.question_start_time = {}
-                        st.session_state.program_run_results = {}
-                        st.session_state.program_submissions = {}
-                        st.session_state.exam_submitted = True; st.rerun()
-                    except Exception as e:
-                        st.error(f"Submit failed: {e}")
 
 # =========================
 # MAIN ROUTING
@@ -4532,5 +4265,3 @@ else:
         exam_workspace_view()
     else:
         user_dashboard(preview_mode=False)
-
-
