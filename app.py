@@ -610,6 +610,7 @@ create table if not exists programming_exam_sessions (
   question_time_log jsonb not null default '{}'::jsonb,
   status text not null default 'active',
   force_submit boolean not null default false,
+  force_fullscreen boolean not null default true,
   malpractice_count integer not null default 0,
   last_malpractice_reason text,
   updated_at timestamptz default now(),
@@ -1003,9 +1004,9 @@ def login():
                         st.query_params["uid"] = str(urow["id"])
                         st.query_params["role"] = urow["role"]
                         st.rerun()
-                    card_user_data = supabase.table("card_users").select("*").eq("app_pin", pin).execute()
-                    if card_user_data.data:
-                        urow = card_user_data.data[0]
+                    card_user_data = supabase.table("card_users").select("*").eq("app_pin", pin).execute().data
+                    if card_user_data:
+                        urow = card_user_data[0]
                         st.session_state.logged_in = True
                         st.session_state.role = "card_user"
                         st.session_state.user_id = urow["id"]
@@ -1482,13 +1483,12 @@ def show_student_progress_tab(user_id):
         return
 
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Overall Marks", f"{progress['overall_marks_pct']}%")
+    c1.metric("Overall Marks", f"{progress['overall_class_pct']}%")
     c2.metric("Marks", f"{progress['overall_marks_scored']}/{progress['overall_marks_total']}")
     c3.metric("Class Progress", f"{progress['overall_class_pct']}%")
     c4.metric("Pending", f"{len(progress['pending_classes'])} classes / {len(progress['pending_exams'])} exams")
 
-    st.progress(progress["overall_marks_pct"] / 100, text=f"Overall marks: {progress['overall_marks_pct']}%")
-    st.progress(progress["overall_class_pct"] / 100, text=f"Classes completed: {progress['overall_done_classes']}/{progress['overall_total_classes']}")
+    st.progress(progress["overall_class_pct"] / 100)
 
     st.subheader("Module-wise Progress")
     for item in progress["modules"]:
@@ -1498,40 +1498,10 @@ def show_student_progress_tab(user_id):
             m1, m2 = st.columns(2)
             with m1:
                 st.caption(f"Marks: {item['marks_scored']}/{item['marks_total']} ({item['marks_pct']}%)")
-                st.progress(item["marks_pct"] / 100)
+                st.progress(item['marks_pct'] / 100)
             with m2:
                 st.caption(f"Classes: {item['class_done']}/{item['class_total']} ({item['class_pct']}%)")
-                st.progress(item["class_pct"] / 100)
-
-    st.subheader("Pending Classes")
-    if not progress["pending_classes"]:
-        st.success("All classes complete ayyayi!")
-    else:
-        for cls in progress["pending_classes"]:
-            with st.container(border=True):
-                col_info, col_btn = st.columns([4, 1])
-                with col_info:
-                    st.markdown(f"**{cls.get('title', 'Class')}**")
-                    if cls.get("_submodule_title"):
-                        st.caption(cls["_submodule_title"])
-                with col_btn:
-                    if st.button("Open", key=f"prog_open_cls_{cls['id']}", use_container_width=True):
-                        focus_student_class(cls.get("id"))
-
-    st.subheader("Pending Exams")
-    if not progress["pending_exams"]:
-        st.success("Pending exams levu.")
-    else:
-        for row in progress["pending_exams"]:
-            exam = row["exam"]
-            with st.container(border=True):
-                col_info, col_btn = st.columns([4, 1])
-                with col_info:
-                    st.markdown(f"**{exam.get('title', 'Exam')}**")
-                    st.caption(f"{row['total_q']} questions  {exam.get('duration_mins', 30)} mins")
-                with col_btn:
-                    if st.button("Open", key=f"prog_open_exam_{exam['id']}", use_container_width=True, type="primary"):
-                        start_student_exam(exam)
+                st.progress(item['class_pct'] / 100)
 
 def show_code_practice_tab():
     st.title("Code Practice")
@@ -1586,9 +1556,6 @@ def show_code_practice_tab():
             result = run_programming_code(code, st.session_state.practice_input, selected_language)
         st.subheader("Output")
         st.code(result.get("stdout", ""), language="text")
-        if result.get("stderr"):
-            st.subheader("Errors")
-            st.code(result["stderr"], language="text")
 
 def show_programming_questions_tab(user_id):
     st.title("Programming Questions")
@@ -1796,11 +1763,11 @@ def admin_dashboard():
             st.markdown("### 📥 Bulk Programming Question CSV Upload Framework")
             st.markdown("""
             > **⚠️ CSV FORMAT GUIDELINES:**
-            > Content file values MUST use these exact standard headers:
+            > Content file values MUST use these exact headers:
             > - `question`: The main statement or problem definition.
             > - `type`: Use string constant **`programming`** exclusively.
             > - `correct_answer`: Standard preset signature value tag **`AUTO`**.
-            > - `hint`: Optional conceptual hints text strings.
+            > - `hint`: Optional hints.
             > - `explanation`: Special internal metadata initialization wrapper following exact string pattern layout rule:
             >   `__PROGRAMMING_META___{"description": "Problem statement specifications description text.", "language": "java", "test_cases": [{"input": "10", "expected_output": "20", "marks": 10, "hidden": false}]}`
             """)
@@ -1846,8 +1813,8 @@ def admin_dashboard():
                 st.warning("Create an exam loop layout structure instance first.")
 
         with ex_tab3:
-            st.subheader("Review Active Layout Sets Paper Review")
-            
+            st.subheader("Review Papers")
+
     elif menu == "Student Results & Ranks":
         st.write("Ranks logger framework.")
 
@@ -2012,7 +1979,6 @@ def exam_workspace_view():
         # INDEPENDENT LEFT PANEL (SCROLLABLE PROBLEM DESCRIPTION CONTAINER VIEW)
         # ------------------------------------
         with split_left:
-            # FIXED HEIGHT INTERNAL HEIGHT ATTRIBUTE EMBEDS AN INDEPENDENT CONTAINER IN LINE SCROLL ELEMENT SO CODE EDITOR SAYS STILL
             with st.container(height=640, border=True):
                 st.markdown("##### 🧭 Navigation Matrix Index Control Grid Dashboard")
                 matrix_cols = st.columns(min(total_questions, 8))
@@ -2096,7 +2062,7 @@ def exam_workspace_view():
                         showLineNumbers: true,
                         showGutter: true,
                         autoScrollEditorIntoView: true,
-                        behavioursEnabled: true, // TRIGGER AUTO CLOSE FLOWER BRACES PARENTHESIS COMPONENT SELECTIONS MATCHING TRAP PAIRS
+                        behavioursEnabled: true, 
                         wrap: true,
                         tabSize: 4,
                         useSoftTabs: true
@@ -2134,9 +2100,6 @@ def exam_workspace_view():
                 </script>
                 """, height=0)
                 
-                # EXTRACT TRANSLATED CODE BACK SAFELY INTO OPERATIONAL CONTEXT FOR STREAMLIT COMPILER ROUTINES ENGINE FLOW PIPES
-                # COLLECT STRING MATRICES DIRECTLY BEFORE PIPING TEST RUN OPERATIONS ARGUMENTS BLOCKS SET
-                # INLINE FALLBACK READER SYSTEM IMPLEMENTATION ASSIGNMENT CONTROL PIPELINES TARGET FIELDS RECOVERY BLOCK
                 st.caption("Active Canvas Safe Mode Verification: Ensure explicit runtime compilation triggers below are hit before testing final structures array templates evaluation bounds loops.")
                 
                 # SPLIT FRAME 2 - PART B: TEST CASES CONSOLE FIELD VIEW
@@ -2150,23 +2113,27 @@ def exam_workspace_view():
 
                 col_run, col_sub, col_cust = st.columns(3)
                 with col_run:
-                    if st.button("▶ " + "Run Testing Suite Matrix Array Checks", key=f"action_trigger_suite_run_execution_key_id_{qid}", use_container_width=True):
+                    if st.button("▶️ Execute Testing Array Suite", key=f"action_trigger_suite_run_execution_key_id_{qid}", use_container_width=True):
                         with st.spinner("Piping code statements across local tracking verification pipeline check suites..."):
-                            st.session_state.program_run_results[str(qid)] = run_programming_test_cases(question, answer_code, selected_language)
+                            # SAFE READ FALLBACK INTERPOLATION FROM CACHED STATE VARIABLE MAP TO RECOVERY LAYER
+                            current_code_value = st.session_state.answers.get(qid, {}).get("code", editor_initial_value) if isinstance(st.session_state.answers.get(qid), dict) else editor_initial_value
+                            st.session_state.program_run_results[str(qid)] = run_programming_test_cases(question, current_code_value, selected_language)
                 
                 with col_sub:
-                    if st.button("📥 Commit Target Program Asset Model", key=f"action_trigger_explicit_program_submission_save_key_id_{qid}", type="primary", use_container_width=True):
+                    if st.button("📥 Commit Target Program Asset", key=f"action_trigger_explicit_program_submission_save_key_id_{qid}", type="primary", use_container_width=True):
                         with st.spinner("Compiling static optimization analytics validation rules blocks..."):
-                            score_data = run_programming_test_cases(question, answer_code, selected_language)
+                            current_code_value = st.session_state.answers.get(qid, {}).get("code", editor_initial_value) if isinstance(st.session_state.answers.get(qid), dict) else editor_initial_value
+                            score_data = run_programming_test_cases(question, current_code_value, selected_language)
                             st.session_state.program_run_results[str(qid)] = score_data
-                            st.session_state.program_submissions[str(qid)] = {"code": answer_code, "language": selected_language, "score_data": score_data}
+                            st.session_state.program_submissions[str(qid)] = {"code": current_code_value, "language": selected_language, "score_data": score_data}
                             save_programming_exam_session(status="active")
                             st.success(f"Snapshot structural integrity recorded: {score_data['earned']}/{score_data['total']} checks successfully validated.")
 
                 with col_cust:
                     if st.button("🔧 Custom Check Output", key=f"action_trigger_custom_isolated_execution_test_pipe_key_id_{qid}", use_container_width=True):
                         with st.spinner("Running process threads with customized custom console value parameters array string inputs..."):
-                            custom_result = run_programming_code(answer_code, custom_input, selected_language)
+                            current_code_value = st.session_state.answers.get(qid, {}).get("code", editor_initial_value) if isinstance(st.session_state.answers.get(qid), dict) else editor_initial_value
+                            custom_result = run_programming_code(current_code_value, custom_input, selected_language)
                             custom_result["language"] = selected_language
                             st.session_state.program_custom_results[str(qid)] = custom_result
 
@@ -2175,8 +2142,15 @@ def exam_workspace_view():
                 if run_data and run_data.get("language") == selected_language:
                     st.markdown(f"###### System Diagnostics Trace Sheet: Verification Suite Result Performance Metric Allocation Level: **{run_data['earned']}/{run_data['total']}**")
                     for res in run_data["results"]:
-                        badge = "🟩 PASSED SUCCESSFULLY" if res["passed"] else "🟥 DISCREPANCY DETECTED FAILED"
-                        st.markdown(f"- **Test Case Record Asset {res['case']}**: {badge} — Earned Score Level: {res['marks']}")
+                        badge = "🟩 PASSED SUCCESSFULLY" if res["passed"] else "🟥 FAILED"
+                        title_label = f"Secure Hidden Case {res['case']}" if bool(res.get("hidden", False)) else f"Public Sample Case {res['case']}"
+                        
+                        with st.container(border=True):
+                            st.markdown(f"**{title_label}** — {badge} ({res['marks']} Marks)")
+                            if bool(res.get("hidden", False)) and not res["passed"]:
+                                st.caption("Isolated execution context target parameters mismatch detected.")
+                            elif not res["passed"]:
+                                st.text(f"Expected:\n{res.get('expected_output')}\nReceived Output:\n{res.get('actual_output')}")
 
             # FOOTER FRAME INTERACTION CONTROL LEVEL NAV MATRIX PANEL
             st.divider()
@@ -2194,7 +2168,7 @@ def exam_workspace_view():
                     save_programming_exam_session(status="active")
                     st.rerun()
             with b_pause:
-                if st.button("⏸️ Freeze Active Session State & Return Dash Panel Interface Matrix Portal", use_container_width=True, key="system_footer_navigation_pause_session_exit_cell_trigger_call"):
+                if is_prog_exam and st.button("⏸️ Freeze Active Session State & Return Dash Panel Interface Matrix Portal", use_container_width=True, key="system_footer_navigation_pause_session_exit_cell_trigger_call"):
                     save_current_q_time_action()
                     save_programming_exam_session(status="active")
                     st.session_state.start_exam = False
