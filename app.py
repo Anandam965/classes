@@ -743,22 +743,91 @@ def inject_programming_exam_shell(is_prog_exam=True):
         .vscode-hints {
             color: #94a3b8;
         }
+        .ide-code-frame {
+            position: relative !important;
+            background: #10141d !important;
+            border: 1px solid #2d3748 !important;
+            border-radius: 0 0 8px 8px !important;
+            overflow: hidden !important;
+            min-height: 395px !important;
+        }
+        .ide-code-frame:focus-within {
+            border-color: #4f8cff !important;
+            box-shadow: 0 0 0 1px #4f8cff !important;
+        }
+        .ide-line-gutter {
+            position: absolute;
+            inset: 0 auto 0 0;
+            width: 54px;
+            padding: 12px 8px 12px 0;
+            overflow: hidden;
+            background: #0b1020;
+            border-right: 1px solid #334155;
+            color: #64748b;
+            font-family: Consolas, "Cascadia Code", "Courier New", monospace;
+            font-size: 14px;
+            line-height: 1.55;
+            text-align: right;
+            user-select: none;
+            white-space: pre;
+            z-index: 1;
+        }
+        .ide-highlight-layer {
+            position: absolute;
+            inset: 0 0 0 54px;
+            margin: 0;
+            padding: 12px 14px;
+            overflow: hidden;
+            color: #edf2ff;
+            background: transparent;
+            font-family: Consolas, "Cascadia Code", "Courier New", monospace;
+            font-size: 14px;
+            line-height: 1.55;
+            tab-size: 4;
+            white-space: pre-wrap;
+            word-break: normal;
+            overflow-wrap: normal;
+            pointer-events: none;
+            z-index: 1;
+        }
+        .ide-highlight-layer code {
+            font: inherit;
+            color: inherit;
+            white-space: inherit;
+        }
+        .ide-token-keyword { color: #c586c0; }
+        .ide-token-type { color: #4ec9b0; }
+        .ide-token-string { color: #ce9178; }
+        .ide-token-number { color: #b5cea8; }
+        .ide-token-comment { color: #6a9955; }
+        .ide-token-function { color: #dcdcaa; }
         .ide-wrap textarea {
+            position: relative !important;
+            z-index: 2 !important;
             font-family: Consolas, "Cascadia Code", "Courier New", monospace !important;
             font-size: 14px !important;
             line-height: 1.55 !important;
             tab-size: 4;
-            background: #10141d !important;
-            color: #edf2ff !important;
-            border: 1px solid #2d3748 !important;
-            border-radius: 0 8px 8px 0 !important;
-            padding-left: 58px !important;
-            caret-color: #70e1ff;
-            background-image: linear-gradient(to right, #0b1020 0, #0b1020 46px, #334155 47px, transparent 48px) !important;
+            background: transparent !important;
+            color: transparent !important;
+            -webkit-text-fill-color: transparent !important;
+            border: 0 !important;
+            border-radius: 0 !important;
+            padding: 12px 14px 12px 68px !important;
+            caret-color: #70e1ff !important;
+            resize: vertical !important;
+            min-height: 395px !important;
+            white-space: pre-wrap !important;
+            overflow-wrap: normal !important;
+        }
+        .ide-wrap textarea::selection {
+            background: rgba(79, 140, 255, 0.35) !important;
+            -webkit-text-fill-color: transparent !important;
         }
         .ide-wrap textarea:focus {
-            border-color: #4f8cff !important;
-            box-shadow: 0 0 0 1px #4f8cff !important;
+            border-color: transparent !important;
+            box-shadow: none !important;
+            outline: none !important;
         }
         .console-card {
             border: 1px solid #d9e1ef;
@@ -790,6 +859,127 @@ def inject_programming_exam_shell(is_prog_exam=True):
     )
 
 
+
+def inject_vscode_editor_styles():
+    st.markdown(
+        """
+        <style>
+        .vscode-shell {
+            border: 1px solid #263243;
+            border-radius: 8px;
+            overflow: hidden;
+            background: #0f1724;
+            box-shadow: 0 10px 28px rgba(15, 23, 36, 0.18);
+            margin-bottom: -0.45rem;
+        }
+        .vscode-titlebar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.75rem;
+            background: #1f2937;
+            color: #cbd5e1;
+            padding: 0.45rem 0.7rem;
+            font-size: 0.78rem;
+            border-bottom: 1px solid #334155;
+        }
+        .vscode-dots { display: flex; gap: 0.35rem; }
+        .vscode-dots span {
+            width: 10px;
+            height: 10px;
+            border-radius: 999px;
+            display: inline-block;
+        }
+        .vscode-dots span:nth-child(1) { background: #ef4444; }
+        .vscode-dots span:nth-child(2) { background: #f59e0b; }
+        .vscode-dots span:nth-child(3) { background: #22c55e; }
+        .vscode-file { color: #e2e8f0; font-weight: 650; }
+        .vscode-hints { color: #94a3b8; }
+        .ide-code-frame {
+            position: relative !important;
+            background: #10141d !important;
+            border: 1px solid #2d3748 !important;
+            border-radius: 0 0 8px 8px !important;
+            overflow: hidden !important;
+            min-height: 360px !important;
+        }
+        .ide-code-frame:focus-within {
+            border-color: #4f8cff !important;
+            box-shadow: 0 0 0 1px #4f8cff !important;
+        }
+        .ide-line-gutter {
+            position: absolute;
+            inset: 0 auto 0 0;
+            width: 54px;
+            padding: 12px 8px 12px 0;
+            overflow: hidden;
+            background: #0b1020;
+            border-right: 1px solid #334155;
+            color: #64748b;
+            font-family: Consolas, "Cascadia Code", "Courier New", monospace;
+            font-size: 14px;
+            line-height: 1.55;
+            text-align: right;
+            user-select: none;
+            white-space: pre;
+            z-index: 1;
+        }
+        .ide-highlight-layer {
+            position: absolute;
+            inset: 0 0 0 54px;
+            margin: 0;
+            padding: 12px 14px;
+            overflow: hidden;
+            color: #edf2ff;
+            background: transparent;
+            font-family: Consolas, "Cascadia Code", "Courier New", monospace;
+            font-size: 14px;
+            line-height: 1.55;
+            tab-size: 4;
+            white-space: pre-wrap;
+            word-break: normal;
+            overflow-wrap: normal;
+            pointer-events: none;
+            z-index: 1;
+        }
+        .ide-highlight-layer code { font: inherit; color: inherit; white-space: inherit; }
+        .ide-token-keyword { color: #c586c0; }
+        .ide-token-type { color: #4ec9b0; }
+        .ide-token-string { color: #ce9178; }
+        .ide-token-number { color: #b5cea8; }
+        .ide-token-comment { color: #6a9955; }
+        .ide-token-function { color: #dcdcaa; }
+        .ide-wrap textarea {
+            position: relative !important;
+            z-index: 2 !important;
+            font-family: Consolas, "Cascadia Code", "Courier New", monospace !important;
+            font-size: 14px !important;
+            line-height: 1.55 !important;
+            tab-size: 4;
+            background: transparent !important;
+            color: transparent !important;
+            -webkit-text-fill-color: transparent !important;
+            border: 0 !important;
+            border-radius: 0 !important;
+            padding: 12px 14px 12px 68px !important;
+            caret-color: #70e1ff !important;
+            resize: vertical !important;
+            white-space: pre-wrap !important;
+            overflow-wrap: normal !important;
+        }
+        .ide-wrap textarea::selection {
+            background: rgba(79, 140, 255, 0.35) !important;
+            -webkit-text-fill-color: transparent !important;
+        }
+        .ide-wrap textarea:focus {
+            border-color: transparent !important;
+            box-shadow: none !important;
+            outline: none !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
 def enable_fullscreen_exam_lock():
     components.html(
         """
@@ -874,9 +1064,57 @@ def enable_ide_textarea_behaviour(question_id, language="java"):
                 ta.dataset[key] = "1";
                 const wrapper = ta.closest('[data-testid="stTextArea"]');
                 if (wrapper) wrapper.classList.add("ide-wrap");
+                const frame = ta.parentElement;
+                if (frame) frame.classList.add("ide-code-frame");
+                let gutter = frame ? frame.querySelector(".ide-line-gutter") : null;
+                if (!gutter && frame) {{
+                    gutter = doc.createElement("div");
+                    gutter.className = "ide-line-gutter";
+                    frame.insertBefore(gutter, ta);
+                }}
+                let highlight = frame ? frame.querySelector(".ide-highlight-layer") : null;
+                if (!highlight && frame) {{
+                    highlight = doc.createElement("pre");
+                    highlight.className = "ide-highlight-layer";
+                    const codeEl = doc.createElement("code");
+                    highlight.appendChild(codeEl);
+                    frame.insertBefore(highlight, ta);
+                }}
                 ta.setAttribute("spellcheck", "false");
                 ta.setAttribute("autocomplete", "off");
                 ta.setAttribute("autocapitalize", "off");
+
+                function escapeHtml(value) {{
+                    return value
+                        .replace(/&/g, "&amp;")
+                        .replace(/</g, "&lt;")
+                        .replace(/>/g, "&gt;");
+                }}
+
+                function highlightSyntax(source) {{
+                    let safe = escapeHtml(source || " ");
+                    safe = safe.replace(/(\\/\\/.*?$|#.*?$|\\/\\*[\\s\\S]*?\\*\\/)/gm, '<span class="ide-token-comment">$1</span>');
+                    safe = safe.replace(/(&quot;.*?&quot;|'.*?')/g, '<span class="ide-token-string">$1</span>');
+                    safe = safe.replace(/\\b(\\d+(?:\\.\\d+)?)\\b/g, '<span class="ide-token-number">$1</span>');
+                    safe = safe.replace(/\\b(public|private|protected|class|static|void|int|long|double|float|boolean|char|String|if|else|for|while|do|switch|case|break|continue|return|new|try|catch|finally|import|package|include|using|namespace|def|elif|in|range|print|None|True|False)\\b/g, function(match) {{
+                        return /^(int|long|double|float|boolean|char|String)$/.test(match)
+                            ? '<span class="ide-token-type">' + match + '</span>'
+                            : '<span class="ide-token-keyword">' + match + '</span>';
+                    }});
+                    safe = safe.replace(/\\b([A-Za-z_][A-Za-z0-9_]*)\\s*(?=\\()/g, '<span class="ide-token-function">$1</span>');
+                    return safe;
+                }}
+
+                function syncEditorChrome() {{
+                    const lines = Math.max(1, ta.value.split("\\n").length);
+                    if (gutter) gutter.textContent = Array.from({{ length: lines }}, (_, idx) => idx + 1).join("\\n");
+                    if (highlight) {{
+                        highlight.firstChild.innerHTML = highlightSyntax(ta.value) + (ta.value.endsWith("\\n") ? "\\n" : "");
+                        highlight.scrollTop = ta.scrollTop;
+                        highlight.scrollLeft = ta.scrollLeft;
+                    }}
+                    if (gutter) gutter.scrollTop = ta.scrollTop;
+                }}
 
                 function autoPair(open, close) {{
                     const start = ta.selectionStart;
@@ -919,6 +1157,10 @@ def enable_ide_textarea_behaviour(question_id, language="java"):
                     const match = prefix.match(/[A-Za-z_][A-Za-z0-9_]*$/);
                     return match ? match[0] : "";
                 }}
+
+                ta.addEventListener("input", syncEditorChrome);
+                ta.addEventListener("scroll", syncEditorChrome);
+                syncEditorChrome();
 
                 ta.addEventListener('keydown', function (event) {{
                     const pairs = {{ "(": ")", "[": "]", "{{": "}}", '"': '"', "'": "'" }};
@@ -2074,10 +2316,25 @@ def show_code_practice_tab():
     selected_language = PROGRAMMING_LANGUAGE_LABELS[selected_label]
     st.session_state.practice_language = selected_language
     lang_meta = get_programming_language_meta(selected_language)
+    inject_vscode_editor_styles()
+    enable_textarea_tab_support()
+    enable_ide_textarea_behaviour(f"practice_{selected_language}", selected_language)
 
     if selected_language not in st.session_state.practice_code_by_language:
         st.session_state.practice_code_by_language[selected_language] = lang_meta["default_code"]
 
+    st.markdown(
+        f"""
+        <div class="vscode-shell">
+            <div class="vscode-titlebar">
+                <div class="vscode-dots"><span></span><span></span><span></span></div>
+                <div class="vscode-file">{lang_meta.get('file_name', 'solution.txt')}</div>
+                <div class="vscode-hints">Tab: indent/snippet | brackets auto-close</div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
     st.session_state.practice_code_by_language[selected_language] = st.text_area(
         f"{lang_meta['label']} Code",
         value=st.session_state.practice_code_by_language[selected_language],
@@ -2804,7 +3061,7 @@ def render_suprabhatam_reader(slokas=None):
         drawLanguageButtons();
         titleEl.textContent = sloka.title || `Slokam ${index + 1}`;
         const text = (sloka.languages[language] || "").trim() || "Selected language text inka add cheyyaledu.";
-        textEl.textContent = `“${text}”`;
+        textEl.textContent = `â€œ${text}â€`;
         meaningEl.textContent = sloka.meaning ? `Meaning: ${sloka.meaning}` : "";
         imageBox.innerHTML = sloka.image_url ? `<img src="${sloka.image_url}" alt="">` : "";
         counter.textContent = `Slokam ${index + 1} / ${slokas.length}`;
@@ -5185,5 +5442,6 @@ else:
         exam_workspace_view()
     else:
         user_dashboard(preview_mode=False)
+
 
 
