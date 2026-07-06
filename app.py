@@ -704,6 +704,45 @@ def inject_programming_exam_shell(is_prog_exam=True):
             margin: 0.65rem 0;
             background: #fbfcff;
         }
+        .vscode-shell {
+            border: 1px solid #263243;
+            border-radius: 8px;
+            overflow: hidden;
+            background: #0f1724;
+            box-shadow: 0 10px 28px rgba(15, 23, 36, 0.18);
+            margin-bottom: -0.45rem;
+        }
+        .vscode-titlebar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.75rem;
+            background: #1f2937;
+            color: #cbd5e1;
+            padding: 0.45rem 0.7rem;
+            font-size: 0.78rem;
+            border-bottom: 1px solid #334155;
+        }
+        .vscode-dots {
+            display: flex;
+            gap: 0.35rem;
+        }
+        .vscode-dots span {
+            width: 10px;
+            height: 10px;
+            border-radius: 999px;
+            display: inline-block;
+        }
+        .vscode-dots span:nth-child(1) { background: #ef4444; }
+        .vscode-dots span:nth-child(2) { background: #f59e0b; }
+        .vscode-dots span:nth-child(3) { background: #22c55e; }
+        .vscode-file {
+            color: #e2e8f0;
+            font-weight: 650;
+        }
+        .vscode-hints {
+            color: #94a3b8;
+        }
         .ide-wrap textarea {
             font-family: Consolas, "Cascadia Code", "Courier New", monospace !important;
             font-size: 14px !important;
@@ -715,6 +754,7 @@ def inject_programming_exam_shell(is_prog_exam=True):
             border-radius: 0 8px 8px 0 !important;
             padding-left: 58px !important;
             caret-color: #70e1ff;
+            background-image: linear-gradient(to right, #0b1020 0, #0b1020 46px, #334155 47px, transparent 48px) !important;
         }
         .ide-wrap textarea:focus {
             border-color: #4f8cff !important;
@@ -819,13 +859,14 @@ def enable_fullscreen_exam_lock():
     )
 
 
-def enable_ide_textarea_behaviour(question_id):
+def enable_ide_textarea_behaviour(question_id, language="java"):
     components.html(
         f"""
         <script>
         (function () {{
             const doc = window.parent.document;
             const key = "ideReady_{question_id}";
+            const language = "{normalize_programming_language(language)}";
             function enhance() {{
                 const areas = Array.from(doc.querySelectorAll('textarea'));
                 const ta = areas.find(el => (el.getAttribute('aria-label') || '').includes('Program')) || areas[0];
@@ -833,6 +874,9 @@ def enable_ide_textarea_behaviour(question_id):
                 ta.dataset[key] = "1";
                 const wrapper = ta.closest('[data-testid="stTextArea"]');
                 if (wrapper) wrapper.classList.add("ide-wrap");
+                ta.setAttribute("spellcheck", "false");
+                ta.setAttribute("autocomplete", "off");
+                ta.setAttribute("autocapitalize", "off");
 
                 function autoPair(open, close) {{
                     const start = ta.selectionStart;
@@ -842,10 +886,53 @@ def enable_ide_textarea_behaviour(question_id):
                     ta.dispatchEvent(new Event('input', {{ bubbles: true }}));
                 }}
 
+                function insertSnippet(text, backOffset) {{
+                    const start = ta.selectionStart;
+                    const end = ta.selectionEnd;
+                    ta.setRangeText(text, start, end, "end");
+                    const pos = start + text.length - (backOffset || 0);
+                    ta.selectionStart = ta.selectionEnd = pos;
+                    ta.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                }}
+
+                const snippets = {{
+                    java: {{
+                        "main": "public static void main(String[] args) {{\\n    \\n}}",
+                        "sout": "System.out.println();",
+                        "fori": "for (int i = 0; i < n; i++) {{\\n    \\n}}"
+                    }},
+                    c: {{
+                        "main": "int main() {{\\n    \\n    return 0;\\n}}",
+                        "printf": "printf(\"%d\\\\n\", );",
+                        "fori": "for (int i = 0; i < n; i++) {{\\n    \\n}}"
+                    }},
+                    python: {{
+                        "main": "def main():\\n    \\n\\nif __name__ == \"__main__\":\\n    main()",
+                        "fori": "for i in range(n):\\n    ",
+                        "print": "print()"
+                    }}
+                }};
+
+                function currentWord() {{
+                    const start = ta.selectionStart;
+                    const prefix = ta.value.slice(0, start);
+                    const match = prefix.match(/[A-Za-z_][A-Za-z0-9_]*$/);
+                    return match ? match[0] : "";
+                }}
+
                 ta.addEventListener('keydown', function (event) {{
                     const pairs = {{ "(": ")", "[": "]", "{{": "}}", '"': '"', "'": "'" }};
                     if (event.key === "Tab") {{
                         event.preventDefault();
+                        const word = currentWord();
+                        const langSnippets = snippets[language] || {{}};
+                        if (word && langSnippets[word]) {{
+                            const start = ta.selectionStart - word.length;
+                            const end = ta.selectionStart;
+                            ta.setRangeText(langSnippets[word], start, end, "end");
+                            ta.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                            return;
+                        }}
                         const start = ta.selectionStart;
                         const end = ta.selectionEnd;
                         ta.setRangeText("    ", start, end, "end");
@@ -873,6 +960,101 @@ def enable_ide_textarea_behaviour(question_id):
         </script>
         """,
         height=0,
+    )
+
+def inject_student_home_styles():
+    st.markdown(
+        """
+        <style>
+        .student-home-hero {
+            border: 1px solid #dbe3ef;
+            border-radius: 8px;
+            padding: 1rem 1.1rem;
+            background: linear-gradient(135deg, #ffffff 0%, #f6f9ff 58%, #f7fff9 100%);
+            margin-bottom: 0.8rem;
+        }
+        .student-home-hero h2 {
+            margin: 0 0 0.25rem;
+            color: #142033;
+            font-size: 1.35rem;
+        }
+        .student-home-hero p {
+            margin: 0;
+            color: #5b6778;
+            font-size: 0.92rem;
+        }
+        .home-stat-row {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 0.75rem;
+            margin: 0.75rem 0 1rem;
+        }
+        .home-stat {
+            border: 1px solid #dde5f1;
+            border-radius: 8px;
+            padding: 0.85rem;
+            background: #ffffff;
+        }
+        .home-stat small {
+            color: #66758a;
+            font-weight: 650;
+        }
+        .home-stat strong {
+            display: block;
+            color: #162238;
+            font-size: 1.2rem;
+            margin-top: 0.2rem;
+        }
+        .module-strip {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1rem;
+            padding: 0.2rem 0 0.55rem;
+            border-bottom: 1px solid #edf1f7;
+            margin-bottom: 0.65rem;
+        }
+        .module-strip h3 {
+            margin: 0;
+            color: #172033;
+            font-size: 1.05rem;
+        }
+        .module-strip span {
+            color: #536174;
+            font-size: 0.86rem;
+            font-weight: 650;
+        }
+        .class-card {
+            border: 1px solid #e0e7f2;
+            border-radius: 8px;
+            padding: 0.85rem;
+            background: #ffffff;
+            margin: 0.55rem 0 0.75rem;
+        }
+        .class-title {
+            color: #172033;
+            font-weight: 750;
+            font-size: 1rem;
+            margin-bottom: 0.25rem;
+        }
+        .exam-chip {
+            display: inline-flex;
+            align-items: center;
+            border: 1px solid #cbd7ea;
+            border-radius: 999px;
+            padding: 0.18rem 0.55rem;
+            background: #f8fbff;
+            color: #24364f;
+            font-size: 0.82rem;
+            font-weight: 650;
+            margin: 0.2rem 0 0.45rem;
+        }
+        @media (max-width: 800px) {
+            .home-stat-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
     )
 
 def get_question_max_marks(question):
@@ -1950,47 +2132,48 @@ def show_java_practice_tab():
 def show_programming_questions_tab(user_id):
     st.title("Programming Questions")
     exams = supabase.table("exams").select("*").eq("enabled", True).execute().data or []
-    rows = []
+    exam_rows = []
     for exam in exams:
         q_rows = supabase.table("questions").select("*").eq("exam_id", exam["id"]).eq("type", "programming").execute().data or []
-        for q in q_rows:
-            rows.append({"exam": exam, "question": q})
+        if q_rows:
+            exam_rows.append({"exam": exam, "questions": q_rows})
 
-    if not rows:
+    if not exam_rows:
         st.info("Programming questions levu.")
         return
 
-    h1, h2, h3, h4 = st.columns([1, 5, 2, 2])
-    h1.markdown("**No**")
-    h2.markdown("**Name**")
-    h3.markdown("**Marks**")
-    h4.markdown("**Action**")
-
-    for idx, row in enumerate(rows, start=1):
+    st.caption("Admin oka exam lo 5 programs add cheste, ikkada single exam card laga kanipistundi. Start chesthe aa 5 questions same exam workspace lo vastayi.")
+    for idx, row in enumerate(exam_rows, start=1):
         exam = row["exam"]
-        q = row["question"]
-        attempted = user_attempted_question(user_id, q["id"])
-        marks = get_question_max_marks(q)
-        c_no, c_name, c_marks, c_action = st.columns([1, 5, 2, 2])
-        with c_no:
-            st.write(idx)
-        with c_name:
-            st.markdown(f"**{q.get('question', 'Untitled')}**")
-            st.caption(f"Exam: {exam.get('title', '')}")
-        with c_marks:
-            st.write(marks)
-        with c_action:
-            label = "Attempted / Solve Again" if attempted else "Solve"
-            has_pwd = exam.get("password") and str(exam.get("password")).strip()
-            entered_pwd = ""
-            if has_pwd:
-                entered_pwd = st.text_input("Access Code", type="password", key=f"prog_pwd_{q['id']}", label_visibility="collapsed")
-            if st.button(label, key=f"solve_prog_{q['id']}", use_container_width=True, type="primary" if not attempted else "secondary"):
-                if has_pwd and entered_pwd.strip() != str(exam.get("password")).strip():
-                    st.error("Wrong Password!")
-                else:
-                    start_exam_with_questions(exam, [q])
-                    st.rerun()
+        q_rows = row["questions"]
+        total_marks = get_exam_max_marks(q_rows)
+        attempted_count = sum(1 for q in q_rows if user_attempted_question(user_id, q["id"]))
+        attempted = attempted_count == len(q_rows)
+        with st.container(border=True):
+            c_name, c_meta, c_action = st.columns([5, 2, 2])
+            with c_name:
+                st.markdown(f"### {idx}. {exam.get('title', 'Programming Exam')}")
+                preview_names = ", ".join(str(q.get("question", "Untitled")) for q in q_rows[:3])
+                if len(q_rows) > 3:
+                    preview_names += f" + {len(q_rows) - 3} more"
+                st.caption(preview_names)
+            with c_meta:
+                st.metric("Programs", len(q_rows))
+                st.caption(f"Marks: {total_marks}")
+                st.caption(f"Duration: {exam.get('duration_mins', 30)} mins")
+                st.caption(f"Done: {attempted_count}/{len(q_rows)}")
+            with c_action:
+                label = "Attempted / Solve Again" if attempted else "Start Exam"
+                has_pwd = exam.get("password") and str(exam.get("password")).strip()
+                entered_pwd = ""
+                if has_pwd:
+                    entered_pwd = st.text_input("Access Code", type="password", key=f"prog_pwd_exam_{exam['id']}", label_visibility="collapsed")
+                if st.button(label, key=f"solve_prog_exam_{exam['id']}", use_container_width=True, type="primary" if not attempted else "secondary"):
+                    if has_pwd and entered_pwd.strip() != str(exam.get("password")).strip():
+                        st.error("Wrong Password!")
+                    else:
+                        start_exam_with_questions(exam, q_rows)
+                        st.rerun()
 
 # =========================
 # REVIEW SHEET (styled like screenshot)
@@ -3104,7 +3287,7 @@ def admin_dashboard():
                 prog_language_label = st.selectbox("Programming Language", list(PROGRAMMING_LANGUAGE_LABELS.keys()), key="aq_prog_language")
                 prog_language = PROGRAMMING_LANGUAGE_LABELS[prog_language_label]
                 prog_description = st.text_area("Programming Description", key="aq_prog_desc",
-                    placeholder="Problem statement, constraints, input/output format ikkada rayandi...")
+                    placeholder="Problem statement clear ga rayandi:\n- Task / objective\n- Input format\n- Output format\n- Constraints\n- Sample explanation optional")
                 st.markdown("**Test Cases & Marks**")
                 tc_count = st.number_input("Number of test cases", min_value=1, max_value=10, value=3, step=1, key="aq_tc_count")
                 for idx in range(int(tc_count)):
@@ -3201,6 +3384,32 @@ def admin_dashboard():
                 selected_exam = st.selectbox("Select Exam:", list(exam_options.keys()))
                 exam_id_bulk = exam_options[selected_exam]
                 st.caption("CSV supports mcq, blank, and programming rows. Programming rows can use test_input_1/test_output_1/test_marks_1/test_hidden_1 columns up to 10, or a test_cases_json list.")
+                with st.expander("Programming CSV format - quick guide", expanded=True):
+                    st.markdown(
+                        """
+                        **Required columns:** `question`, `type`
+
+                        For programming questions:
+                        `type` should be `programming`, `language` should be `java`, `c`, or `python`, and `description` should include the full problem statement, input format, output format, and constraints.
+
+                        Add test cases using repeated columns:
+                        `test_input_1`, `test_output_1`, `test_marks_1`, `test_hidden_1`.
+                        Continue as `test_input_2`, `test_output_2` ... up to 10 cases.
+
+                        Alternative advanced format:
+                        Put a JSON list in `test_cases_json`, for example `[{"input":"2\\n4 5","expected_output":"9","marks":2,"hidden":false}]`.
+                        """
+                    )
+                    st.dataframe(pd.DataFrame([
+                        {"Column": "question", "Programming example": "Sum of two numbers"},
+                        {"Column": "type", "Programming example": "programming"},
+                        {"Column": "language", "Programming example": "java"},
+                        {"Column": "description", "Programming example": "Read two integers and print their sum. Input: a b. Output: sum."},
+                        {"Column": "test_input_1", "Programming example": "4 5"},
+                        {"Column": "test_output_1", "Programming example": "9"},
+                        {"Column": "test_marks_1", "Programming example": "2"},
+                        {"Column": "test_hidden_1", "Programming example": "false"},
+                    ]), hide_index=True, use_container_width=True)
                 template_rows = pd.DataFrame([
                     {
                         "question": "Two Sum",
@@ -4379,12 +4588,37 @@ def user_dashboard(preview_mode=False):
 
     # My Classes
     modules = supabase.table("modules").select("*").execute().data
+    modules = modules or []
     if st.session_state.completed_ids is None:
         all_completions = supabase.table("class_completions").select("class_id").eq("user_id", st.session_state.user_id).execute().data
         st.session_state.completed_ids = {str(c["class_id"]) for c in all_completions}
     completed_ids = st.session_state.completed_ids
     focus_class_id = str(st.session_state.get("focus_class_id", ""))
     focus_exam_id = str(st.session_state.get("focus_exam_id", ""))
+    inject_student_home_styles()
+    try:
+        all_classes_count = len(supabase.table("classes").select("id").execute().data or [])
+        active_exam_count = len(supabase.table("exams").select("id").eq("enabled", True).execute().data or [])
+    except Exception:
+        all_classes_count = 0
+        active_exam_count = 0
+    done_count = len(completed_ids)
+    pending_count = max(all_classes_count - done_count, 0)
+    st.markdown(
+        f"""
+        <div class="student-home-hero">
+            <h2>Learning Workspace</h2>
+            <p>Modules, classes, aptitude practice, and exams anni oka place lo clean ga track cheyyandi.</p>
+        </div>
+        <div class="home-stat-row">
+            <div class="home-stat"><small>Modules</small><strong>{len(modules)}</strong></div>
+            <div class="home-stat"><small>Classes Done</small><strong>{done_count}/{all_classes_count}</strong></div>
+            <div class="home-stat"><small>Pending Classes</small><strong>{pending_count}</strong></div>
+            <div class="home-stat"><small>Active Exams</small><strong>{active_exam_count}</strong></div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
     for module in modules:
         module_submodules = supabase.table("submodules").select("id").eq("module_id", module["id"]).execute().data
@@ -4400,6 +4634,15 @@ def user_dashboard(preview_mode=False):
         pct = int((module_done / module_total * 100)) if module_total > 0 else 0
 
         with st.expander(f"{module['title']}    {module_done}/{module_total} classes  ({pct}%)", expanded=module_has_focus):
+            st.markdown(
+                f"""
+                <div class="module-strip">
+                    <h3>{html.escape(str(module.get('title', 'Module')))}</h3>
+                    <span>{module_done}/{module_total} classes complete</span>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
             if module_total > 0:
                 st.progress(pct / 100, text=f"Module Progress: {pct}%")
             submodules = supabase.table("submodules").select("*").eq("module_id", module["id"]).execute().data
@@ -4414,7 +4657,15 @@ def user_dashboard(preview_mode=False):
                 for cls in classes:
                     is_done = str(cls.get("id")) in completed_ids
                     is_focused_class = focus_class_id and str(cls.get("id")) == focus_class_id
-                    st.markdown(f"### {'' if is_done else ''} {cls['title']}")
+                    st.markdown(
+                        f"""
+                        <div class="class-card">
+                            <div class="class-title">{html.escape(str(cls.get('title', 'Class')))}</div>
+                            <span class="exam-chip">{'Completed' if is_done else 'In progress'}</span>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
                     if is_focused_class:
                         st.info("Progress tab nundi open chesina class idi.")
                     col_link1, col_link2, col_link3 = st.columns(3)
@@ -4782,8 +5033,20 @@ def exam_workspace_view():
                     selected_language = PROGRAMMING_LANGUAGE_LABELS[selected_language_label]
                     lang_meta = get_programming_language_meta(selected_language)
                     enable_textarea_tab_support()
-                    enable_ide_textarea_behaviour(question["id"])
-                    editor_value = stored_code if stored_code else ""
+                    enable_ide_textarea_behaviour(question["id"], selected_language)
+                    editor_value = stored_code if stored_code else lang_meta.get("default_code", "")
+                    st.markdown(
+                        f"""
+                        <div class="vscode-shell">
+                            <div class="vscode-titlebar">
+                                <div class="vscode-dots"><span></span><span></span><span></span></div>
+                                <div class="vscode-file">{lang_meta.get('file_name', 'solution.txt')}</div>
+                                <div class="vscode-hints">Tab: indent/snippet | brackets auto-close</div>
+                            </div>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
                     answer = st.text_area(f"{lang_meta['label']} Program", value=editor_value, key=f"code_{question['id']}", height=395)
                     st.session_state.answers[question["id"]] = {"code": answer, "language": selected_language}
                     save_programming_exam_session(status="active")
