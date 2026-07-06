@@ -8,6 +8,7 @@ from datetime import date, timedelta
 
 import streamlit as st
 import streamlit.components.v1 as components
+import pandas as pd
 from supabase import create_client
 import google.generativeai as genai
 
@@ -544,6 +545,75 @@ def get_programming_meta(question):
             return {"description": "", "test_cases": [], "language": "java"}
     return {"description": raw if question.get("type") == "programming" else "", "test_cases": [], "language": "java"}
 
+
+def parse_csv_bool(value):
+    return str(value or "").strip().lower() in {"1", "true", "yes", "y", "hidden"}
+
+
+def parse_programming_csv_cases(row):
+    raw_json = str(row.get("test_cases_json", "") or row.get("test_cases", "") or "").strip()
+    if raw_json:
+        try:
+            parsed = json.loads(raw_json)
+            if isinstance(parsed, list):
+                return [
+                    {
+                        "input": str(tc.get("input", "")),
+                        "expected_output": str(tc.get("expected_output", tc.get("output", ""))),
+                        "marks": int(tc.get("marks", 1) or 1),
+                        "hidden": bool(tc.get("hidden", False)),
+                    }
+                    for tc in parsed
+                    if isinstance(tc, dict)
+                ]
+        except Exception:
+            pass
+
+    cases = []
+    for idx in range(1, 11):
+        inp = str(row.get(f"test_input_{idx}", "") or "")
+        out = str(row.get(f"test_output_{idx}", "") or row.get(f"expected_output_{idx}", "") or "")
+        if not inp and not out:
+            continue
+        try:
+            marks = int(row.get(f"test_marks_{idx}", 1) or 1)
+        except Exception:
+            marks = 1
+        cases.append({
+            "input": inp,
+            "expected_output": out,
+            "marks": marks,
+            "hidden": parse_csv_bool(row.get(f"test_hidden_{idx}", False)),
+        })
+    return cases
+
+
+def build_question_payload_from_csv_row(row, exam_id):
+    q_type = str(row.get("type", "mcq") or "mcq").strip().lower()
+    if q_type not in {"mcq", "blank", "programming"}:
+        q_type = "mcq"
+    exp_val = str(row.get("explanation", "") or "").strip()
+    correct_answer = str(row.get("correct_answer", "") or "").strip()
+    if q_type == "programming":
+        language = normalize_programming_language(row.get("language", row.get("programming_language", "java")))
+        description = str(row.get("description", "") or row.get("programming_description", "") or exp_val).strip()
+        test_cases = parse_programming_csv_cases(row)
+        exp_val = make_programming_meta(description, test_cases, language)
+        correct_answer = "AUTO"
+    return {
+        "exam_id": exam_id,
+        "question": str(row.get("question", "") or "").strip(),
+        "type": q_type,
+        "option_a": str(row.get("option_a", "") or ""),
+        "option_b": str(row.get("option_b", "") or ""),
+        "option_c": str(row.get("option_c", "") or ""),
+        "option_d": str(row.get("option_d", "") or ""),
+        "correct_answer": correct_answer,
+        "hint": str(row.get("hint", "") or ""),
+        "image_url": str(row.get("image_url", "") or "").strip() or None,
+        "explanation": exp_val if exp_val else None,
+    }
+
 def enable_textarea_tab_support():
     st.components.v1.html(
         """
@@ -566,6 +636,240 @@ def enable_textarea_tab_support():
         };
         attachTabs();
         setInterval(attachTabs, 1000);
+        </script>
+        """,
+        height=0,
+    )
+
+def inject_programming_exam_shell(is_prog_exam=True):
+    if not is_prog_exam:
+        return
+    st.markdown(
+        """
+        <style>
+        header, footer, [data-testid="stSidebar"], [data-testid="stToolbar"], [data-testid="stDecoration"] {
+            display: none !important;
+        }
+        .main .block-container {
+            max-width: 100vw !important;
+            padding: 0.55rem 1rem 0.8rem !important;
+        }
+        div[data-testid="column"]:nth-of-type(2) {
+            position: sticky;
+            top: 0.55rem;
+            align-self: flex-start;
+        }
+        .exam-topbar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1rem;
+            border-bottom: 1px solid #d7dde8;
+            padding: 0.35rem 0 0.6rem;
+            margin-bottom: 0.55rem;
+            background: #ffffff;
+        }
+        .exam-title {
+            color: #172033;
+            font-size: 1.05rem;
+            font-weight: 750;
+        }
+        .exam-status {
+            display: flex;
+            align-items: center;
+            gap: 0.65rem;
+            color: #526071;
+            font-size: 0.88rem;
+        }
+        .lock-pill {
+            border: 1px solid #b9c5d8;
+            border-radius: 999px;
+            padding: 0.25rem 0.65rem;
+            color: #26384f;
+            background: #f7f9fc;
+            font-weight: 650;
+        }
+        .problem-pane {
+            color: #182235;
+            line-height: 1.55;
+        }
+        .problem-pane h3 {
+            font-size: 1.08rem;
+            margin: 0.2rem 0 0.7rem;
+        }
+        .sample-case {
+            border: 1px solid #dbe2ef;
+            border-radius: 8px;
+            padding: 0.75rem;
+            margin: 0.65rem 0;
+            background: #fbfcff;
+        }
+        .ide-wrap textarea {
+            font-family: Consolas, "Cascadia Code", "Courier New", monospace !important;
+            font-size: 14px !important;
+            line-height: 1.55 !important;
+            tab-size: 4;
+            background: #10141d !important;
+            color: #edf2ff !important;
+            border: 1px solid #2d3748 !important;
+            border-radius: 0 8px 8px 0 !important;
+            padding-left: 58px !important;
+            caret-color: #70e1ff;
+        }
+        .ide-wrap textarea:focus {
+            border-color: #4f8cff !important;
+            box-shadow: 0 0 0 1px #4f8cff !important;
+        }
+        .console-card {
+            border: 1px solid #d9e1ef;
+            border-radius: 8px;
+            padding: 0.75rem;
+            background: #ffffff;
+        }
+        .console-log-pass {
+            border-left: 4px solid #1f9d55;
+            background: #f0fff4;
+            padding: 0.55rem 0.7rem;
+            border-radius: 6px;
+            margin: 0.45rem 0;
+        }
+        .console-log-fail {
+            border-left: 4px solid #d64545;
+            background: #fff5f5;
+            padding: 0.55rem 0.7rem;
+            border-radius: 6px;
+            margin: 0.45rem 0;
+        }
+        div.stButton > button[kind="primary"] {
+            border-radius: 8px !important;
+            font-weight: 750 !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def enable_fullscreen_exam_lock():
+    components.html(
+        """
+        <script>
+        (function () {
+            const parentWindow = window.parent;
+            const doc = parentWindow.document;
+            if (parentWindow.__examLockReady) return;
+            parentWindow.__examLockReady = true;
+            let armedAt = Date.now();
+            let reporting = false;
+
+            function report(reason) {
+                if (reporting || Date.now() - armedAt < 1200) return;
+                reporting = true;
+                try {
+                    const url = new URL(parentWindow.location.href);
+                    url.searchParams.set("malpractice", "1");
+                    url.searchParams.set("mal_reason", reason);
+                    parentWindow.location.href = url.toString();
+                } catch (e) {
+                    reporting = false;
+                }
+            }
+
+            function requestFullScreen() {
+                const root = doc.documentElement;
+                if (doc.fullscreenElement) return;
+                const fn = root.requestFullscreen || root.webkitRequestFullscreen || root.msRequestFullscreen;
+                if (fn) {
+                    try { fn.call(root).catch(function () {}); } catch (e) {}
+                }
+            }
+
+            function lockHistory() {
+                try {
+                    parentWindow.history.pushState({ examLocked: true }, "", parentWindow.location.href);
+                    parentWindow.addEventListener("popstate", function () {
+                        parentWindow.history.pushState({ examLocked: true }, "", parentWindow.location.href);
+                        report("Browser back/navigation attempted");
+                    });
+                } catch (e) {}
+            }
+
+            requestFullScreen();
+            lockHistory();
+            ["click", "keydown", "pointerdown"].forEach(function (evt) {
+                doc.addEventListener(evt, requestFullScreen, true);
+            });
+            doc.addEventListener("fullscreenchange", function () {
+                if (!doc.fullscreenElement) report("Fullscreen exited");
+            });
+            doc.addEventListener("visibilitychange", function () {
+                if (doc.hidden) report("Tab switched or minimized");
+            });
+            parentWindow.addEventListener("blur", function () {
+                report("Exam window lost focus");
+            });
+            parentWindow.addEventListener("beforeunload", function (event) {
+                event.preventDefault();
+                event.returnValue = "";
+            });
+        })();
+        </script>
+        """,
+        height=0,
+    )
+
+
+def enable_ide_textarea_behaviour(question_id):
+    components.html(
+        f"""
+        <script>
+        (function () {{
+            const doc = window.parent.document;
+            const key = "ideReady_{question_id}";
+            function enhance() {{
+                const areas = Array.from(doc.querySelectorAll('textarea'));
+                const ta = areas.find(el => (el.getAttribute('aria-label') || '').includes('Program')) || areas[0];
+                if (!ta || ta.dataset[key] === "1") return;
+                ta.dataset[key] = "1";
+                const wrapper = ta.closest('[data-testid="stTextArea"]');
+                if (wrapper) wrapper.classList.add("ide-wrap");
+
+                function autoPair(open, close) {{
+                    const start = ta.selectionStart;
+                    const end = ta.selectionEnd;
+                    ta.setRangeText(open + ta.value.slice(start, end) + close, start, end, 'end');
+                    ta.selectionStart = ta.selectionEnd = start + 1;
+                    ta.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                }}
+
+                ta.addEventListener('keydown', function (event) {{
+                    const pairs = {{ "(": ")", "[": "]", "{{": "}}", '"': '"', "'": "'" }};
+                    if (event.key === "Tab") {{
+                        event.preventDefault();
+                        const start = ta.selectionStart;
+                        const end = ta.selectionEnd;
+                        ta.setRangeText("    ", start, end, "end");
+                        ta.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                    }} else if (pairs[event.key]) {{
+                        event.preventDefault();
+                        autoPair(event.key, pairs[event.key]);
+                    }} else if (event.key === "Enter") {{
+                        const before = ta.value.slice(0, ta.selectionStart).split("\\n").pop() || "";
+                        const indent = (before.match(/^\\s+/) || [""])[0] + (/\\{{\\s*$/.test(before) ? "    " : "");
+                        if (indent) {{
+                            event.preventDefault();
+                            const start = ta.selectionStart;
+                            const end = ta.selectionEnd;
+                            ta.setRangeText("\\n" + indent, start, end, "end");
+                            ta.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                        }}
+                    }}
+                }});
+            }}
+            enhance();
+            setTimeout(enhance, 500);
+            setInterval(enhance, 1200);
+        }})();
         </script>
         """,
         height=0,
@@ -1406,16 +1710,7 @@ def start_student_exam(exam):
         focus_student_class(exam.get("class_id"), exam.get("id"))
         return
     q_data = supabase.table("questions").select("*").eq("exam_id", exam["id"]).execute().data
-    st.session_state.update({
-        "exam_id": exam["id"],
-        "exam_title": exam["title"],
-        "start_exam": True,
-        "exam_submitted": False,
-        "answers": {},
-        "question_index": 0,
-        "current_questions": q_data,
-        "exam_end_time": time.time() + (int(exam.get("duration_mins", 30)) * 60),
-    })
+    start_exam_with_questions(exam, q_data)
     st.rerun()
 
 def collect_student_progress(user_id):
@@ -2905,38 +3200,80 @@ def admin_dashboard():
             if exam_options:
                 selected_exam = st.selectbox("Select Exam:", list(exam_options.keys()))
                 exam_id_bulk = exam_options[selected_exam]
+                st.caption("CSV supports mcq, blank, and programming rows. Programming rows can use test_input_1/test_output_1/test_marks_1/test_hidden_1 columns up to 10, or a test_cases_json list.")
+                template_rows = pd.DataFrame([
+                    {
+                        "question": "Two Sum",
+                        "type": "programming",
+                        "language": "java",
+                        "description": "Read n and n integers, print the sum of the two numbers.",
+                        "test_input_1": "2\n4 5",
+                        "test_output_1": "9",
+                        "test_marks_1": 2,
+                        "test_hidden_1": "false",
+                        "test_input_2": "2\n10 15",
+                        "test_output_2": "25",
+                        "test_marks_2": 3,
+                        "test_hidden_2": "true",
+                        "correct_answer": "AUTO",
+                    },
+                    {
+                        "question": "Capital of India?",
+                        "type": "mcq",
+                        "option_a": "Delhi",
+                        "option_b": "Mumbai",
+                        "option_c": "Chennai",
+                        "option_d": "Kolkata",
+                        "correct_answer": "A",
+                        "hint": "",
+                        "explanation": "",
+                    },
+                ])
+                st.download_button(
+                    "Download CSV Template",
+                    template_rows.to_csv(index=False).encode("utf-8"),
+                    file_name="question_upload_template.csv",
+                    mime="text/csv",
+                    use_container_width=True,
+                )
                 uploaded_file = st.file_uploader("Upload CSV", type=["csv"])
                 if uploaded_file is not None:
-                    import pandas as pd, io as _io
+                    import io as _io
                     try:
                         raw = uploaded_file.read()
                         try: df = pd.read_csv(_io.StringIO(raw.decode("utf-8")))
                         except UnicodeDecodeError: df = pd.read_csv(_io.StringIO(raw.decode("latin1")))
-                        required = ["question", "type", "correct_answer"]
+                        required = ["question", "type"]
                         missing = [col for col in required if col not in df.columns]
                         if missing:
                             st.error(f"CSV   columns : {missing}")
-                            st.caption("Expected: question, type, option_a..d, correct_answer, hint, explanation")
+                            st.caption("Expected minimum: question, type. MCQ/blank use correct_answer. Programming use language, description, and test cases columns.")
                         else:
                             df = df.fillna("")
                             st.success(f" {len(df)} rows loaded!")
                             st.write("Preview:", df.head())
+                            errors = []
+                            for row_no, row in df.iterrows():
+                                q_type = str(row.get("type", "")).strip().lower()
+                                if not str(row.get("question", "")).strip():
+                                    errors.append(f"Row {row_no + 2}: question empty")
+                                if q_type == "programming" and not parse_programming_csv_cases(row):
+                                    errors.append(f"Row {row_no + 2}: programming row needs at least one test case")
+                                if q_type in {"mcq", "blank"} and not str(row.get("correct_answer", "")).strip():
+                                    errors.append(f"Row {row_no + 2}: correct_answer required")
+                            if errors:
+                                st.error("CSV validation failed:")
+                                for err in errors[:12]:
+                                    st.caption(err)
+                                if len(errors) > 12:
+                                    st.caption(f"...and {len(errors) - 12} more")
+                                st.stop()
                             if st.button("Upload to DB"):
                                 try:
                                     for _, row in df.iterrows():
-                                        exp_val = str(row.get("explanation","")).strip()
-                                        supabase.table("questions").insert({
-                                            "exam_id": exam_id_bulk,
-                                            "question": str(row.get("question","")),
-                                            "type": str(row.get("type","mcq")),
-                                            "option_a": str(row.get("option_a","")),
-                                            "option_b": str(row.get("option_b","")),
-                                            "option_c": str(row.get("option_c","")),
-                                            "option_d": str(row.get("option_d","")),
-                                            "correct_answer": str(row.get("correct_answer","")),
-                                            "hint": str(row.get("hint","")),
-                                            "explanation": exp_val if exp_val else None
-                                        }).execute()
+                                        supabase.table("questions").insert(
+                                            build_question_payload_from_csv_row(row, exam_id_bulk)
+                                        ).execute()
                                     st.success(f" {len(df)} questions uploaded!")
                                 except Exception as e:
                                     st.error(f"Upload Error: {e}")
@@ -4182,6 +4519,9 @@ def exam_workspace_view():
     questions = st.session_state.current_questions
     total_questions = len(questions)
     is_prog_exam = is_programming_exam(st.session_state.exam_id) if st.session_state.get("exam_id") else False
+    inject_programming_exam_shell(is_prog_exam and not st.session_state.exam_submitted)
+    if is_prog_exam and not st.session_state.exam_submitted:
+        enable_fullscreen_exam_lock()
     if is_prog_exam and not st.session_state.exam_submitted:
         qp = st.query_params
         if qp.get("malpractice") == "1":
@@ -4253,12 +4593,27 @@ def exam_workspace_view():
             st.session_state.current_questions = []
             st.rerun()
     else:
-        st.title(st.session_state.exam_title)
         current = st.session_state.question_index
         question = questions[current]
+        mins, secs = divmod(remaining_time, 60)
+        if is_prog_exam:
+            st.markdown(
+                f"""
+                <div class="exam-topbar">
+                    <div class="exam-title">{clean_ui_text(st.session_state.exam_title)}</div>
+                    <div class="exam-status">
+                        <span class="lock-pill">Fullscreen locked</span>
+                        <span>Question {current + 1}/{total_questions}</span>
+                        <span>{mins:02d}:{secs:02d}</span>
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+        else:
+            st.title(st.session_state.exam_title)
         left, right = st.columns([4, 1])
         with right:
-            mins, secs = divmod(remaining_time, 60)
             st.components.v1.html(f"""
                 <div id="timer" style="font-size:2rem;font-weight:600;text-align:center;padding:12px;border-radius:8px;
                     background:{'#fff3cd' if remaining_time<300 else '#e8f4fd'};
@@ -4294,6 +4649,25 @@ def exam_workspace_view():
                     label = f" {i+1}" if i==current else (f" {i+1}" if q_id in st.session_state.answers and st.session_state.answers[q_id] else f" {i+1}")
                     if st.button(label, key=f"qnav_{i}", use_container_width=True):
                         st.session_state.question_index = i; st.rerun()
+            if is_prog_exam:
+                st.divider()
+                if st.button("Submit Final Exam", type="primary", key="submit_exam_top_right", use_container_width=True):
+                    qid_cur = question["id"]
+                    if qid_cur in st.session_state.question_start_time:
+                        elapsed = int(time.time() - st.session_state.question_start_time[qid_cur])
+                        prev = st.session_state.question_time_log.get(qid_cur, 0)
+                        st.session_state.question_time_log[qid_cur] = prev + elapsed
+                        del st.session_state.question_start_time[qid_cur]
+                    try:
+                        save_programming_exam_session(status="active")
+                        submit_exam_attempt(questions, include_time=True, require_programming_submitted=True)
+                        st.session_state.question_time_log = {}
+                        st.session_state.question_start_time = {}
+                        st.session_state.program_run_results = {}
+                        st.session_state.program_submissions = {}
+                        st.session_state.exam_submitted = True; st.rerun()
+                    except Exception as e:
+                        st.error(f"Submit failed: {e}")
 
         with left:
             hcol1, hcol2 = st.columns([4, 1])
@@ -4375,17 +4749,29 @@ def exam_workspace_view():
                 current_language_label = get_programming_language_meta(stored_language)["label"]
                 p_left, p_right = st.columns([1, 1])
                 with p_left:
-                    st.markdown("#### Problem")
-                    st.markdown(f"**{question['question']}**")
-                    if meta.get("description"):
-                        st.markdown(meta["description"])
-                    st.caption(f"Total Marks: {max_marks}")
-                    with st.expander("Sample test cases"):
-                        for idx, tc in enumerate(meta.get("test_cases", []), start=1):
-                            if tc.get("hidden", False):
-                                continue
-                            st.markdown(f"**Case {idx}**  {tc.get('marks', 0)} marks")
-                            st.code(f"Input:\n{tc.get('input','')}\n\nExpected Output:\n{tc.get('expected_output','')}", language="text")
+                    with st.container(height=660):
+                        st.markdown("<div class='problem-pane'>", unsafe_allow_html=True)
+                        st.markdown(f"### {question['question']}")
+                        if meta.get("description"):
+                            st.markdown(meta["description"])
+                        st.caption(f"Marks: {max_marks}")
+                        visible_cases = [tc for tc in meta.get("test_cases", []) if not tc.get("hidden", False)]
+                        if visible_cases:
+                            st.markdown("#### Samples")
+                            for idx, tc in enumerate(visible_cases, start=1):
+                                st.markdown(
+                                    f"""
+                                    <div class="sample-case">
+                                        <strong>Sample {idx}</strong>
+                                    </div>
+                                    """,
+                                    unsafe_allow_html=True,
+                                )
+                                st.caption("Input")
+                                st.code(tc.get("input", ""), language="text")
+                                st.caption("Expected Output")
+                                st.code(tc.get("expected_output", ""), language="text")
+                        st.markdown("</div>", unsafe_allow_html=True)
                 with p_right:
                     selected_language_label = st.selectbox(
                         "Language",
@@ -4396,88 +4782,92 @@ def exam_workspace_view():
                     selected_language = PROGRAMMING_LANGUAGE_LABELS[selected_language_label]
                     lang_meta = get_programming_language_meta(selected_language)
                     enable_textarea_tab_support()
+                    enable_ide_textarea_behaviour(question["id"])
                     editor_value = stored_code if stored_code else ""
-                    answer = st.text_area(f"{lang_meta['label']} Program", value=editor_value, key=f"code_{question['id']}", height=360)
+                    answer = st.text_area(f"{lang_meta['label']} Program", value=editor_value, key=f"code_{question['id']}", height=395)
                     st.session_state.answers[question["id"]] = {"code": answer, "language": selected_language}
                     save_programming_exam_session(status="active")
+                    st.markdown("<div class='console-card'>", unsafe_allow_html=True)
                     custom_input = st.text_area(
-                        "Custom Input",
+                        "Custom Parameters / stdin",
                         key=f"custom_input_{question['id']}",
-                        height=110,
-                        placeholder="Mee own input ikkada enter chesi Run Custom Input click cheyyandi..."
+                        height=82,
+                        placeholder="Input values ikkada enter cheyyandi..."
                     )
                     run_col, submit_prog_col, custom_col = st.columns(3)
                     with run_col:
-                        run_tests_clicked = st.button("Run Tests", key=f"run_prog_{question['id']}", use_container_width=True)
+                        run_tests_clicked = st.button("Run Suite", key=f"run_prog_{question['id']}", use_container_width=True)
                     with submit_prog_col:
-                        submit_program_clicked = st.button("Submit Program", key=f"submit_prog_{question['id']}", type="primary", use_container_width=True)
+                        submit_program_clicked = st.button("Save Program Score", key=f"submit_prog_{question['id']}", type="primary", use_container_width=True)
                     with custom_col:
                         run_custom_clicked = st.button("Run Custom", key=f"run_custom_{question['id']}", use_container_width=True)
 
                     if run_tests_clicked:
-                        with st.spinner("Program run avuthundi..."):
+                        with st.spinner("Test suite running..."):
                             st.session_state.program_run_results[str(question["id"])] = run_programming_test_cases(question, answer, selected_language)
 
                     if submit_program_clicked:
-                        with st.spinner("Program submit avuthundi..."):
+                        with st.spinner("Score saving..."):
                             score_data = run_programming_test_cases(question, answer, selected_language)
                             st.session_state.program_run_results[str(question["id"])] = score_data
                             st.session_state.program_submissions[str(question["id"])] = {"code": answer, "language": selected_language, "score_data": score_data}
                             save_programming_exam_session(status="active")
-                            st.success(f"Program submitted: {score_data['earned']}/{score_data['total']} marks")
+                            st.success(f"Saved: {score_data['earned']}/{score_data['total']} marks")
+
+                    if run_custom_clicked:
+                        with st.spinner("Custom run executing..."):
+                            custom_result = run_programming_code(answer, custom_input, selected_language)
+                            custom_result["language"] = selected_language
+                            st.session_state.program_custom_results[str(question["id"])] = custom_result
 
                     saved_prog = st.session_state.program_submissions.get(str(question["id"]), {})
                     if saved_prog.get("code") == answer and normalize_programming_language(saved_prog.get("language", selected_language)) == selected_language and saved_prog.get("score_data"):
                         saved_score = saved_prog["score_data"]
-                        st.success(f"Saved for final submit: {saved_score['earned']}/{saved_score['total']} marks")
+                        st.success(f"Final submit ready: {saved_score['earned']}/{saved_score['total']} marks")
                     elif saved_prog:
-                        st.warning("Code changed after Submit Program. Please submit this program again before final submit.")
+                        st.warning("Code changed after score save. Save Program Score again before final submit.")
                     else:
-                        st.info("Final exam submit fast ga undali ante ee program ki Submit Program click cheyyandi.")
-
-                    if run_custom_clicked:
-                        with st.spinner("Custom input tho program run avuthundi..."):
-                            custom_result = run_programming_code(answer, custom_input, selected_language)
-                            custom_result["language"] = selected_language
-                            st.session_state.program_custom_results[str(question["id"])] = custom_result
+                        st.info("Run Suite checks code. Save Program Score locks this question for final submit.")
 
                     custom_data = st.session_state.program_custom_results.get(str(question["id"]))
                     if custom_data and normalize_programming_language(custom_data.get("language", selected_language)) != selected_language:
                         custom_data = None
                     if custom_data:
-                        st.markdown("#### Custom Output")
-                        st.caption(f"Status: {custom_data.get('status','')}")
+                        st.caption(f"Custom run: {custom_data.get('status','')}")
                         if custom_data.get("stdout"):
                             st.code(custom_data.get("stdout", ""), language="text")
                         if custom_data.get("stderr"):
-                            st.caption("Error")
                             st.code(custom_data.get("stderr", ""), language="text")
 
                     run_data = st.session_state.program_run_results.get(str(question["id"]))
                     if run_data and normalize_programming_language(run_data.get("language", selected_language)) != selected_language:
                         run_data = None
                     if run_data:
-                        st.markdown(f"#### Result: {run_data['earned']}/{run_data['total']} marks ({run_data['percentage']}%)")
+                        st.markdown(f"**Suite Result:** {run_data['earned']}/{run_data['total']} marks ({run_data['percentage']}%)")
                         for res in run_data["results"]:
-                            with st.container(border=True):
-                                is_hidden = bool(res.get("hidden", False))
-                                badge = " Passed" if res["passed"] else " Failed"
-                                title = f"Hidden Test Case {res['case']}" if is_hidden else f"Test Case {res['case']}"
-                                st.markdown(f"**{title}**  {badge}  {res['marks']} marks")
-                                if is_hidden:
-                                    st.caption("Input/output hidden. Marks lo count avuthundi.")
-                                elif not res["passed"]:
-                                    st.caption(f"Status: {res.get('status','')}")
-                                    c_exp, c_act = st.columns(2)
-                                    with c_exp:
-                                        st.caption("Expected")
-                                        st.code(res.get("expected_output", ""), language="text")
-                                    with c_act:
-                                        st.caption("Your Output")
-                                        st.code(res.get("actual_output", ""), language="text")
-                                    if res.get("error"):
-                                        st.caption("Error")
-                                        st.code(res["error"], language="text")
+                            is_hidden = bool(res.get("hidden", False))
+                            status_class = "console-log-pass" if res["passed"] else "console-log-fail"
+                            badge = "PASS" if res["passed"] else "FAIL"
+                            title = f"Hidden Case {res['case']}" if is_hidden else f"Case {res['case']}"
+                            st.markdown(
+                                f"<div class='{status_class}'><strong>{badge}</strong> - {title} - {res['marks']} marks</div>",
+                                unsafe_allow_html=True,
+                            )
+                            if is_hidden:
+                                st.caption("Hidden input/output counted in scoring.")
+                            elif not res["passed"]:
+                                st.caption(f"Status: {res.get('status','')}")
+                                c_exp, c_act = st.columns(2)
+                                with c_exp:
+                                    st.caption("Expected")
+                                    st.code(res.get("expected_output", ""), language="text")
+                                with c_act:
+                                    st.caption("Actual")
+                                    st.code(res.get("actual_output", ""), language="text")
+                                if res.get("error"):
+                                    st.caption("Runtime / compiler log")
+                                    st.code(res["error"], language="text")
+                    st.markdown("</div>", unsafe_allow_html=True)
 
             def save_current_q_time():
                 qid_cur = question["id"]
@@ -4495,7 +4885,7 @@ def exam_workspace_view():
                 if st.button("Next ", disabled=(current==total_questions-1), use_container_width=True):
                     save_current_q_time(); st.session_state.question_index += 1; save_programming_exam_session(status="active"); st.rerun()
             with pause_col:
-                if is_prog_exam and st.button("Pause & Back", use_container_width=True):
+                if (not is_prog_exam) and st.button("Pause & Back", use_container_width=True):
                     save_current_q_time()
                     save_programming_exam_session(status="active")
                     st.session_state.start_exam = False
