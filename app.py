@@ -1411,7 +1411,9 @@ def load_programming_exam_session(user_id, exam, questions):
         return None
     duration = int(exam.get("duration_mins", 30) or 30)
     end_time = float(session.get("exam_end_time") or 0)
-    if end_time <= time.time():
+    if end_time < 0:
+        end_time = time.time() + abs(end_time)
+    elif end_time <= time.time():
         end_time = time.time() + (duration * 60)
     return {
         "exam_id": exam["id"],
@@ -3376,7 +3378,7 @@ def admin_dashboard():
             with st.form("create_exam_form", clear_on_submit=True):
                 sel_cls = st.selectbox("Link with Lesson Class", list(cls_options.keys()) or ["No classes yet"])
                 e_title = st.text_input("Exam Sheet Name")
-                e_duration = st.number_input("Exam Duration (Minutes)", min_value=1, max_value=180, value=30)
+                e_duration = st.number_input("Exam Duration (Minutes)", min_value=1, max_value=900, value=30, help="15 hours varaku set cheyyachu (900 minutes).")
                 e_pwd = st.text_input("Exam Password (Optional)", type="password")
                 c_en = st.checkbox("Turn On Exam", value=True)
                 c_ans = st.checkbox("Enable Answers Visibility")
@@ -3397,7 +3399,7 @@ def admin_dashboard():
                 else:
                     builder_cls = st.selectbox("Class select cheyyandi", list(cls_options.keys()) or ["No classes yet"], key="prog_builder_class")
                     builder_title = st.text_input("Programming Exam Name", key="prog_builder_title")
-                    builder_duration = st.number_input("Duration (Minutes)", min_value=1, max_value=180, value=60, key="prog_builder_duration")
+                    builder_duration = st.number_input("Duration (Minutes)", min_value=1, max_value=900, value=60, key="prog_builder_duration", help="15 hours varaku set cheyyachu (900 minutes).")
                     builder_pwd = st.text_input("Password (Optional)", type="password", key="prog_builder_pwd")
                     builder_enabled = st.checkbox("Turn On Exam", value=True, key="prog_builder_enabled")
                     builder_show_answers = st.checkbox("Enable Answers Visibility", value=True, key="prog_builder_show_answers")
@@ -3457,7 +3459,7 @@ def admin_dashboard():
                     st.markdown(f"####  **{ex['title']}**")
                     col_e1, col_e2, col_e3 = st.columns([2, 2, 2])
                     with col_e1:
-                        updated_dur = st.number_input("Duration (Mins)", min_value=1, max_value=180, value=int(ex.get("duration_mins",30)), key=f"dur_{ex['id']}")
+                        updated_dur = st.number_input("Duration (Mins)", min_value=1, max_value=900, value=min(int(ex.get("duration_mins",30) or 30), 900), key=f"dur_{ex['id']}", help="15 hours varaku set cheyyachu (900 minutes).")
                     with col_e2:
                         updated_pwd = st.text_input("Password", value=str(ex.get("password","") or ""), key=f"pwd_ed_{ex['id']}")
                     with col_e3:
@@ -3882,18 +3884,59 @@ def admin_dashboard():
                                 eq_type = st.selectbox("Type", ["mcq","blank","programming"],
                                     index=["mcq","blank","programming"].index(q["type"]) if q["type"] in ["mcq","blank","programming"] else 0,
                                     key=f"eq_type_{q['id']}")
-                                eq_text = st.text_area("Question", value=q["question"], key=f"eq_text_{q['id']}")
-                                col1, col2 = st.columns(2)
-                                with col1:
-                                    eq_a = st.text_input("Option A", value=q.get("option_a",""), key=f"eq_a_{q['id']}")
-                                    eq_b = st.text_input("Option B", value=q.get("option_b",""), key=f"eq_b_{q['id']}")
-                                with col2:
-                                    eq_c = st.text_input("Option C", value=q.get("option_c",""), key=f"eq_c_{q['id']}")
-                                    eq_d = st.text_input("Option D", value=q.get("option_d",""), key=f"eq_d_{q['id']}")
-                                eq_ans = st.text_input("Correct Answer", value=q.get("correct_answer",""), key=f"eq_ans_{q['id']}")
-                                eq_hint = st.text_input("Hint", value=q.get("hint",""), key=f"eq_hint_{q['id']}")
-                                eq_explanation = st.text_area(" Explanation", value=q.get("explanation","") or "", key=f"eq_exp_{q['id']}")
+                                eq_text = st.text_area("Question / Title", value=q["question"], key=f"eq_text_{q['id']}", height=90)
+                                eq_hint = st.text_input("Hint", value=q.get("hint","") or "", key=f"eq_hint_{q['id']}")
                                 eq_img_url = st.text_input("Image URL", value=q.get("image_url","") or "", key=f"eq_img_{q['id']}")
+                                eq_a = eq_b = eq_c = eq_d = ""
+                                eq_ans = q.get("correct_answer", "") or ""
+                                eq_explanation = q.get("explanation", "") or ""
+                                if eq_type == "programming":
+                                    prog_meta = get_programming_meta(q)
+                                    current_prog_label = get_programming_language_meta(prog_meta.get("language", "java"))["label"]
+                                    prog_labels = list(PROGRAMMING_LANGUAGE_LABELS.keys())
+                                    eq_prog_label = st.selectbox(
+                                        "Programming Language",
+                                        prog_labels,
+                                        index=prog_labels.index(current_prog_label) if current_prog_label in prog_labels else 0,
+                                        key=f"eq_prog_lang_{q['id']}",
+                                    )
+                                    eq_prog_language = PROGRAMMING_LANGUAGE_LABELS[eq_prog_label]
+                                    eq_prog_description = st.text_area(
+                                        "Problem Description",
+                                        value=prog_meta.get("description", ""),
+                                        key=f"eq_prog_desc_{q['id']}",
+                                        height=180,
+                                        placeholder="Problem statement, input format, output format, constraints separate ga rayandi.",
+                                    )
+                                    old_cases = prog_meta.get("test_cases", []) or []
+                                    eq_prog_cases = []
+                                    eq_case_count = st.number_input("Test cases", min_value=1, max_value=10, value=max(1, min(len(old_cases) or 3, 10)), step=1, key=f"eq_tc_count_{q['id']}")
+                                    for tc_idx in range(int(eq_case_count)):
+                                        old_tc = old_cases[tc_idx] if tc_idx < len(old_cases) else {}
+                                        with st.container(border=True):
+                                            st.markdown(f"##### Test Case {tc_idx + 1}")
+                                            tc_in_col, tc_out_col, tc_marks_col, tc_hidden_col = st.columns([3, 3, 1, 1])
+                                            with tc_in_col:
+                                                tc_input = st.text_area("Input", value=old_tc.get("input", ""), key=f"eq_tc_input_{q['id']}_{tc_idx}", height=80)
+                                            with tc_out_col:
+                                                tc_output = st.text_area("Expected Output", value=old_tc.get("expected_output", ""), key=f"eq_tc_output_{q['id']}_{tc_idx}", height=80)
+                                            with tc_marks_col:
+                                                tc_marks = st.number_input("Marks", min_value=1, max_value=100, value=int(old_tc.get("marks", 1) or 1), step=1, key=f"eq_tc_marks_{q['id']}_{tc_idx}")
+                                            with tc_hidden_col:
+                                                tc_hidden = st.checkbox("Hidden", value=bool(old_tc.get("hidden", tc_idx > 0)), key=f"eq_tc_hidden_{q['id']}_{tc_idx}")
+                                            eq_prog_cases.append({"input": tc_input, "expected_output": tc_output, "marks": int(tc_marks), "hidden": bool(tc_hidden)})
+                                    eq_ans = "AUTO"
+                                    eq_explanation = make_programming_meta(eq_prog_description, eq_prog_cases, eq_prog_language)
+                                else:
+                                    col1, col2 = st.columns(2)
+                                    with col1:
+                                        eq_a = st.text_input("Option A", value=q.get("option_a","") or "", key=f"eq_a_{q['id']}")
+                                        eq_b = st.text_input("Option B", value=q.get("option_b","") or "", key=f"eq_b_{q['id']}")
+                                    with col2:
+                                        eq_c = st.text_input("Option C", value=q.get("option_c","") or "", key=f"eq_c_{q['id']}")
+                                        eq_d = st.text_input("Option D", value=q.get("option_d","") or "", key=f"eq_d_{q['id']}")
+                                    eq_ans = st.text_input("Correct Answer", value=q.get("correct_answer","") or "", key=f"eq_ans_{q['id']}")
+                                    eq_explanation = st.text_area("Answer Explanation", value=q.get("explanation","") or "", key=f"eq_exp_{q['id']}")
                                 if q.get("image_url"): st.image(q["image_url"], width=150)
                                 save_col, cancel_col = st.columns(2)
                                 with save_col:
@@ -5135,7 +5178,6 @@ def exam_workspace_view():
                     document.getElementById('countdown').innerText=m+':'+s;
                     if(total<300){{var el=document.getElementById('timer');el.style.background='#fff3cd';el.style.color='#856404';}}}}
                     setInterval(tick,1000);
-                    setInterval(function(){{ window.parent.location.reload(); }}, 30000);
                     function flagMalpractice(reason){{
                         try {{
                             var url = new URL(window.parent.location.href);
@@ -5168,7 +5210,7 @@ def exam_workspace_view():
                         del st.session_state.question_start_time[qid_cur]
                     try:
                         save_programming_exam_session(status="active")
-                        submit_exam_attempt(questions, include_time=True, require_programming_submitted=True)
+                        submit_exam_attempt(questions, include_time=True, require_programming_submitted=False)
                         st.session_state.question_time_log = {}
                         st.session_state.question_start_time = {}
                         st.session_state.program_run_results = {}
@@ -5316,9 +5358,9 @@ def exam_workspace_view():
                     )
                     run_col, submit_prog_col, custom_col = st.columns(3)
                     with run_col:
-                        run_tests_clicked = st.button("Run Suite", key=f"run_prog_{question['id']}", use_container_width=True)
+                        run_tests_clicked = st.button("Compile", key=f"run_prog_{question['id']}", use_container_width=True)
                     with submit_prog_col:
-                        submit_program_clicked = st.button("Save Program Score", key=f"submit_prog_{question['id']}", type="primary", use_container_width=True)
+                        submit_program_clicked = st.button("Execute & Submit", key=f"submit_prog_{question['id']}", type="primary", use_container_width=True)
                     with custom_col:
                         run_custom_clicked = st.button("Run Custom", key=f"run_custom_{question['id']}", use_container_width=True)
 
@@ -5345,9 +5387,9 @@ def exam_workspace_view():
                         saved_score = saved_prog["score_data"]
                         st.success(f"Final submit ready: {saved_score['earned']}/{saved_score['total']} marks")
                     elif saved_prog:
-                        st.warning("Code changed after score save. Save Program Score again before final submit.")
+                        st.warning("Code changed after score save. Execute & Submit again to update this program marks.")
                     else:
-                        st.info("Run Suite checks code. Save Program Score locks this question for final submit.")
+                        st.info("Compile code check chestundi. Execute & Submit marks update chestundi. Final submit lo unsaved programs 0 score ga count avuthayi.")
 
                     custom_data = st.session_state.program_custom_results.get(str(question["id"]))
                     if custom_data and normalize_programming_language(custom_data.get("language", selected_language)) != selected_language:
@@ -5405,8 +5447,10 @@ def exam_workspace_view():
                 if st.button("Next ", disabled=(current==total_questions-1), use_container_width=True):
                     save_current_q_time(); st.session_state.question_index += 1; save_programming_exam_session(status="active"); st.rerun()
             with pause_col:
-                if (not is_prog_exam) and st.button("Pause & Back", use_container_width=True):
+                if st.button("Pause & Back", use_container_width=True):
                     save_current_q_time()
+                    if is_prog_exam:
+                        st.session_state.exam_end_time = -max(1, int(st.session_state.exam_end_time - time.time()))
                     save_programming_exam_session(status="active")
                     st.session_state.start_exam = False
                     st.session_state.current_questions = []
@@ -5416,7 +5460,7 @@ def exam_workspace_view():
                     save_current_q_time()
                     try:
                         save_programming_exam_session(status="active")
-                        submit_exam_attempt(questions, include_time=True, require_programming_submitted=True)
+                        submit_exam_attempt(questions, include_time=True, require_programming_submitted=False)
                         st.session_state.question_time_log = {}
                         st.session_state.question_start_time = {}
                         st.session_state.program_run_results = {}
