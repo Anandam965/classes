@@ -1293,8 +1293,108 @@ def inject_student_home_styles():
             font-weight: 650;
             margin: 0.2rem 0 0.45rem;
         }
+        .student-exams-page {
+            padding-top: 0.65rem;
+        }
+        .student-exams-page [data-testid="stHorizontalBlock"]:has(.folder-filter-anchor) {
+            justify-content: center;
+            gap: 0.75rem;
+            margin: 0 auto 2.6rem;
+            max-width: 520px;
+        }
+        .student-exams-page [data-testid="stHorizontalBlock"]:has(.folder-filter-anchor) [data-testid="column"] {
+            width: auto !important;
+            flex: 0 0 auto !important;
+            min-width: 0 !important;
+        }
+        .student-exams-page [data-testid="stHorizontalBlock"]:has(.folder-filter-anchor) button {
+            min-width: 70px;
+            height: 46px;
+            border-radius: 4px;
+            border: 1px solid #d6dce6;
+            background: #fff;
+            color: #1b2433;
+            font-weight: 800;
+            letter-spacing: 0;
+            box-shadow: none;
+        }
+        .student-exams-page [data-testid="stHorizontalBlock"]:has(.folder-filter-anchor) button[kind="primary"] {
+            border-color: #315dff;
+            color: #2458ff;
+            background: #ffffff;
+        }
+        .student-exam-card-wrap div[data-testid="stVerticalBlockBorderWrapper"]:has(.student-exam-card-content) {
+            min-height: 190px;
+            border: 1px solid #d9dfe8;
+            border-radius: 4px;
+            background: #fbfcff;
+            padding: 34px 30px 26px;
+            box-shadow: 0 10px 24px rgba(18, 31, 53, 0.035);
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+        }
+        .student-exam-tags {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            margin-bottom: 18px;
+            flex-wrap: wrap;
+        }
+        .student-exam-tag {
+            display: inline-flex;
+            align-items: center;
+            height: 27px;
+            padding: 0 8px;
+            border-radius: 999px;
+            font-size: 0.91rem;
+            line-height: 1;
+            font-weight: 800;
+            letter-spacing: 0;
+        }
+        .student-exam-tag.category {
+            color: #526d95;
+            background: #dce7f5;
+            border: 1px solid #c6d3e7;
+        }
+        .student-exam-tag.free {
+            color: #20c997;
+            background: #cff8ed;
+            border: 1px solid #a7eadb;
+        }
+        .student-exam-title {
+            color: #20242c;
+            font-size: 1.55rem;
+            line-height: 1.18;
+            font-weight: 800;
+            letter-spacing: 0;
+            min-height: 58px;
+            margin: 0 0 22px;
+        }
+        .student-exam-card-wrap button {
+            height: 47px;
+            border-radius: 4px;
+            border: 1px solid #111827;
+            background: #fbfcff;
+            color: #172033;
+            font-size: 1.18rem;
+            font-weight: 500;
+            letter-spacing: 0;
+            box-shadow: none;
+        }
+        .student-exam-card-wrap button:hover {
+            border-color: #111827;
+            color: #111827;
+            background: #ffffff;
+        }
+        @media (max-width: 1100px) {
+            .student-exam-card-wrap div[data-testid="stVerticalBlockBorderWrapper"]:has(.student-exam-card-content) { padding: 26px 22px 22px; }
+            .student-exam-title { font-size: 1.28rem; }
+        }
         @media (max-width: 800px) {
             .home-stat-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+            .student-exams-page [data-testid="stHorizontalBlock"]:has(.folder-filter-anchor) { margin-bottom: 1.4rem; }
+            .student-exam-card-wrap div[data-testid="stVerticalBlockBorderWrapper"]:has(.student-exam-card-content) { min-height: 175px; }
         }
         </style>
         """,
@@ -1582,19 +1682,29 @@ def render_exam_detail_view(exam):
                             st.session_state.exam_submitted = True
                             st.rerun()
 
-def render_student_exam_card(exam, key_prefix="exam"):
+def render_student_exam_card(exam, folder_label="Programming", key_prefix="exam"):
     if not exam.get("enabled"):
         return
-    attempts = get_exam_attempt_rows(st.session_state.user_id, exam["id"])
-    max_marks = get_exam_max_marks(supabase.table("questions").select("*").eq("exam_id", exam["id"]).execute().data or [])
-    st.markdown(f"#### {exam.get('title', 'Exam')}")
-    st.caption(f"{int(exam.get('duration_mins') or 30)} mins | {len(attempts)} previous attempts | {max_marks} marks")
-    if st.button("Open Exam", key=f"{key_prefix}_open_{exam['id']}", use_container_width=True, type="primary"):
-        st.session_state.selected_exam_detail_id = str(exam["id"])
-        st.rerun()
+    title = html.escape(str(exam.get("title") or "Exam"))
+    folder_label = html.escape(str(folder_label or "Programming"))
+    with st.container(border=True):
+        st.markdown(
+            f"""
+            <div class="student-exam-card-content">
+                <div class="student-exam-tags">
+                    <span class="student-exam-tag category">{folder_label}</span>
+                    <span class="student-exam-tag free">Free</span>
+                </div>
+                <div class="student-exam-title">{title}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        if st.button("Open", key=f"{key_prefix}_open_{exam['id']}", use_container_width=True):
+            st.session_state.selected_exam_detail_id = str(exam["id"])
+            st.rerun()
 
 def show_student_exams_tab(user_id):
-    st.title("Exams")
     folders = fetch_exam_folders(show_warning=True)
     try:
         exams = supabase.table("exams").select("*").eq("enabled", True).execute().data or []
@@ -1614,16 +1724,13 @@ def show_student_exams_tab(user_id):
             render_exam_detail_view(selected_exam)
             return
         st.session_state.selected_exam_detail_id = ""
-    if not folders:
-        st.caption("Folders setup ayyaka Aptitude, Reasoning, Programming boxes ikkada kanipistayi.")
-        for exam in exams:
-            with st.container(border=True):
-                render_student_exam_card(exam, key_prefix="all_exam")
-        return
+
+    st.markdown('<div class="student-exams-page">', unsafe_allow_html=True)
     exams_by_folder = {}
     for exam in exams:
         exams_by_folder.setdefault(str(exam.get("folder_id") or ""), []).append(exam)
     folder_by_id = {str(folder.get("id")): folder for folder in folders}
+
     def folder_path(folder):
         names = []
         current = folder
@@ -1633,21 +1740,47 @@ def show_student_exams_tab(user_id):
             names.append(str(current.get("title") or "Folder"))
             current = folder_by_id.get(str(current.get("parent_id") or ""))
         return " / ".join(reversed(names))
-    for folder in sorted(folders, key=folder_path):
-        folder_id = str(folder.get("id"))
-        direct_exams = exams_by_folder.get(folder_id, [])
-        with st.expander(f"{folder_path(folder)} ({len(direct_exams)} exams)", expanded=(folder.get("parent_id") is None)):
-            if not direct_exams:
-                st.caption("I folder lo inka exams levu.")
-            for exam in direct_exams:
-                with st.container(border=True):
-                    render_student_exam_card(exam, key_prefix=f"folder_{folder_id}")
-    uncategorized = exams_by_folder.get("", [])
-    if uncategorized:
-        with st.expander(f"Uncategorized ({len(uncategorized)} exams)", expanded=True):
-            for exam in uncategorized:
-                with st.container(border=True):
-                    render_student_exam_card(exam, key_prefix="uncat_exam")
+
+    visible_folders = [folder for folder in sorted(folders, key=folder_path) if exams_by_folder.get(str(folder.get("id")))]
+    filter_options = [("all", "All")]
+    filter_options.extend((str(folder.get("id")), folder_path(folder)) for folder in visible_folders)
+    if exams_by_folder.get(""):
+        filter_options.append(("uncategorized", "Uncategorized"))
+
+    selected_filter = str(st.session_state.get("student_exam_folder_filter") or "all")
+    valid_filter_ids = {option_id for option_id, _ in filter_options}
+    if selected_filter not in valid_filter_ids:
+        selected_filter = "all"
+        st.session_state.student_exam_folder_filter = "all"
+
+    filter_cols = st.columns([1] * len(filter_options))
+    for idx, (option_id, label) in enumerate(filter_options):
+        with filter_cols[idx]:
+            st.markdown('<span class="folder-filter-anchor"></span>', unsafe_allow_html=True)
+            if st.button(label, key=f"student_exam_filter_{option_id}", type=("primary" if selected_filter == option_id else "secondary")):
+                st.session_state.student_exam_folder_filter = option_id
+                st.rerun()
+
+    folder_label_by_id = {str(folder.get("id")): folder_path(folder) for folder in folders}
+    if selected_filter == "all":
+        visible_exams = exams
+    elif selected_filter == "uncategorized":
+        visible_exams = exams_by_folder.get("", [])
+    else:
+        visible_exams = exams_by_folder.get(selected_filter, [])
+
+    if not visible_exams:
+        st.caption("I folder lo inka exams levu.")
+    else:
+        cols = st.columns(4)
+        for idx, exam in enumerate(visible_exams):
+            folder_id = str(exam.get("folder_id") or "")
+            folder_label = folder_label_by_id.get(folder_id, "Programming" if folder_id else "Programming")
+            with cols[idx % 4]:
+                st.markdown('<div class="student-exam-card-wrap">', unsafe_allow_html=True)
+                render_student_exam_card(exam, folder_label=folder_label, key_prefix=f"student_exam_{selected_filter}_{idx}")
+                st.markdown('</div>', unsafe_allow_html=True)
+    st.markdown('</div>', unsafe_allow_html=True)
 
 def show_admin_exam_folders_tab():
     st.subheader("Exam Folders")
@@ -5799,6 +5932,9 @@ else:
         exam_workspace_view()
     else:
         user_dashboard(preview_mode=False)
+
+
+
 
 
 
