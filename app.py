@@ -1371,6 +1371,22 @@ def inject_student_home_styles():
             min-height: 58px;
             margin: 0 0 22px;
         }
+        .student-folder-title {
+            color: #172033;
+            font-size: 1.82rem;
+            line-height: 1.15;
+            font-weight: 850;
+            letter-spacing: 0;
+            min-height: 92px;
+            display: flex;
+            align-items: center;
+            margin: 0 0 22px;
+        }
+        .student-exam-tag.blocked {
+            color: #9f1239;
+            background: #ffe4e6;
+            border: 1px solid #fecdd3;
+        }
         .student-exam-card-wrap button {
             height: 47px;
             border-radius: 4px;
@@ -1387,9 +1403,17 @@ def inject_student_home_styles():
             color: #111827;
             background: #ffffff;
         }
+        .student-exam-card-wrap button:disabled,
+        .student-exam-card-wrap button:disabled:hover {
+            border-color: #d1d5db;
+            color: #9f1239;
+            background: #fff1f2;
+            opacity: 1;
+        }
         @media (max-width: 1100px) {
             .student-exam-card-wrap div[data-testid="stVerticalBlockBorderWrapper"]:has(.student-exam-card-content) { padding: 26px 22px 22px; }
             .student-exam-title { font-size: 1.28rem; }
+            .student-folder-title { font-size: 1.55rem; min-height: 76px; }
         }
         @media (max-width: 800px) {
             .home-stat-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -1684,39 +1708,37 @@ def render_exam_detail_view(exam):
                             st.rerun()
 
 def render_student_exam_card(exam, folder_label="Programming", key_prefix="exam"):
-    if not exam.get("enabled"):
-        return
     title = html.escape(str(exam.get("title") or "Exam"))
     folder_label = html.escape(str(folder_label or "Programming"))
+    is_enabled = bool(exam.get("enabled"))
+    status_tag = '<span class="student-exam-tag free">Free</span>' if is_enabled else '<span class="student-exam-tag blocked">Blocked</span>'
     with st.container(border=True):
         st.markdown(
             f"""
             <div class="student-exam-card-content">
                 <div class="student-exam-tags">
                     <span class="student-exam-tag category">{folder_label}</span>
-                    <span class="student-exam-tag free">Free</span>
+                    {status_tag}
                 </div>
                 <div class="student-exam-title">{title}</div>
             </div>
             """,
             unsafe_allow_html=True,
         )
-        if st.button("Open", key=f"{key_prefix}_open_{exam['id']}", use_container_width=True):
-            st.session_state.selected_exam_detail_id = str(exam["id"])
-            st.rerun()
+        if is_enabled:
+            if st.button("Open", key=f"{key_prefix}_open_{exam['id']}", use_container_width=True):
+                st.session_state.selected_exam_detail_id = str(exam["id"])
+                st.rerun()
+        else:
+            st.button("Blocked", key=f"{key_prefix}_blocked_{exam['id']}", use_container_width=True, disabled=True)
 
 def render_student_folder_card(folder, subfolder_count=0, exam_count=0, key_prefix="folder"):
     title = html.escape(str(folder.get("title") or "Folder"))
-    item_text = f"{subfolder_count} folders" if subfolder_count else f"{exam_count} exams"
     with st.container(border=True):
         st.markdown(
             f"""
             <div class="student-exam-card-content">
-                <div class="student-exam-tags">
-                    <span class="student-exam-tag category">Folder</span>
-                    <span class="student-exam-tag free">{html.escape(item_text)}</span>
-                </div>
-                <div class="student-exam-title">{title}</div>
+                <div class="student-folder-title">{title}</div>
             </div>
             """,
             unsafe_allow_html=True,
@@ -1728,7 +1750,7 @@ def render_student_folder_card(folder, subfolder_count=0, exam_count=0, key_pref
 def show_student_exams_tab(user_id):
     folders = fetch_exam_folders(show_warning=True)
     try:
-        exams = supabase.table("exams").select("*").eq("enabled", True).execute().data or []
+        exams = supabase.table("exams").select("*").execute().data or []
     except Exception as e:
         st.error(f"Exams load avvaledu: {e}")
         return
@@ -5964,6 +5986,8 @@ else:
         exam_workspace_view()
     else:
         user_dashboard(preview_mode=False)
+
+
 
 
 
