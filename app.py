@@ -89,6 +89,8 @@ defaults = {
     "attendance_marked_date": "",
     "ai_generated_qs": None,
     "last_attempt_id": "",
+    "selected_exam_detail_id": "",
+    "view_solutions_attempt_id": "",
     "programming_session_loaded": False,
     "malpractice_reported_keys": set(),
     "suprabhatam_index": 0,
@@ -1384,18 +1386,21 @@ def fetch_exam_folders(show_warning=False):
         return []
 
 def build_exam_folder_options(folders, include_uncategorized=True):
-    by_parent = {}
-    for folder in folders:
-        by_parent.setdefault(str(folder.get("parent_id") or ""), []).append(folder)
+    folder_by_id = {str(folder.get("id")): folder for folder in folders}
+    def path_for(folder):
+        names = []
+        current = folder
+        seen = set()
+        while current and str(current.get("id")) not in seen:
+            seen.add(str(current.get("id")))
+            names.append(str(current.get("title") or "Folder"))
+            current = folder_by_id.get(str(current.get("parent_id") or ""))
+        return " / ".join(reversed(names))
     options = {}
     if include_uncategorized:
         options["No Folder / Uncategorized"] = None
-    def walk(parent_id="", depth=0):
-        for folder in by_parent.get(str(parent_id or ""), []):
-            label = f"{'  ' * depth}{folder.get('title', 'Folder')}"
-            options[label] = folder.get("id")
-            walk(folder.get("id"), depth + 1)
-    walk()
+    for folder in sorted(folders, key=path_for):
+        options[path_for(folder)] = folder.get("id")
     return options
 
 def create_exam_record(payload):
@@ -1417,73 +1422,176 @@ def set_exam_folder(exam_id, folder_id):
         st.error(f"Exam folder update avvaledu. SQL setup run chesara? {e}")
         return False
 
+def format_duration(seconds):
+    seconds = int(seconds or 0)
+    hours, rem = divmod(seconds, 3600)
+    mins, secs = divmod(rem, 60)
+    if hours:
+        return f"{hours} hour, {mins} Mins, {secs} Sec"
+    if mins:
+        return f"{mins} Mins, {secs} Sec"
+    return f"{secs} Sec"
+
+def format_attempt_date(value):
+    if not value:
+        return "Attempt time not saved"
+    text = str(value).replace("T", " ").replace("Z", "")
+    if "." in text:
+        text = text.split(".", 1)[0]
+    return text[:19]
+
+def get_exam_attempt_rows(user_id, exam_id):
+    try:
+        rows = supabase.table("exam_attempts").select("*").eq("user_id", user_id).eq("exam_id", exam_id).execute().data or []
+        return sorted(rows, key=lambda r: str(r.get("created_at") or r.get("submitted_at") or r.get("id") or ""), reverse=True)
+    except Exception:
+        return []
+
+def get_attempt_time_spent_seconds(attempt_id):
+    try:
+        rows = supabase.table("user_answers").select("time_spent_seconds").eq("attempt_id", attempt_id).execute().data or []
+        return sum(int(row.get("time_spent_seconds") or 0) for row in rows)
+    except Exception:
+        return 0
+
+def get_attempt_answer_map(attempt_id):
+    try:
+        rows = supabase.table("user_answers").select("*").eq("attempt_id", attempt_id).execute().data or []
+        return {a["question_id"]: a.get("answer", "") for a in rows}
+    except Exception:
+        return {}
+
+def render_exam_result_summary(exam, questions, attempt, show_return=True):
+    max_marks = get_exam_max_marks(questions)
+    score = int(attempt.get("score") or 0)
+    pct = (score / max_marks * 100) if max_marks else 0
+    answer_map = get_attempt_answer_map(attempt["id"])
+    attempted = len([q for q in questions if str(answer_map.get(q["id"], "")).strip()])
+    wrong = max(max_marks - score, 0)
+    time_spent = get_attempt_time_spent_seconds(attempt.get("id"))
+    status = "Qualified" if pct >= 35 else "Not Qualified"
+    st.markdown(
+        f"""
+        <style>
+        .result-hero {{display:grid;grid-template-columns:1.05fr .95fr;gap:36px;align-items:center;padding:34px 28px 26px;border:1px solid #e5eaf2;border-radius:8px;background:#fff;}}
+        .result-title {{font-size:2rem;font-weight:800;color:#10243d;margin-bottom:22px;}}
+        .result-metrics {{display:grid;grid-template-columns:repeat(3,minmax(130px,1fr));gap:28px 42px;}}
+        .result-metric small {{display:block;color:#0f172a;font-size:1rem;margin-bottom:8px;}}
+        .result-metric strong {{font-size:1.45rem;color:#07111f;line-height:1.25;}}
+        .result-art {{min-height:245px;border-radius:8px;background:linear-gradient(135deg,#f7fafc,#eef6ff);display:flex;align-items:center;justify-content:center;color:#1f7a4d;font-size:7rem;font-weight:900;}}
+        .result-table table {{width:100%;border-collapse:collapse;margin-top:10px;}}
+        .result-table th,.result-table td {{border:1px solid #d8dee8;padding:12px 16px;text-align:left;}}
+        .result-table th {{font-size:.85rem;color:#526070;background:#fbfcfe;}}
+        @media(max-width:900px){{.result-hero{{grid-template-columns:1fr;}}.result-metrics{{grid-template-columns:1fr 1fr;}}}}
+        </style>
+        <div class="result-hero">
+            <div>
+                <div class="result-title">{html.escape(str(exam.get('title') or st.session_state.exam_title))}</div>
+                <div class="result-metrics">
+                    <div class="result-metric"><small>Time Spent</small><strong>{format_duration(time_spent)}</strong></div>
+                    <div class="result-metric"><small>Marks</small><strong>{score} / {max_marks}</strong></div>
+                    <div class="result-metric"><small>Percentage</small><strong>{pct:.2f}</strong></div>
+                    <div class="result-metric"><small>Accuracy</small><strong>{pct:.2f}</strong></div>
+                    <div class="result-metric"><small>Status</small><strong>{status}</strong></div>
+                    <div class="result-metric"><small>Qualifying Percentage</small><strong>35.00%</strong></div>
+                </div>
+            </div>
+            <div class="result-art">&#10003;</div>
+        </div>
+        <h3 style="margin-top:34px;">Sectional Summary</h3>
+        <div class="result-table">
+        <table>
+            <thead><tr><th>SECTION</th><th>ATTEMPTED</th><th>CORRECT / WRONG</th><th>MARKS</th><th>PERCENTAGE</th><th>ACCURACY</th></tr></thead>
+            <tbody><tr><td><strong>{html.escape(str(exam.get('title') or st.session_state.exam_title))}</strong></td><td>{attempted} / {len(questions)}</td><td>{score} / {wrong}</td><td>{score:.2f} / {max_marks}</td><td>{pct:.2f}</td><td>{pct:.2f}</td></tr></tbody>
+        </table>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    c1, c2 = st.columns([1, 4])
+    with c1:
+        if st.button("View Solutions", type="primary", use_container_width=True, key=f"view_solutions_{attempt['id']}"):
+            st.session_state.view_solutions_attempt_id = attempt["id"]
+            st.rerun()
+    if show_return:
+        with c2:
+            if st.button("Return to Exams", use_container_width=False):
+                save_programming_exam_session(status="submitted", force_submit=False)
+                st.session_state.start_exam = False
+                st.session_state.exam_submitted = False
+                st.session_state.answers = {}
+                st.session_state.question_index = 0
+                st.session_state.current_questions = []
+                st.session_state.selected_exam_detail_id = str(exam.get("id") or "")
+                st.rerun()
+    if st.session_state.get("view_solutions_attempt_id") == attempt.get("id"):
+        exam_data = supabase.table("exams").select("*").eq("id", exam.get("id")).execute().data
+        if exam_data and exam_data[0].get("show_answers"):
+            st.subheader("Solutions")
+            render_review_sheet(questions, answer_map, [attempt])
+        else:
+            st.info("Solutions visibility admin disable chesaru.")
+
+def render_exam_detail_view(exam):
+    st.markdown(f"### {exam.get('title', 'Exam')}")
+    questions = supabase.table("questions").select("*").eq("exam_id", exam["id"]).execute().data or []
+    attempts = get_exam_attempt_rows(st.session_state.user_id, exam["id"])
+    active_session = get_active_programming_session(st.session_state.user_id, exam["id"]) if is_programming_exam(exam["id"]) else None
+    tab_details, tab_attempts = st.tabs(["Assessment Details", "Previous Attempts"])
+    with tab_details:
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Duration", f"{int(exam.get('duration_mins') or 30)} mins")
+        c2.metric("Questions", len(questions))
+        c3.metric("Marks", get_exam_max_marks(questions))
+        has_pwd = exam.get("password") and str(exam["password"]).strip()
+        entered_pwd = st.text_input(f"Access Code for {exam['title']}", type="password", key=f"detail_pwd_{exam['id']}") if has_pwd else ""
+        if st.button("Start Exam", key=f"detail_start_{exam['id']}", type="primary", use_container_width=True):
+            if has_pwd and entered_pwd.strip() != str(exam["password"]).strip():
+                st.error("Wrong Password!")
+            else:
+                start_exam_with_questions(exam, questions)
+                st.rerun()
+    with tab_attempts:
+        cards = []
+        if active_session:
+            cards.append(("In Progress", active_session, None))
+        cards.extend(("Completed", attempt, attempt) for attempt in attempts)
+        if not cards:
+            st.info("Previous attempts levu.")
+        cols = st.columns(3)
+        for idx, (status, row, attempt) in enumerate(cards):
+            with cols[idx % 3]:
+                with st.container(border=True):
+                    st.markdown("**Attempted on:**")
+                    st.caption(format_attempt_date(row.get("updated_at") or row.get("created_at") or row.get("submitted_at")))
+                    st.markdown(f"**Status:** {status}")
+                    if status == "In Progress":
+                        if st.button("Resume Test", key=f"resume_session_{exam['id']}", use_container_width=True):
+                            start_exam_with_questions(exam, questions)
+                            st.rerun()
+                    else:
+                        score = int(attempt.get("score") or 0)
+                        total = get_exam_max_marks(questions)
+                        st.caption(f"Score: {score}/{total}")
+                        if st.button("View Results", key=f"attempt_result_{attempt['id']}", use_container_width=True):
+                            st.session_state.exam_id = exam["id"]
+                            st.session_state.exam_title = exam["title"]
+                            st.session_state.current_questions = questions
+                            st.session_state.last_attempt_id = attempt["id"]
+                            st.session_state.start_exam = True
+                            st.session_state.exam_submitted = True
+                            st.rerun()
+
 def render_student_exam_card(exam, key_prefix="exam"):
     if not exam.get("enabled"):
         return
-    exam_dur = exam.get("duration_mins", 30)
-    st.write(f" **Exam: {exam['title']}** ({exam_dur} Mins)")
-    btn_col, lb_col = st.columns([2, 2])
-    with lb_col:
-        board = get_exam_leaderboard(exam["id"])
-        if board:
-            st.markdown(" **Top Performers:**")
-            for idx, student in enumerate(board[:3]):
-                medal = "" if idx == 0 else "" if idx == 1 else ""
-                st.caption(f"{medal} {student['Name']}  {student['Score']}")
-        else:
-            st.caption("Be the first! ")
-    with btn_col:
-        check_attempt = supabase.table("exam_attempts").select("*").eq("user_id", st.session_state.user_id).eq("exam_id", exam["id"]).execute().data
-        if check_attempt:
-            q_count = supabase.table("questions").select("*").eq("exam_id", exam["id"]).execute().data
-            total_q = get_exam_max_marks(q_count)
-            st.markdown("**  Attempts:**")
-            for idx, att in enumerate(check_attempt):
-                pct = int((int(att.get("score") or 0) / total_q) * 100) if total_q else 0
-                st.caption(f"Attempt {idx+1}: **{att['score']}/{total_q}** ({pct}%)")
-            if st.button("Show Answers", key=f"{key_prefix}_view_{exam['id']}", use_container_width=True):
-                st.session_state.exam_id = exam["id"]
-                st.session_state.exam_title = exam["title"]
-                st.session_state.start_exam = True
-                st.session_state.exam_submitted = True
-                st.session_state.current_questions = supabase.table("questions").select("*").eq("exam_id", exam["id"]).execute().data
-                st.rerun()
-            retake_req = supabase.table("exam_retake_requests").select("*").eq("user_id", st.session_state.user_id).eq("exam_id", exam["id"]).order("requested_at", desc=True).limit(1).execute().data
-            if retake_req:
-                status = retake_req[0]["status"]
-                if status == "pending":
-                    st.warning("Re-exam request pending...")
-                elif status == "rejected":
-                    st.error("Re-exam rejected.")
-                    if st.button("Request", key=f"{key_prefix}_retry_req_{exam['id']}", use_container_width=True):
-                        supabase.table("exam_retake_requests").insert({"user_id": st.session_state.user_id, "exam_id": exam["id"], "status": "pending"}).execute()
-                        st.success("Request !"); st.rerun()
-                elif status == "approved":
-                    st.success("Re-exam approved.")
-                    has_pwd = exam.get("password") and str(exam["password"]).strip()
-                    entered_pwd = st.text_input("Access Code", type="password", key=f"{key_prefix}_repwd_{exam['id']}") if has_pwd else ""
-                    if st.button("Start Re-Exam", key=f"{key_prefix}_rebtn_{exam['id']}", use_container_width=True, type="primary"):
-                        if has_pwd and entered_pwd.strip() != str(exam["password"]).strip():
-                            st.error("Wrong Password!")
-                        else:
-                            supabase.table("exam_retake_requests").update({"status": "used"}).eq("id", retake_req[0]["id"]).execute()
-                            q_data = supabase.table("questions").select("*").eq("exam_id", exam["id"]).execute().data
-                            start_exam_with_questions(exam, q_data)
-                            st.rerun()
-            else:
-                if st.button("Try Again Request", key=f"{key_prefix}_req_{exam['id']}", use_container_width=True):
-                    supabase.table("exam_retake_requests").insert({"user_id": st.session_state.user_id, "exam_id": exam["id"], "status": "pending"}).execute()
-                    st.success("Request sent."); st.rerun()
-        else:
-            has_pwd = exam.get("password") and str(exam["password"]).strip()
-            entered_pwd = st.text_input(f"Access Code for {exam['title']}", type="password", key=f"{key_prefix}_pwd_{exam['id']}") if has_pwd else ""
-            if st.button("Start Exam", key=f"{key_prefix}_btn_{exam['id']}", use_container_width=True):
-                if has_pwd and entered_pwd.strip() != str(exam["password"]).strip():
-                    st.error("Wrong Password!")
-                else:
-                    q_data = supabase.table("questions").select("*").eq("exam_id", exam["id"]).execute().data
-                    start_exam_with_questions(exam, q_data)
-                    st.rerun()
+    attempts = get_exam_attempt_rows(st.session_state.user_id, exam["id"])
+    max_marks = get_exam_max_marks(supabase.table("questions").select("*").eq("exam_id", exam["id"]).execute().data or [])
+    st.markdown(f"#### {exam.get('title', 'Exam')}")
+    st.caption(f"{int(exam.get('duration_mins') or 30)} mins | {len(attempts)} previous attempts | {max_marks} marks")
+    if st.button("Open Exam", key=f"{key_prefix}_open_{exam['id']}", use_container_width=True, type="primary"):
+        st.session_state.selected_exam_detail_id = str(exam["id"])
+        st.rerun()
 
 def show_student_exams_tab(user_id):
     st.title("Exams")
@@ -1496,6 +1604,16 @@ def show_student_exams_tab(user_id):
     if not exams:
         st.info("Active exams levu.")
         return
+    selected_exam_id = str(st.session_state.get("selected_exam_detail_id") or "")
+    if selected_exam_id:
+        selected_exam = next((exam for exam in exams if str(exam.get("id")) == selected_exam_id), None)
+        if selected_exam:
+            if st.button("Back to Exam Folders", key="back_to_exam_folders"):
+                st.session_state.selected_exam_detail_id = ""
+                st.rerun()
+            render_exam_detail_view(selected_exam)
+            return
+        st.session_state.selected_exam_detail_id = ""
     if not folders:
         st.caption("Folders setup ayyaka Aptitude, Reasoning, Programming boxes ikkada kanipistayi.")
         for exam in exams:
@@ -1537,6 +1655,16 @@ def show_admin_exam_folders_tab():
         st.code(get_exam_folders_sql(), language="sql")
     folders = fetch_exam_folders(show_warning=True)
     folder_options = build_exam_folder_options(folders)
+    folder_parent_map = {str(folder.get("id")): str(folder.get("parent_id") or "") for folder in folders}
+    def is_descendant_folder(candidate_id, folder_id):
+        current = str(candidate_id or "")
+        seen = set()
+        while current and current not in seen:
+            if current == str(folder_id):
+                return True
+            seen.add(current)
+            current = folder_parent_map.get(current, "")
+        return False
     col_add, col_move = st.columns([1, 2])
     with col_add:
         st.markdown("#### Create Folder")
@@ -1563,10 +1691,25 @@ def show_admin_exam_folders_tab():
             with st.expander(folder.get("title", "Folder")):
                 new_title = st.text_input("Title", value=folder.get("title") or "", key=f"exam_folder_title_{folder['id']}")
                 new_order = st.number_input("Order", min_value=0, value=int(folder.get("display_order") or 0), step=1, key=f"exam_folder_order_{folder['id']}")
+                parent_choices = {
+                    label: fid for label, fid in folder_options.items()
+                    if str(fid) != str(folder["id"]) and not is_descendant_folder(fid, folder["id"])
+                }
+                current_parent_label = next((label for label, fid in parent_choices.items() if str(fid) == str(folder.get("parent_id"))), "No Folder / Uncategorized")
+                new_parent_label = st.selectbox(
+                    "Parent Folder",
+                    list(parent_choices.keys()),
+                    index=list(parent_choices.keys()).index(current_parent_label) if current_parent_label in parent_choices else 0,
+                    key=f"exam_folder_parent_{folder['id']}",
+                )
                 save_col, del_col = st.columns(2)
                 with save_col:
                     if st.button("Save", key=f"exam_folder_save_{folder['id']}", use_container_width=True):
-                        supabase.table("exam_folders").update({"title": new_title.strip(), "display_order": int(new_order)}).eq("id", folder["id"]).execute()
+                        supabase.table("exam_folders").update({
+                            "title": new_title.strip(),
+                            "display_order": int(new_order),
+                            "parent_id": parent_choices.get(new_parent_label),
+                        }).eq("id", folder["id"]).execute()
                         st.success("Folder update ayyindi."); st.rerun()
                 with del_col:
                     if st.button("Delete", key=f"exam_folder_delete_{folder['id']}", use_container_width=True):
@@ -1828,6 +1971,17 @@ def insert_user_answer_row(attempt_id, question_id, answer, time_spent_seconds=N
             last_error = e
     raise last_error
 
+def insert_exam_attempt_row(payload):
+    payloads = [{**payload, "created_at": "now()"}, payload]
+    last_error = None
+    for item in payloads:
+        try:
+            supabase.table("exam_attempts").insert(item).execute()
+            return
+        except Exception as e:
+            last_error = e
+    raise last_error
+
 def submit_exam_attempt(questions, include_time=False, require_programming_submitted=False):
     if require_programming_submitted:
         pending = get_unsubmitted_program_questions(questions, st.session_state.answers)
@@ -1836,12 +1990,12 @@ def submit_exam_attempt(questions, include_time=False, require_programming_submi
             raise ValueError(f"Please click Submit Program for question(s): {nums}")
     attempt_uuid = str(uuid.uuid4())
     final_score, total_marks, final_percentage, answer_payloads = score_exam_answers(questions, st.session_state.answers, use_cached_programming=True)
-    supabase.table("exam_attempts").insert({
+    insert_exam_attempt_row({
         "id": attempt_uuid,
         "user_id": st.session_state.user_id,
         "exam_id": st.session_state.exam_id,
         "score": final_score,
-    }).execute()
+    })
     for q in questions:
         t_spent = st.session_state.question_time_log.get(q["id"], 0) if include_time else None
         insert_user_answer_row(attempt_uuid, q["id"], answer_payloads.get(q["id"], ""), t_spent)
@@ -5286,36 +5440,22 @@ def exam_workspace_view():
                 return
 
     if st.session_state.exam_submitted:
-        st.title(f" Results: {st.session_state.exam_title}")
+        exam_data = supabase.table("exams").select("*").eq("id", st.session_state.exam_id).execute().data or [{}]
+        current_exam = exam_data[0]
+        current_exam.setdefault("id", st.session_state.exam_id)
+        current_exam.setdefault("title", st.session_state.exam_title)
         db_attempt = supabase.table("exam_attempts").select("*").eq("user_id", st.session_state.user_id).eq("exam_id", st.session_state.exam_id).execute().data
         if db_attempt and st.session_state.get("last_attempt_id"):
             last_id = st.session_state.last_attempt_id
             db_attempt = sorted(db_attempt, key=lambda att: 0 if att.get("id") == last_id else 1)
         if db_attempt:
-            max_marks = get_exam_max_marks(questions)
-            st.markdown("###    Attempts")
-            for idx, att in enumerate(reversed(db_attempt)):
-                pct = int((int(att.get("score") or 0) / max_marks) * 100) if max_marks else 0
-                st.info(f"Attempt {idx+1}: **{att['score']}/{max_marks}** ({pct}%)")
-            st.divider()
-            latest = db_attempt[0]
-            latest_pct = int((int(latest.get("score") or 0) / max_marks) * 100) if max_marks else 0
-            st.success(f" Latest Score: {latest['score']}/{max_marks} ({latest_pct}%)")
-            db_answers = supabase.table("user_answers").select("*").eq("attempt_id", latest["id"]).execute().data
-            ans_map = {a["question_id"]: a["answer"] for a in db_answers}
-            exam_data = supabase.table("exams").select("*").eq("id", st.session_state.exam_id).execute().data
-            if exam_data and exam_data[0]["show_answers"]:
-                st.subheader("Review Sheet")
-                render_review_sheet(questions, ans_map, db_attempt)
-
-        if st.button("Return to Dashboard", type="primary"):
-            save_programming_exam_session(status="submitted", force_submit=False)
-            st.session_state.start_exam = False
-            st.session_state.exam_submitted = False
-            st.session_state.answers = {}
-            st.session_state.question_index = 0
-            st.session_state.current_questions = []
-            st.rerun()
+            render_exam_result_summary(current_exam, questions, db_attempt[0], show_return=True)
+        else:
+            st.warning("Attempt details dorakaledu.")
+            if st.button("Return to Exams", type="primary"):
+                st.session_state.start_exam = False
+                st.session_state.exam_submitted = False
+                st.rerun()
     else:
         current = st.session_state.question_index
         question = questions[current]
