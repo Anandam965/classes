@@ -1569,7 +1569,8 @@ def render_exam_result_summary(exam, questions, attempt, show_return=True):
     attempted = len([q for q in questions if str(answer_map.get(q["id"], "")).strip()])
     wrong = max(max_marks - score, 0)
     time_spent = get_attempt_time_spent_seconds(attempt.get("id"))
-    status = "Qualified" if pct >= 35 else "Not Qualified"
+    qualifying_pct = 80
+    status = "Qualified" if pct >= qualifying_pct else "Not Qualified"
     st.markdown(
         f"""
         <style>
@@ -1593,7 +1594,7 @@ def render_exam_result_summary(exam, questions, attempt, show_return=True):
                     <div class="result-metric"><small>Percentage</small><strong>{pct:.2f}</strong></div>
                     <div class="result-metric"><small>Accuracy</small><strong>{pct:.2f}</strong></div>
                     <div class="result-metric"><small>Status</small><strong>{status}</strong></div>
-                    <div class="result-metric"><small>Qualifying Percentage</small><strong>35.00%</strong></div>
+                    <div class="result-metric"><small>Qualifying Percentage</small><strong>{qualifying_pct:.2f}%</strong></div>
                 </div>
             </div>
             <div class="result-art">&#10003;</div>
@@ -5963,6 +5964,7 @@ else:
         exam_workspace_view()
     else:
         user_dashboard(preview_mode=False)
+
 
 
 
