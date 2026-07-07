@@ -1353,6 +1353,243 @@ def is_programming_exam(exam_id):
     except Exception:
         return False
 
+def get_exam_folders_sql():
+    return """
+create table if not exists exam_folders (
+  id uuid primary key default gen_random_uuid(),
+  parent_id uuid references exam_folders(id) on delete cascade,
+  title text not null,
+  display_order integer not null default 0,
+  created_at timestamptz default now()
+);
+
+alter table exams
+add column if not exists folder_id uuid references exam_folders(id) on delete set null;
+
+insert into exam_folders (title, display_order)
+select seed.title, seed.display_order
+from (values ('Aptitude', 1), ('Reasoning', 2), ('Programming', 3)) as seed(title, display_order)
+where not exists (
+  select 1 from exam_folders f
+  where f.parent_id is null and lower(f.title) = lower(seed.title)
+);
+"""
+
+def fetch_exam_folders(show_warning=False):
+    try:
+        return supabase.table("exam_folders").select("*").order("display_order").order("title").execute().data or []
+    except Exception as e:
+        if show_warning:
+            st.warning(f"Exam folders table ready ledu. SQL setup run cheyyandi: {e}")
+        return []
+
+def build_exam_folder_options(folders, include_uncategorized=True):
+    by_parent = {}
+    for folder in folders:
+        by_parent.setdefault(str(folder.get("parent_id") or ""), []).append(folder)
+    options = {}
+    if include_uncategorized:
+        options["No Folder / Uncategorized"] = None
+    def walk(parent_id="", depth=0):
+        for folder in by_parent.get(str(parent_id or ""), []):
+            label = f"{'  ' * depth}{folder.get('title', 'Folder')}"
+            options[label] = folder.get("id")
+            walk(folder.get("id"), depth + 1)
+    walk()
+    return options
+
+def create_exam_record(payload):
+    try:
+        return supabase.table("exams").insert(payload).execute().data
+    except Exception as e:
+        if "folder_id" in payload:
+            fallback = dict(payload)
+            fallback.pop("folder_id", None)
+            st.warning("folder_id column database lo inka ledu. Exam create ayyindi, folder assign avvaledu. SQL setup run cheyyandi.")
+            return supabase.table("exams").insert(fallback).execute().data
+        raise e
+
+def set_exam_folder(exam_id, folder_id):
+    try:
+        supabase.table("exams").update({"folder_id": folder_id}).eq("id", exam_id).execute()
+        return True
+    except Exception as e:
+        st.error(f"Exam folder update avvaledu. SQL setup run chesara? {e}")
+        return False
+
+def render_student_exam_card(exam, key_prefix="exam"):
+    if not exam.get("enabled"):
+        return
+    exam_dur = exam.get("duration_mins", 30)
+    st.write(f" **Exam: {exam['title']}** ({exam_dur} Mins)")
+    btn_col, lb_col = st.columns([2, 2])
+    with lb_col:
+        board = get_exam_leaderboard(exam["id"])
+        if board:
+            st.markdown(" **Top Performers:**")
+            for idx, student in enumerate(board[:3]):
+                medal = "" if idx == 0 else "" if idx == 1 else ""
+                st.caption(f"{medal} {student['Name']}  {student['Score']}")
+        else:
+            st.caption("Be the first! ")
+    with btn_col:
+        check_attempt = supabase.table("exam_attempts").select("*").eq("user_id", st.session_state.user_id).eq("exam_id", exam["id"]).execute().data
+        if check_attempt:
+            q_count = supabase.table("questions").select("*").eq("exam_id", exam["id"]).execute().data
+            total_q = get_exam_max_marks(q_count)
+            st.markdown("**  Attempts:**")
+            for idx, att in enumerate(check_attempt):
+                pct = int((int(att.get("score") or 0) / total_q) * 100) if total_q else 0
+                st.caption(f"Attempt {idx+1}: **{att['score']}/{total_q}** ({pct}%)")
+            if st.button("Show Answers", key=f"{key_prefix}_view_{exam['id']}", use_container_width=True):
+                st.session_state.exam_id = exam["id"]
+                st.session_state.exam_title = exam["title"]
+                st.session_state.start_exam = True
+                st.session_state.exam_submitted = True
+                st.session_state.current_questions = supabase.table("questions").select("*").eq("exam_id", exam["id"]).execute().data
+                st.rerun()
+            retake_req = supabase.table("exam_retake_requests").select("*").eq("user_id", st.session_state.user_id).eq("exam_id", exam["id"]).order("requested_at", desc=True).limit(1).execute().data
+            if retake_req:
+                status = retake_req[0]["status"]
+                if status == "pending":
+                    st.warning("Re-exam request pending...")
+                elif status == "rejected":
+                    st.error("Re-exam rejected.")
+                    if st.button("Request", key=f"{key_prefix}_retry_req_{exam['id']}", use_container_width=True):
+                        supabase.table("exam_retake_requests").insert({"user_id": st.session_state.user_id, "exam_id": exam["id"], "status": "pending"}).execute()
+                        st.success("Request !"); st.rerun()
+                elif status == "approved":
+                    st.success("Re-exam approved.")
+                    has_pwd = exam.get("password") and str(exam["password"]).strip()
+                    entered_pwd = st.text_input("Access Code", type="password", key=f"{key_prefix}_repwd_{exam['id']}") if has_pwd else ""
+                    if st.button("Start Re-Exam", key=f"{key_prefix}_rebtn_{exam['id']}", use_container_width=True, type="primary"):
+                        if has_pwd and entered_pwd.strip() != str(exam["password"]).strip():
+                            st.error("Wrong Password!")
+                        else:
+                            supabase.table("exam_retake_requests").update({"status": "used"}).eq("id", retake_req[0]["id"]).execute()
+                            q_data = supabase.table("questions").select("*").eq("exam_id", exam["id"]).execute().data
+                            start_exam_with_questions(exam, q_data)
+                            st.rerun()
+            else:
+                if st.button("Try Again Request", key=f"{key_prefix}_req_{exam['id']}", use_container_width=True):
+                    supabase.table("exam_retake_requests").insert({"user_id": st.session_state.user_id, "exam_id": exam["id"], "status": "pending"}).execute()
+                    st.success("Request sent."); st.rerun()
+        else:
+            has_pwd = exam.get("password") and str(exam["password"]).strip()
+            entered_pwd = st.text_input(f"Access Code for {exam['title']}", type="password", key=f"{key_prefix}_pwd_{exam['id']}") if has_pwd else ""
+            if st.button("Start Exam", key=f"{key_prefix}_btn_{exam['id']}", use_container_width=True):
+                if has_pwd and entered_pwd.strip() != str(exam["password"]).strip():
+                    st.error("Wrong Password!")
+                else:
+                    q_data = supabase.table("questions").select("*").eq("exam_id", exam["id"]).execute().data
+                    start_exam_with_questions(exam, q_data)
+                    st.rerun()
+
+def show_student_exams_tab(user_id):
+    st.title("Exams")
+    folders = fetch_exam_folders(show_warning=True)
+    try:
+        exams = supabase.table("exams").select("*").eq("enabled", True).execute().data or []
+    except Exception as e:
+        st.error(f"Exams load avvaledu: {e}")
+        return
+    if not exams:
+        st.info("Active exams levu.")
+        return
+    if not folders:
+        st.caption("Folders setup ayyaka Aptitude, Reasoning, Programming boxes ikkada kanipistayi.")
+        for exam in exams:
+            with st.container(border=True):
+                render_student_exam_card(exam, key_prefix="all_exam")
+        return
+    exams_by_folder = {}
+    for exam in exams:
+        exams_by_folder.setdefault(str(exam.get("folder_id") or ""), []).append(exam)
+    folder_by_id = {str(folder.get("id")): folder for folder in folders}
+    def folder_path(folder):
+        names = []
+        current = folder
+        seen = set()
+        while current and str(current.get("id")) not in seen:
+            seen.add(str(current.get("id")))
+            names.append(str(current.get("title") or "Folder"))
+            current = folder_by_id.get(str(current.get("parent_id") or ""))
+        return " / ".join(reversed(names))
+    for folder in sorted(folders, key=folder_path):
+        folder_id = str(folder.get("id"))
+        direct_exams = exams_by_folder.get(folder_id, [])
+        with st.expander(f"{folder_path(folder)} ({len(direct_exams)} exams)", expanded=(folder.get("parent_id") is None)):
+            if not direct_exams:
+                st.caption("I folder lo inka exams levu.")
+            for exam in direct_exams:
+                with st.container(border=True):
+                    render_student_exam_card(exam, key_prefix=f"folder_{folder_id}")
+    uncategorized = exams_by_folder.get("", [])
+    if uncategorized:
+        with st.expander(f"Uncategorized ({len(uncategorized)} exams)", expanded=True):
+            for exam in uncategorized:
+                with st.container(border=True):
+                    render_student_exam_card(exam, key_prefix="uncat_exam")
+
+def show_admin_exam_folders_tab():
+    st.subheader("Exam Folders")
+    with st.expander("Database SQL setup", expanded=False):
+        st.code(get_exam_folders_sql(), language="sql")
+    folders = fetch_exam_folders(show_warning=True)
+    folder_options = build_exam_folder_options(folders)
+    col_add, col_move = st.columns([1, 2])
+    with col_add:
+        st.markdown("#### Create Folder")
+        with st.form("create_exam_folder_form", clear_on_submit=True):
+            parent_label = st.selectbox("Parent Folder", list(folder_options.keys()), key="new_exam_folder_parent")
+            folder_title = st.text_input("Folder Name", placeholder="Aptitude / Reasoning / Programming")
+            display_order = st.number_input("Display Order", min_value=0, value=0, step=1)
+            if st.form_submit_button("Create Folder", type="primary"):
+                if not folder_title.strip():
+                    st.error("Folder name enter cheyyandi.")
+                else:
+                    try:
+                        supabase.table("exam_folders").insert({
+                            "title": folder_title.strip(),
+                            "parent_id": folder_options.get(parent_label),
+                            "display_order": int(display_order),
+                        }).execute()
+                        st.success("Folder create ayyindi.")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Folder create avvaledu. SQL setup run cheyyandi: {e}")
+        st.markdown("#### Manage Folders")
+        for folder in folders:
+            with st.expander(folder.get("title", "Folder")):
+                new_title = st.text_input("Title", value=folder.get("title") or "", key=f"exam_folder_title_{folder['id']}")
+                new_order = st.number_input("Order", min_value=0, value=int(folder.get("display_order") or 0), step=1, key=f"exam_folder_order_{folder['id']}")
+                save_col, del_col = st.columns(2)
+                with save_col:
+                    if st.button("Save", key=f"exam_folder_save_{folder['id']}", use_container_width=True):
+                        supabase.table("exam_folders").update({"title": new_title.strip(), "display_order": int(new_order)}).eq("id", folder["id"]).execute()
+                        st.success("Folder update ayyindi."); st.rerun()
+                with del_col:
+                    if st.button("Delete", key=f"exam_folder_delete_{folder['id']}", use_container_width=True):
+                        supabase.table("exam_folders").delete().eq("id", folder["id"]).execute()
+                        st.warning("Folder delete ayyindi."); st.rerun()
+    with col_move:
+        st.markdown("#### Move Existing Exams")
+        exams = supabase.table("exams").select("*").execute().data or []
+        if not exams:
+            st.info("Exams levu.")
+            return
+        for exam in exams:
+            current_folder = exam.get("folder_id")
+            labels = list(folder_options.keys())
+            current_label = next((label for label, fid in folder_options.items() if str(fid) == str(current_folder)), labels[0])
+            with st.container(border=True):
+                st.markdown(f"**{exam.get('title', 'Untitled Exam')}**")
+                selected = st.selectbox("Move to folder", labels, index=labels.index(current_label), key=f"move_exam_folder_{exam['id']}")
+                if st.button("Move Exam", key=f"move_exam_btn_{exam['id']}", use_container_width=True):
+                    if set_exam_folder(exam["id"], folder_options.get(selected)):
+                        st.success("Exam folder update ayyindi.")
+                        st.rerun()
+
 def get_programming_session_sql():
     return """
 create table if not exists programming_exam_sessions (
@@ -2127,7 +2364,7 @@ def get_student_completed_ids(user_id):
 def focus_student_class(class_id, exam_id=""):
     st.session_state.focus_class_id = str(class_id) if class_id else ""
     st.session_state.focus_exam_id = str(exam_id) if exam_id else ""
-    st.session_state.user_page = "My Classes"
+    st.session_state.user_page = "Exams" if exam_id else "My Classes"
     st.rerun()
 
 def start_student_exam(exam):
@@ -3367,16 +3604,18 @@ def admin_dashboard():
                             st.warning("Deleted!"); st.rerun()
 
     elif menu == "Manage Exams & Questions":
-        ex_tab1, ex_tab2, ex_tab3, ex_tab4, ex_tab5 = st.tabs([
-            " Exams Setup", " Add Questions", " Review Papers", " Bulk Upload (CSV)", " AI Gen"
+        ex_tab1, ex_tab2, ex_tab3, ex_tab4, ex_tab5, ex_tab6 = st.tabs([
+            " Exams Setup", " Add Questions", " Review Papers", " Bulk Upload (CSV)", " AI Gen", " Exam Folders"
         ])
 
         with ex_tab1:
             st.subheader("Setup Dynamic Exams")
             classes_list = supabase.table("classes").select("*").execute().data
             cls_options = {c["title"]: c["id"] for c in classes_list} if classes_list else {}
+            exam_folder_options = build_exam_folder_options(fetch_exam_folders())
             with st.form("create_exam_form", clear_on_submit=True):
                 sel_cls = st.selectbox("Link with Lesson Class", list(cls_options.keys()) or ["No classes yet"])
+                sel_exam_folder = st.selectbox("Show under Exam Folder", list(exam_folder_options.keys()), key="create_exam_folder")
                 e_title = st.text_input("Exam Sheet Name")
                 e_duration = st.number_input("Exam Duration (Minutes)", min_value=1, max_value=900, value=30, help="15 hours varaku set cheyyachu (900 minutes).")
                 e_pwd = st.text_input("Exam Password (Optional)", type="password")
@@ -3384,12 +3623,13 @@ def admin_dashboard():
                 c_ans = st.checkbox("Enable Answers Visibility")
                 if st.form_submit_button(" Generate Exam Layout"):
                     if sel_cls in cls_options:
-                        supabase.table("exams").insert({
+                        create_exam_record({
                             "class_id": cls_options[sel_cls], "title": e_title,
                             "duration_mins": int(e_duration),
                             "password": e_pwd.strip() if e_pwd.strip() else None,
-                            "enabled": c_en, "show_answers": c_ans
-                        }).execute()
+                            "enabled": c_en, "show_answers": c_ans,
+                            "folder_id": exam_folder_options.get(sel_exam_folder)
+                        })
                         st.success("Exam Created!"); st.rerun()
             with st.expander("Programming Exam Builder - existing questions nundi create cheyyandi"):
                 st.caption("Already add chesina programming questions select chesi, new exam create cheyyachu.")
@@ -3398,6 +3638,7 @@ def admin_dashboard():
                     st.info("Existing programming questions levu. First Add Questions tab lo programming question add cheyyandi.")
                 else:
                     builder_cls = st.selectbox("Class select cheyyandi", list(cls_options.keys()) or ["No classes yet"], key="prog_builder_class")
+                    builder_folder = st.selectbox("Exam Folder select cheyyandi", list(exam_folder_options.keys()), key="prog_builder_folder")
                     builder_title = st.text_input("Programming Exam Name", key="prog_builder_title")
                     builder_duration = st.number_input("Duration (Minutes)", min_value=1, max_value=900, value=60, key="prog_builder_duration", help="15 hours varaku set cheyyachu (900 minutes).")
                     builder_pwd = st.text_input("Password (Optional)", type="password", key="prog_builder_pwd")
@@ -3419,14 +3660,15 @@ def admin_dashboard():
                         elif not selected_labels:
                             st.error("At least one programming question select cheyyandi.")
                         else:
-                            created = supabase.table("exams").insert({
+                            created = create_exam_record({
                                 "class_id": cls_options[builder_cls],
                                 "title": builder_title.strip(),
                                 "duration_mins": int(builder_duration),
                                 "password": builder_pwd.strip() if builder_pwd.strip() else None,
                                 "enabled": builder_enabled,
                                 "show_answers": builder_show_answers,
-                            }).execute().data
+                                "folder_id": exam_folder_options.get(builder_folder),
+                            })
                             new_exam = created[0] if created else None
                             if not new_exam:
                                 matches = supabase.table("exams").select("*").eq("title", builder_title.strip()).eq("class_id", cls_options[builder_cls]).execute().data or []
@@ -3981,6 +4223,9 @@ def admin_dashboard():
                             st.success("Added!"); st.rerun()
                         else:
                             st.error("Question text empty!")
+
+        with ex_tab6:
+            show_admin_exam_folders_tab()
 
     elif menu == "Student Results & Ranks":
         r_tab1, r_tab2, r_tab3, r_tab4, r_tab5, r_tab6, r_tab7 = st.tabs([
@@ -4847,7 +5092,7 @@ def user_dashboard(preview_mode=False):
                 st.session_state[key] = defaults[key]
             show_logout_redirect()
         st.sidebar.divider()
-        pages = ["My Classes", "Programming", "Progress", "Code Practice", "Group Chat", "Attendance"]
+        pages = ["My Classes", "Exams", "Progress", "Code Practice", "Group Chat", "Attendance"]
         if user_has_suprabhatam_access(st.session_state.user_id):
             pages.append("Suprabhatam")
         for pg in pages:
@@ -4878,7 +5123,10 @@ def user_dashboard(preview_mode=False):
     if user_page in ["Java Practice", "Code Practice"]:
         show_code_practice_tab(); return
     if user_page == "Programming":
-        show_programming_questions_tab(st.session_state.user_id); return
+        st.session_state.user_page = "Exams"
+        user_page = "Exams"
+    if user_page == "Exams":
+        show_student_exams_tab(st.session_state.user_id); return
     if user_page == "Attendance":
         show_attendance_tab(st.session_state.user_id); return
     if user_page == "Suprabhatam":
@@ -4898,23 +5146,20 @@ def user_dashboard(preview_mode=False):
     inject_student_home_styles()
     try:
         all_classes_count = len(supabase.table("classes").select("id").execute().data or [])
-        active_exam_count = len(supabase.table("exams").select("id").eq("enabled", True).execute().data or [])
     except Exception:
         all_classes_count = 0
-        active_exam_count = 0
     done_count = len(completed_ids)
     pending_count = max(all_classes_count - done_count, 0)
     st.markdown(
         f"""
         <div class="student-home-hero">
             <h2>Learning Workspace</h2>
-            <p>Modules, classes, aptitude practice, and exams anni oka place lo clean ga track cheyyandi.</p>
+            <p>Modules, classes, videos, and notes anni oka place lo clean ga track cheyyandi.</p>
         </div>
         <div class="home-stat-row">
             <div class="home-stat"><small>Modules</small><strong>{len(modules)}</strong></div>
             <div class="home-stat"><small>Classes Done</small><strong>{done_count}/{all_classes_count}</strong></div>
             <div class="home-stat"><small>Pending Classes</small><strong>{pending_count}</strong></div>
-            <div class="home-stat"><small>Active Exams</small><strong>{active_exam_count}</strong></div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -4990,78 +5235,6 @@ def user_dashboard(preview_mode=False):
                                     st.success("   !")
                                 except Exception as e:
                                     st.error(f"Insert Error: {e}")
-
-                    exams = supabase.table("exams").select("*").eq("class_id", cls["id"]).execute().data
-                    for exam in exams:
-                        if not exam["enabled"]: continue
-                        exam_dur = exam.get("duration_mins", 30)
-                        is_focused_exam = focus_exam_id and str(exam.get("id")) == focus_exam_id
-                        st.write(f" **Exam: {exam['title']}** ({exam_dur} Mins)")
-                        if is_focused_exam:
-                            st.info("Progress tab nundi open chesina exam idi. Password unte access code enter  start cheyyandi.")
-                        btn_col, lb_col = st.columns([2, 2])
-                        with lb_col:
-                            board = get_exam_leaderboard(exam["id"])
-                            if board:
-                                st.markdown(" **Top Performers:**")
-                                for idx, student in enumerate(board[:3]):
-                                    medal = "" if idx==0 else "" if idx==1 else ""
-                                    st.caption(f"{medal} {student['Name']}  {student['Score']}")
-                            else:
-                                st.caption("Be the first! ")
-                        with btn_col:
-                            check_attempt = supabase.table("exam_attempts").select("*").eq("user_id", st.session_state.user_id).eq("exam_id", exam["id"]).execute().data
-                            if check_attempt:
-                                q_count = supabase.table("questions").select("*").eq("exam_id", exam["id"]).execute().data
-                                total_q = get_exam_max_marks(q_count)
-                                st.markdown("**  Attempts:**")
-                                for idx, att in enumerate(check_attempt):
-                                    pct = int((int(att.get("score") or 0) / total_q) * 100) if total_q else 0
-                                    st.caption(f"Attempt {idx+1}: **{att['score']}/{total_q}** ({pct}%)")
-                                if st.button("Show Answers", key=f"view_{exam['id']}", use_container_width=True):
-                                    st.session_state.exam_id = exam["id"]
-                                    st.session_state.exam_title = exam["title"]
-                                    st.session_state.start_exam = True
-                                    st.session_state.exam_submitted = True
-                                    st.session_state.current_questions = supabase.table("questions").select("*").eq("exam_id", exam["id"]).execute().data
-                                    st.rerun()
-                                retake_req = supabase.table("exam_retake_requests").select("*").eq("user_id", st.session_state.user_id).eq("exam_id", exam["id"]).order("requested_at",desc=True).limit(1).execute().data
-                                if retake_req:
-                                    status = retake_req[0]["status"]
-                                    if status == "pending":
-                                        st.warning("Re-exam request pending...")
-                                    elif status == "rejected":
-                                        st.error("Re-exam rejected.")
-                                        if st.button("Request", key=f"retry_req_{exam['id']}", use_container_width=True):
-                                            supabase.table("exam_retake_requests").insert({"user_id": st.session_state.user_id, "exam_id": exam["id"], "status":"pending"}).execute()
-                                            st.success("Request !"); st.rerun()
-                                    elif status == "approved":
-                                        st.success("Re-exam approved.")
-                                        has_pwd = exam.get("password") and str(exam["password"]).strip()
-                                        entered_pwd = st.text_input(f"Access Code", type="password", key=f"repwd_{exam['id']}") if has_pwd else ""
-                                        if st.button("Start Re-Exam", key=f"rebtn_{exam['id']}", use_container_width=True, type="primary"):
-                                            if has_pwd and entered_pwd.strip() != str(exam["password"]).strip():
-                                                st.error("Wrong Password!")
-                                            else:
-                                                supabase.table("exam_retake_requests").update({"status":"used"}).eq("id",retake_req[0]["id"]).execute()
-                                                q_data = supabase.table("questions").select("*").eq("exam_id", exam["id"]).execute().data
-                                                start_exam_with_questions(exam, q_data)
-                                                st.rerun()
-                                else:
-                                    if st.button("Try Again Request", key=f"req_{exam['id']}", use_container_width=True):
-                                        supabase.table("exam_retake_requests").insert({"user_id": st.session_state.user_id, "exam_id": exam["id"], "status":"pending"}).execute()
-                                        st.success("Request sent."); st.rerun()
-                            else:
-                                has_pwd = exam.get("password") and str(exam["password"]).strip()
-                                entered_pwd = st.text_input(f"Access Code for {exam['title']}", type="password", key=f"pwd_{exam['id']}") if has_pwd else ""
-                                if st.button("Start Exam", key=f"btn_{exam['id']}", use_container_width=True):
-                                    if has_pwd and entered_pwd.strip() != str(exam["password"]).strip():
-                                        st.error("Wrong Password!")
-                                    else:
-                                        q_data = supabase.table("questions").select("*").eq("exam_id", exam["id"]).execute().data
-                                        start_exam_with_questions(exam, q_data)
-                                        st.rerun()
-                    st.divider()
 
 # =========================
 # EXAM WORKSPACE
