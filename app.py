@@ -1051,93 +1051,6 @@ def enable_fullscreen_exam_lock():
     )
 
 
-def enable_camera_proctoring_overlay():
-    components.html(
-        """
-        <script>
-        (function () {
-            const parentWindow = window.parent;
-            const doc = parentWindow.document;
-            if (parentWindow.__cameraProctorReady) return;
-            parentWindow.__cameraProctorReady = true;
-
-            function flag(reason) {
-                try {
-                    const url = new URL(parentWindow.location.href);
-                    url.searchParams.set("malpractice", "1");
-                    url.searchParams.set("mal_reason", reason);
-                    parentWindow.location.href = url.toString();
-                } catch (e) {}
-            }
-
-            const panel = doc.createElement("div");
-            panel.id = "camera-proctor-panel";
-            panel.innerHTML = `
-                <div class="camera-proctor-title">Camera Proctoring</div>
-                <video id="camera-proctor-video" autoplay muted playsinline></video>
-                <div id="camera-proctor-status">Camera permission waiting...</div>
-            `;
-            doc.body.appendChild(panel);
-
-            const style = doc.createElement("style");
-            style.textContent = `
-                #camera-proctor-panel {
-                    position: fixed;
-                    right: 18px;
-                    bottom: 18px;
-                    z-index: 2147483647;
-                    width: 220px;
-                    padding: 10px;
-                    border: 1px solid #d5dde8;
-                    border-radius: 8px;
-                    background: #ffffff;
-                    box-shadow: 0 14px 34px rgba(15, 23, 42, 0.18);
-                    font-family: system-ui, -apple-system, Segoe UI, sans-serif;
-                }
-                #camera-proctor-panel .camera-proctor-title {
-                    color: #172033;
-                    font-size: 13px;
-                    font-weight: 800;
-                    margin-bottom: 8px;
-                }
-                #camera-proctor-video {
-                    display: block;
-                    width: 100%;
-                    height: 132px;
-                    object-fit: cover;
-                    border-radius: 6px;
-                    background: #111827;
-                }
-                #camera-proctor-status {
-                    color: #526070;
-                    font-size: 12px;
-                    font-weight: 650;
-                    margin-top: 7px;
-                }
-            `;
-            doc.head.appendChild(style);
-
-            const video = panel.querySelector("#camera-proctor-video");
-            const status = panel.querySelector("#camera-proctor-status");
-            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-                status.textContent = "Camera not supported";
-                flag("Camera not supported for proctored exam");
-                return;
-            }
-            navigator.mediaDevices.getUserMedia({ video: true, audio: false })
-                .then(function (stream) {
-                    video.srcObject = stream;
-                    status.textContent = "Camera active";
-                })
-                .catch(function () {
-                    status.textContent = "Camera blocked";
-                    flag("Camera permission denied for proctored exam");
-                });
-        })();
-        </script>
-        """,
-        height=0,
-    )
 def enable_ide_textarea_behaviour(question_id, language="java"):
     components.html(
         f"""
@@ -1577,7 +1490,7 @@ create table if not exists exam_folders (
 );
 
 alter table exams
-add column if not exists folder_id uuid references exam_folders(id) on delete set null;`r`nalter table exams`r`nadd column if not exists proctoring_enabled boolean not null default false;
+add column if not exists folder_id uuid references exam_folders(id) on delete set null;
 
 insert into exam_folders (title, display_order)
 select seed.title, seed.display_order
@@ -1618,13 +1531,10 @@ def create_exam_record(payload):
     try:
         return supabase.table("exams").insert(payload).execute().data
     except Exception as e:
-        optional_columns = ["folder_id", "proctoring_enabled"]
-        if any(col in payload for col in optional_columns):
+        if "folder_id" in payload:
             fallback = dict(payload)
-            removed = [col for col in optional_columns if col in fallback]
-            for col in removed:
-                fallback.pop(col, None)
-            st.warning("Optional exam columns database lo inka levu. Exam create ayyindi, kani folder/proctoring assign avvakapovachu. SQL setup run cheyyandi.")
+            fallback.pop("folder_id", None)
+            st.warning("folder_id column database lo inka ledu. Exam create ayyindi, folder assign avvaledu. SQL setup run cheyyandi.")
             return supabase.table("exams").insert(fallback).execute().data
         raise e
 
@@ -4135,7 +4045,7 @@ def admin_dashboard():
                         updated_pwd = st.text_input("Password", value=str(ex.get("password","") or ""), key=f"pwd_ed_{ex['id']}")
                     with col_e3:
                         t_active = st.toggle("Active", value=ex["enabled"], key=f"tog_en_{ex['id']}")
-                        t_ans = st.toggle("Show Answers", value=ex["show_answers"], key=f"tog_ans_{ex['id']}")`r`n                        t_proctor = st.toggle("Camera Proctoring", value=bool(ex.get("proctoring_enabled", False)), key=f"tog_proc_{ex['id']}")
+                        t_ans = st.toggle("Show Answers", value=ex["show_answers"], key=f"tog_ans_{ex['id']}")
                     col_btn1, col_btn2 = st.columns(2)
                     with col_btn1:
                         if st.button("Save", key=f"up_ex_{ex['id']}", type="primary", use_container_width=True):
@@ -6074,8 +5984,6 @@ else:
         exam_workspace_view()
     else:
         user_dashboard(preview_mode=False)
-
-
 
 
 
