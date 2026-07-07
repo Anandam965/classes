@@ -1709,7 +1709,6 @@ def render_exam_detail_view(exam):
 
 def render_student_exam_card(exam, folder_label="Programming", key_prefix="exam"):
     title = html.escape(str(exam.get("title") or "Exam"))
-    folder_label = html.escape(str(folder_label or "Programming"))
     is_enabled = bool(exam.get("enabled"))
     status_tag = '<span class="student-exam-tag free">Free</span>' if is_enabled else '<span class="student-exam-tag blocked">Blocked</span>'
     with st.container(border=True):
@@ -1717,7 +1716,6 @@ def render_student_exam_card(exam, folder_label="Programming", key_prefix="exam"
             f"""
             <div class="student-exam-card-content">
                 <div class="student-exam-tags">
-                    <span class="student-exam-tag category">{folder_label}</span>
                     {status_tag}
                 </div>
                 <div class="student-exam-title">{title}</div>
@@ -5986,6 +5984,7 @@ else:
         exam_workspace_view()
     else:
         user_dashboard(preview_mode=False)
+
 
 
 
