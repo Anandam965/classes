@@ -1704,6 +1704,26 @@ def render_student_exam_card(exam, folder_label="Programming", key_prefix="exam"
             st.session_state.selected_exam_detail_id = str(exam["id"])
             st.rerun()
 
+def render_student_folder_card(folder, subfolder_count=0, exam_count=0, key_prefix="folder"):
+    title = html.escape(str(folder.get("title") or "Folder"))
+    item_text = f"{subfolder_count} folders" if subfolder_count else f"{exam_count} exams"
+    with st.container(border=True):
+        st.markdown(
+            f"""
+            <div class="student-exam-card-content">
+                <div class="student-exam-tags">
+                    <span class="student-exam-tag category">Folder</span>
+                    <span class="student-exam-tag free">{html.escape(item_text)}</span>
+                </div>
+                <div class="student-exam-title">{title}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        if st.button("Open", key=f"{key_prefix}_open_{folder['id']}", use_container_width=True):
+            st.session_state.student_exam_current_folder_id = str(folder["id"])
+            st.rerun()
+
 def show_student_exams_tab(user_id):
     folders = fetch_exam_folders(show_warning=True)
     try:
@@ -1711,25 +1731,14 @@ def show_student_exams_tab(user_id):
     except Exception as e:
         st.error(f"Exams load avvaledu: {e}")
         return
-    if not exams:
+    if not exams and not folders:
         st.info("Active exams levu.")
         return
-    selected_exam_id = str(st.session_state.get("selected_exam_detail_id") or "")
-    if selected_exam_id:
-        selected_exam = next((exam for exam in exams if str(exam.get("id")) == selected_exam_id), None)
-        if selected_exam:
-            if st.button("Back to Exam Folders", key="back_to_exam_folders"):
-                st.session_state.selected_exam_detail_id = ""
-                st.rerun()
-            render_exam_detail_view(selected_exam)
-            return
-        st.session_state.selected_exam_detail_id = ""
 
-    st.markdown('<div class="student-exams-page">', unsafe_allow_html=True)
+    folder_by_id = {str(folder.get("id")): folder for folder in folders}
     exams_by_folder = {}
     for exam in exams:
         exams_by_folder.setdefault(str(exam.get("folder_id") or ""), []).append(exam)
-    folder_by_id = {str(folder.get("id")): folder for folder in folders}
 
     def folder_path(folder):
         names = []
@@ -1741,45 +1750,67 @@ def show_student_exams_tab(user_id):
             current = folder_by_id.get(str(current.get("parent_id") or ""))
         return " / ".join(reversed(names))
 
-    visible_folders = [folder for folder in sorted(folders, key=folder_path) if exams_by_folder.get(str(folder.get("id")))]
-    filter_options = [("all", "All")]
-    filter_options.extend((str(folder.get("id")), folder_path(folder)) for folder in visible_folders)
-    if exams_by_folder.get(""):
-        filter_options.append(("uncategorized", "Uncategorized"))
+    def sort_folder(folder):
+        title = str(folder.get("title") or "")
+        programming_first = 0 if title.strip().lower() == "programming" else 1
+        return (programming_first, int(folder.get("display_order") or 0), title.lower())
 
-    selected_filter = str(st.session_state.get("student_exam_folder_filter") or "all")
-    valid_filter_ids = {option_id for option_id, _ in filter_options}
-    if selected_filter not in valid_filter_ids:
-        selected_filter = "all"
-        st.session_state.student_exam_folder_filter = "all"
-
-    filter_cols = st.columns([1] * len(filter_options))
-    for idx, (option_id, label) in enumerate(filter_options):
-        with filter_cols[idx]:
-            st.markdown('<span class="folder-filter-anchor"></span>', unsafe_allow_html=True)
-            if st.button(label, key=f"student_exam_filter_{option_id}", type=("primary" if selected_filter == option_id else "secondary")):
-                st.session_state.student_exam_folder_filter = option_id
+    selected_exam_id = str(st.session_state.get("selected_exam_detail_id") or "")
+    if selected_exam_id:
+        selected_exam = next((exam for exam in exams if str(exam.get("id")) == selected_exam_id), None)
+        if selected_exam:
+            if st.button("Back to Exam Folders", key="back_to_exam_folders"):
+                st.session_state.selected_exam_detail_id = ""
                 st.rerun()
+            render_exam_detail_view(selected_exam)
+            return
+        st.session_state.selected_exam_detail_id = ""
 
+    current_folder_id = str(st.session_state.get("student_exam_current_folder_id") or "")
+    if current_folder_id and current_folder_id not in folder_by_id:
+        current_folder_id = ""
+        st.session_state.student_exam_current_folder_id = ""
+
+    st.markdown('<div class="student-exams-page">', unsafe_allow_html=True)
+
+    if current_folder_id:
+        current_folder = folder_by_id[current_folder_id]
+        back_label = "Back to Folders"
+        if st.button(back_label, key=f"student_folder_back_{current_folder_id}"):
+            parent_id = str(current_folder.get("parent_id") or "")
+            st.session_state.student_exam_current_folder_id = parent_id
+            st.rerun()
+        st.markdown(f"### {html.escape(folder_path(current_folder))}")
+        child_folders = [folder for folder in folders if str(folder.get("parent_id") or "") == current_folder_id]
+        visible_exams = exams_by_folder.get(current_folder_id, []) if not child_folders else []
+    else:
+        child_folders = [folder for folder in folders if not folder.get("parent_id")]
+        visible_exams = exams_by_folder.get("", []) if not child_folders else []
+
+    child_folders = sorted(child_folders, key=sort_folder)
     folder_label_by_id = {str(folder.get("id")): folder_path(folder) for folder in folders}
-    if selected_filter == "all":
-        visible_exams = exams
-    elif selected_filter == "uncategorized":
-        visible_exams = exams_by_folder.get("", [])
-    else:
-        visible_exams = exams_by_folder.get(selected_filter, [])
 
-    if not visible_exams:
-        st.caption("I folder lo inka exams levu.")
-    else:
+    if child_folders:
+        cols = st.columns(4)
+        for idx, folder in enumerate(child_folders):
+            folder_id = str(folder.get("id"))
+            nested_count = len([child for child in folders if str(child.get("parent_id") or "") == folder_id])
+            exam_count = len(exams_by_folder.get(folder_id, []))
+            with cols[idx % 4]:
+                st.markdown('<div class="student-exam-card-wrap">', unsafe_allow_html=True)
+                render_student_folder_card(folder, subfolder_count=nested_count, exam_count=exam_count, key_prefix=f"student_folder_{idx}")
+                st.markdown('</div>', unsafe_allow_html=True)
+    elif visible_exams:
         cols = st.columns(4)
         for idx, exam in enumerate(visible_exams):
             folder_id = str(exam.get("folder_id") or "")
-            folder_label = folder_label_by_id.get(folder_id, "Programming" if folder_id else "Programming")
+            folder_label = folder_label_by_id.get(folder_id, "Programming")
             with cols[idx % 4]:
                 st.markdown('<div class="student-exam-card-wrap">', unsafe_allow_html=True)
-                render_student_exam_card(exam, folder_label=folder_label, key_prefix=f"student_exam_{selected_filter}_{idx}")
+                render_student_exam_card(exam, folder_label=folder_label, key_prefix=f"student_exam_{current_folder_id or 'root'}_{idx}")
                 st.markdown('</div>', unsafe_allow_html=True)
+    else:
+        st.caption("I folder lo inka sub folders/exams levu.")
     st.markdown('</div>', unsafe_allow_html=True)
 
 def show_admin_exam_folders_tab():
@@ -5932,6 +5963,7 @@ else:
         exam_workspace_view()
     else:
         user_dashboard(preview_mode=False)
+
 
 
 
