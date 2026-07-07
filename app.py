@@ -94,6 +94,8 @@ defaults = {
     "ai_generated_qs": None,
     "last_attempt_id": "",
     "selected_exam_detail_id": "",
+    "selected_exam_series_id": "",
+    "exam_lock_message": "",
     "view_solutions_attempt_id": "",
     "programming_session_loaded": False,
     "malpractice_reported_keys": set(),
@@ -1514,6 +1516,19 @@ alter table exams
 add column if not exists section_config jsonb not null default '[]'::jsonb;
 """
 
+def get_exam_series_sql():
+    return """
+create table if not exists exam_series (
+  id uuid primary key default gen_random_uuid(),
+  title text not null,
+  description text,
+  enabled boolean not null default true,
+  rounds jsonb not null default '[]'::jsonb,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);
+"""
+
 def fetch_exam_folders(show_warning=False):
     try:
         return supabase.table("exam_folders").select("*").order("display_order").order("title").execute().data or []
@@ -1664,6 +1679,100 @@ def move_to_exam_section(index):
 
 def is_exam_proctoring_enabled(exam):
     return bool(exam.get("proctoring_enabled"))
+
+def parse_exam_series_rounds(raw):
+    if not raw:
+        return []
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except Exception:
+            return []
+    if not isinstance(raw, list):
+        return []
+    rounds = []
+    for idx, item in enumerate(raw, start=1):
+        if not isinstance(item, dict):
+            continue
+        exam_id = str(item.get("exam_id") or "").strip()
+        if not exam_id:
+            continue
+        try:
+            qualify_pct = int(item.get("qualify_pct", 60) or 60)
+        except Exception:
+            qualify_pct = 60
+        rounds.append({
+            "exam_id": exam_id,
+            "title": str(item.get("title") or f"Round {idx}").strip() or f"Round {idx}",
+            "qualify_pct": max(0, min(100, qualify_pct)),
+        })
+    return rounds
+
+def fetch_exam_series(show_warning=False):
+    try:
+        return supabase.table("exam_series").select("*").order("created_at", desc=True).execute().data or []
+    except Exception as e:
+        if show_warning:
+            st.warning(f"Multi round exams table ready ledu. SQL setup run cheyyandi: {e}")
+        return []
+
+def get_exam_best_attempt(user_id, exam_id):
+    attempts = get_exam_attempt_rows(user_id, exam_id)
+    if not attempts:
+        return None
+    return max(attempts, key=lambda attempt: int(attempt.get("score") or 0))
+
+def get_exam_score_pct(exam, attempt):
+    if not attempt:
+        return 0
+    try:
+        questions = supabase.table("questions").select("*").eq("exam_id", exam["id"]).execute().data or []
+        total = get_exam_max_marks(questions)
+    except Exception:
+        total = 0
+    score = int(attempt.get("score") or 0)
+    return int((score / total) * 100) if total else 0
+
+def get_series_round_states(series, exams, user_id):
+    exam_by_id = {str(exam.get("id")): exam for exam in exams}
+    rounds = parse_exam_series_rounds(series.get("rounds"))
+    states = []
+    previous_qualified = True
+    for idx, round_cfg in enumerate(rounds, start=1):
+        exam = exam_by_id.get(str(round_cfg.get("exam_id")))
+        attempt = get_exam_best_attempt(user_id, round_cfg.get("exam_id")) if exam else None
+        pct = get_exam_score_pct(exam, attempt) if exam and attempt else 0
+        qualified = bool(attempt) and pct >= int(round_cfg.get("qualify_pct", 60) or 60)
+        unlocked = previous_qualified and bool(exam) and bool(exam.get("enabled"))
+        states.append({
+            "index": idx,
+            "round": round_cfg,
+            "exam": exam,
+            "attempt": attempt,
+            "pct": pct,
+            "qualified": qualified,
+            "unlocked": unlocked,
+        })
+        previous_qualified = qualified
+    return states
+
+def get_exam_series_lock_message(exam, user_id):
+    series_list = fetch_exam_series(show_warning=False)
+    if not series_list:
+        return ""
+    try:
+        exams = supabase.table("exams").select("*").execute().data or []
+    except Exception:
+        exams = [exam]
+    exam_id = str(exam.get("id"))
+    for series in series_list:
+        if not bool(series.get("enabled")):
+            continue
+        states = get_series_round_states(series, exams, user_id)
+        for state in states:
+            if str(state["round"].get("exam_id")) == exam_id and not state["unlocked"]:
+                return f"Locked: '{series.get('title', 'Multi Round Exam')}' lo previous round qualify ayyaka ee round open avuthundi."
+    return ""
 
 def format_attempt_date(value):
     if not value:
@@ -1888,20 +1997,95 @@ def render_student_folder_card(folder, subfolder_count=0, exam_count=0, key_pref
             st.session_state.student_exam_current_folder_id = str(folder["id"])
             st.rerun()
 
+def render_student_exam_series_card(series, exams, user_id, key_prefix="series"):
+    title = html.escape(str(series.get("title") or "Multi Round Exam"))
+    rounds = parse_exam_series_rounds(series.get("rounds"))
+    states = get_series_round_states(series, exams, user_id)
+    completed = len([state for state in states if state["qualified"]])
+    with st.container(border=True):
+        st.markdown(
+            f"""
+            <div class="student-exam-card-content">
+                <div class="student-exam-tags">
+                    <span class="student-exam-tag category">Multi Round</span>
+                    <span class="student-exam-tag free">{completed}/{len(rounds)} Qualified</span>
+                </div>
+                <div class="student-exam-title">{title}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        desc = str(series.get("description") or "").strip()
+        if desc:
+            st.caption(desc)
+        if st.button("Open Rounds", key=f"{key_prefix}_open_{series['id']}", use_container_width=True):
+            st.session_state.selected_exam_series_id = str(series["id"])
+            st.rerun()
+
+def render_student_exam_series_detail(series, exams, user_id):
+    st.markdown(f"### {series.get('title', 'Multi Round Exam')}")
+    desc = str(series.get("description") or "").strip()
+    if desc:
+        st.caption(desc)
+    states = get_series_round_states(series, exams, user_id)
+    if not states:
+        st.info("Rounds setup avvaledu.")
+        return
+    for state in states:
+        round_cfg = state["round"]
+        exam = state["exam"]
+        qualify_pct = int(round_cfg.get("qualify_pct", 60) or 60)
+        with st.container(border=True):
+            c1, c2, c3 = st.columns([2.2, 1, 1])
+            with c1:
+                st.markdown(f"**Round {state['index']}: {round_cfg.get('title', 'Round')}**")
+                st.caption(exam.get("title", "Exam missing") if exam else "Linked exam missing")
+            with c2:
+                status = "Qualified" if state["qualified"] else ("Open" if state["unlocked"] else "Locked")
+                st.metric("Status", status)
+            with c3:
+                score_text = f"{state['pct']}%" if state["attempt"] else "-"
+                st.metric(f"Need {qualify_pct}%", score_text)
+            if not exam:
+                st.error("Ee round linked exam dorakaledu.")
+            elif state["unlocked"]:
+                questions = supabase.table("questions").select("*").eq("exam_id", exam["id"]).execute().data or []
+                if state["qualified"]:
+                    st.success("Ee round qualify ayyaru. Next round unlock ayyindi.")
+                has_pwd = exam.get("password") and str(exam["password"]).strip()
+                entered_pwd = st.text_input(f"Access Code for {exam['title']}", type="password", key=f"series_pwd_{series['id']}_{exam['id']}") if has_pwd else ""
+                btn_label = "Retake Round" if state["attempt"] else "Start Round"
+                if st.button(btn_label, key=f"series_start_{series['id']}_{exam['id']}", type="primary", use_container_width=True):
+                    if has_pwd and entered_pwd.strip() != str(exam["password"]).strip():
+                        st.error("Wrong Password!")
+                    else:
+                        start_exam_with_questions(exam, questions)
+                        st.rerun()
+            else:
+                st.info("Previous round qualify ayyaka ee round open avuthundi.")
+
 def show_student_exams_tab(user_id):
     folders = fetch_exam_folders(show_warning=True)
+    series_list = fetch_exam_series(show_warning=False)
     try:
         exams = supabase.table("exams").select("*").execute().data or []
     except Exception as e:
         st.error(f"Exams load avvaledu: {e}")
         return
-    if not exams and not folders:
+    if not exams and not folders and not series_list:
         st.info("Active exams levu.")
         return
 
     folder_by_id = {str(folder.get("id")): folder for folder in folders}
+    series_exam_ids = {
+        str(round_cfg.get("exam_id"))
+        for series in series_list if bool(series.get("enabled"))
+        for round_cfg in parse_exam_series_rounds(series.get("rounds"))
+    }
     exams_by_folder = {}
     for exam in exams:
+        if str(exam.get("id")) in series_exam_ids:
+            continue
         exams_by_folder.setdefault(str(exam.get("folder_id") or ""), []).append(exam)
 
     def folder_path(folder):
@@ -1930,12 +2114,34 @@ def show_student_exams_tab(user_id):
             return
         st.session_state.selected_exam_detail_id = ""
 
+    selected_series_id = str(st.session_state.get("selected_exam_series_id") or "")
+    if selected_series_id:
+        selected_series = next((series for series in series_list if str(series.get("id")) == selected_series_id), None)
+        if selected_series:
+            if st.button("Back to Exam Folders", key="back_to_exam_series"):
+                st.session_state.selected_exam_series_id = ""
+                st.rerun()
+            render_student_exam_series_detail(selected_series, exams, user_id)
+            return
+        st.session_state.selected_exam_series_id = ""
+
     current_folder_id = str(st.session_state.get("student_exam_current_folder_id") or "")
     if current_folder_id and current_folder_id not in folder_by_id:
         current_folder_id = ""
         st.session_state.student_exam_current_folder_id = ""
 
     st.markdown('<div class="student-exams-page">', unsafe_allow_html=True)
+
+    enabled_series = [series for series in series_list if bool(series.get("enabled"))]
+    if enabled_series and not current_folder_id:
+        st.markdown("### Multi Round Exams")
+        series_cols = st.columns(3)
+        for idx, series in enumerate(enabled_series):
+            with series_cols[idx % 3]:
+                st.markdown('<div class="student-exam-card-wrap">', unsafe_allow_html=True)
+                render_student_exam_series_card(series, exams, user_id, key_prefix=f"student_series_{idx}")
+                st.markdown("</div>", unsafe_allow_html=True)
+        st.divider()
 
     if current_folder_id:
         current_folder = folder_by_id[current_folder_id]
@@ -2062,6 +2268,110 @@ def show_admin_exam_folders_tab():
                         st.success("Exam folder update ayyindi.")
                         st.rerun()
 
+def show_admin_exam_series_tab():
+    st.subheader("Multi Round Exam Builder")
+    with st.expander("Database SQL setup", expanded=False):
+        st.code(get_exam_series_sql(), language="sql")
+
+    try:
+        exams = supabase.table("exams").select("*").order("title").execute().data or []
+    except Exception as e:
+        st.error(f"Exams load avvaledu: {e}")
+        return
+    series_list = fetch_exam_series(show_warning=True)
+    if not exams:
+        st.info("First individual exams create cheyyandi. Tarvatha ikkada rounds ga join cheyyachu.")
+        return
+
+    exam_options = {f"{exam.get('title', 'Untitled')}  |  {exam.get('id')}": exam for exam in exams}
+    st.markdown("#### Create Multi Round Exam")
+    title = st.text_input("Series Name", placeholder="Campus Hiring - 3 Rounds", key="series_new_title")
+    description = st.text_area("Description", placeholder="Round 1 qualify ayithe Round 2 open avuthundi.", key="series_new_desc", height=80)
+    selected_labels = st.multiselect(
+        "Rounds order lo individual exams select cheyyandi",
+        list(exam_options.keys()),
+        key="series_new_rounds",
+    )
+    rounds = []
+    if selected_labels:
+        st.caption("Qualifying percentage per round")
+        for idx, label in enumerate(selected_labels, start=1):
+            exam = exam_options[label]
+            qualify_pct = st.number_input(
+                f"Round {idx}: {exam.get('title')} qualify %",
+                min_value=0,
+                max_value=100,
+                value=60,
+                step=1,
+                key=f"series_new_qpct_{idx}_{exam['id']}",
+            )
+            rounds.append({"exam_id": str(exam["id"]), "title": str(exam.get("title") or f"Round {idx}"), "qualify_pct": int(qualify_pct)})
+    enabled = st.checkbox("Enable Multi Round Exam", value=True, key="series_new_enabled")
+    if st.button("Create Multi Round Exam", type="primary", use_container_width=True, key="series_create_btn"):
+        if not title.strip():
+            st.error("Series name enter cheyyandi.")
+        elif len(rounds) < 2:
+            st.error("At least 2 individual exams select cheyyandi.")
+        else:
+            try:
+                supabase.table("exam_series").insert({
+                    "title": title.strip(),
+                    "description": description.strip() if description.strip() else None,
+                    "enabled": enabled,
+                    "rounds": rounds,
+                    "updated_at": "now()",
+                }).execute()
+                st.success("Multi round exam create ayyindi.")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Create avvaledu. SQL setup run chesara? {e}")
+
+    st.divider()
+    st.markdown("#### Manage Multi Round Exams")
+    if not series_list:
+        st.info("Multi round exams levu.")
+        return
+    for series in series_list:
+        with st.expander(series.get("title", "Multi Round Exam")):
+            current_rounds = parse_exam_series_rounds(series.get("rounds"))
+            new_title = st.text_input("Series Name", value=series.get("title") or "", key=f"series_title_{series['id']}")
+            new_desc = st.text_area("Description", value=series.get("description") or "", key=f"series_desc_{series['id']}", height=70)
+            new_enabled = st.toggle("Enabled", value=bool(series.get("enabled")), key=f"series_enabled_{series['id']}")
+            st.caption("Rounds JSON advanced edit")
+            rounds_text = json.dumps(current_rounds, ensure_ascii=False, indent=2)
+            new_rounds_text = st.text_area(
+                "Rounds",
+                value=rounds_text,
+                key=f"series_rounds_{series['id']}",
+                height=160,
+                help='Format: [{"exam_id":"...","title":"Aptitude","qualify_pct":60}]',
+            )
+            for idx, round_cfg in enumerate(current_rounds, start=1):
+                exam = next((ex for ex in exams if str(ex.get("id")) == str(round_cfg.get("exam_id"))), None)
+                label = exam.get("title") if exam else "Exam missing"
+                st.caption(f"Round {idx}: {label} | Need {round_cfg.get('qualify_pct', 60)}%")
+            c_save, c_delete = st.columns(2)
+            with c_save:
+                if st.button("Save Series", key=f"series_save_{series['id']}", type="primary", use_container_width=True):
+                    parsed_rounds = parse_exam_series_rounds(new_rounds_text)
+                    if len(parsed_rounds) < 2:
+                        st.error("At least 2 valid rounds kavali.")
+                    else:
+                        supabase.table("exam_series").update({
+                            "title": new_title.strip() or series.get("title"),
+                            "description": new_desc.strip() if new_desc.strip() else None,
+                            "enabled": new_enabled,
+                            "rounds": parsed_rounds,
+                            "updated_at": "now()",
+                        }).eq("id", series["id"]).execute()
+                        st.success("Series update ayyindi.")
+                        st.rerun()
+            with c_delete:
+                if st.button("Delete Series", key=f"series_delete_{series['id']}", use_container_width=True):
+                    supabase.table("exam_series").delete().eq("id", series["id"]).execute()
+                    st.warning("Series delete ayyindi.")
+                    st.rerun()
+
 def get_programming_session_sql():
     return """
 create table if not exists programming_exam_sessions (
@@ -2148,6 +2458,11 @@ def load_programming_exam_session(user_id, exam, questions):
 
 
 def start_exam_with_questions(exam, questions):
+    lock_message = get_exam_series_lock_message(exam, st.session_state.user_id)
+    if lock_message:
+        st.session_state.exam_lock_message = lock_message
+        st.error(lock_message)
+        return
     resumed = load_programming_exam_session(st.session_state.user_id, exam, questions) if is_programming_exam(exam["id"]) else None
     if resumed:
         st.session_state.update(resumed)
@@ -4145,8 +4460,8 @@ def admin_dashboard():
                             st.warning("Deleted!"); st.rerun()
 
     elif menu == "Manage Exams & Questions":
-        ex_tab1, ex_tab2, ex_tab3, ex_tab4, ex_tab5, ex_tab6 = st.tabs([
-            " Exams Setup", " Add Questions", " Review Papers", " Bulk Upload (CSV)", " AI Gen", " Exam Folders"
+        ex_tab1, ex_tab2, ex_tab3, ex_tab4, ex_tab5, ex_tab6, ex_tab7 = st.tabs([
+            " Exams Setup", " Add Questions", " Review Papers", " Bulk Upload (CSV)", " AI Gen", " Exam Folders", " Multi Round Exams"
         ])
 
         with ex_tab1:
@@ -4800,6 +5115,9 @@ def admin_dashboard():
 
         with ex_tab6:
             show_admin_exam_folders_tab()
+
+        with ex_tab7:
+            show_admin_exam_series_tab()
 
     elif menu == "Student Results & Ranks":
         r_tab1, r_tab2, r_tab3, r_tab4, r_tab5, r_tab6, r_tab7 = st.tabs([
@@ -6245,6 +6563,9 @@ if not st.session_state.logged_in:
     else:
         login()
 else:
+    if st.session_state.get("exam_lock_message"):
+        st.error(st.session_state.exam_lock_message)
+        st.session_state.exam_lock_message = ""
     if st.session_state.role == "admin":
         admin_dashboard()
     elif st.session_state.role == "card_user":
