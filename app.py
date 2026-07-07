@@ -69,6 +69,10 @@ defaults = {
     "exam_id": "",
     "exam_title": "",
     "exam_end_time": 0.0,
+    "exam_section_end_time": 0.0,
+    "exam_sections": [],
+    "exam_section_index": 0,
+    "exam_proctoring_enabled": False,
     "current_questions": [],
     "completed_ids": None,
     "admin_preview_mode": False,
@@ -1501,6 +1505,15 @@ where not exists (
 );
 """
 
+def get_exam_enhancements_sql():
+    return """
+alter table exams
+add column if not exists proctoring_enabled boolean not null default false;
+
+alter table exams
+add column if not exists section_config jsonb not null default '[]'::jsonb;
+"""
+
 def fetch_exam_folders(show_warning=False):
     try:
         return supabase.table("exam_folders").select("*").order("display_order").order("title").execute().data or []
@@ -1531,11 +1544,28 @@ def create_exam_record(payload):
     try:
         return supabase.table("exams").insert(payload).execute().data
     except Exception as e:
-        if "folder_id" in payload:
+        optional_keys = ["folder_id", "proctoring_enabled", "section_config"]
+        if any(key in payload for key in optional_keys):
             fallback = dict(payload)
-            fallback.pop("folder_id", None)
-            st.warning("folder_id column database lo inka ledu. Exam create ayyindi, folder assign avvaledu. SQL setup run cheyyandi.")
+            for key in optional_keys:
+                fallback.pop(key, None)
+            st.warning("New exam columns database lo inka levu. Exam create ayyindi, kani folders/proctoring/sections save avvakapovachu. SQL setup run cheyyandi.")
             return supabase.table("exams").insert(fallback).execute().data
+        raise e
+
+def update_exam_record(exam_id, payload):
+    try:
+        return supabase.table("exams").update(payload).eq("id", exam_id).execute()
+    except Exception as e:
+        optional_keys = ["proctoring_enabled", "section_config"]
+        if any(key in payload for key in optional_keys):
+            fallback = dict(payload)
+            for key in optional_keys:
+                fallback.pop(key, None)
+            st.warning("Proctoring/section columns database lo inka levu. SQL setup run chesi malli save cheyyandi.")
+            if fallback:
+                return supabase.table("exams").update(fallback).eq("id", exam_id).execute()
+            return None
         raise e
 
 def set_exam_folder(exam_id, folder_id):
@@ -1555,6 +1585,85 @@ def format_duration(seconds):
     if mins:
         return f"{mins} Mins, {secs} Sec"
     return f"{secs} Sec"
+
+def parse_exam_section_config(raw):
+    if not raw:
+        return []
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except Exception:
+            return []
+    if not isinstance(raw, list):
+        return []
+    sections = []
+    for idx, item in enumerate(raw, start=1):
+        if not isinstance(item, dict):
+            continue
+        title = str(item.get("title") or f"Section {idx}").strip() or f"Section {idx}"
+        try:
+            duration = int(item.get("duration_mins") or 0)
+        except Exception:
+            duration = 0
+        try:
+            question_count = int(item.get("question_count") or 0)
+        except Exception:
+            question_count = 0
+        if duration > 0 and question_count > 0:
+            sections.append({"title": title, "duration_mins": duration, "question_count": question_count})
+    return sections
+
+def normalize_exam_sections(exam, total_questions):
+    total_questions = int(total_questions or 0)
+    sections = parse_exam_section_config(exam.get("section_config"))
+    if not sections:
+        return [{
+            "title": str(exam.get("title") or "Exam"),
+            "duration_mins": int(exam.get("duration_mins", 30) or 30),
+            "question_count": total_questions,
+            "start": 0,
+            "end": total_questions,
+        }]
+    normalized = []
+    cursor = 0
+    for section in sections:
+        if cursor >= total_questions:
+            break
+        end = min(cursor + int(section["question_count"]), total_questions)
+        normalized.append({**section, "start": cursor, "end": end})
+        cursor = end
+    if cursor < total_questions and normalized:
+        normalized[-1]["question_count"] += total_questions - cursor
+        normalized[-1]["end"] = total_questions
+    elif cursor < total_questions:
+        normalized.append({
+            "title": "Remaining",
+            "duration_mins": int(exam.get("duration_mins", 30) or 30),
+            "question_count": total_questions,
+            "start": 0,
+            "end": total_questions,
+        })
+    return normalized
+
+def get_current_section():
+    sections = st.session_state.get("exam_sections") or []
+    if not sections:
+        return {"title": st.session_state.get("exam_title", "Exam"), "start": 0, "end": len(st.session_state.current_questions)}
+    idx = min(int(st.session_state.get("exam_section_index", 0) or 0), len(sections) - 1)
+    return sections[idx]
+
+def move_to_exam_section(index):
+    sections = st.session_state.get("exam_sections") or []
+    if not sections or index >= len(sections):
+        return False
+    section = sections[index]
+    st.session_state.exam_section_index = index
+    st.session_state.question_index = int(section.get("start", 0) or 0)
+    st.session_state.exam_section_end_time = time.time() + (int(section.get("duration_mins", 1) or 1) * 60)
+    return True
+
+def is_exam_proctoring_enabled(exam):
+    return bool(exam.get("proctoring_enabled"))
 
 def format_attempt_date(value):
     if not value:
@@ -1592,6 +1701,34 @@ def render_exam_result_summary(exam, questions, attempt, show_return=True):
     answer_map = get_attempt_answer_map(attempt["id"])
     attempted = len([q for q in questions if str(answer_map.get(q["id"], "")).strip()])
     wrong = max(max_marks - score, 0)
+    sections = normalize_exam_sections(exam, len(questions))
+    section_rows = []
+    for section in sections:
+        section_questions = questions[int(section.get("start", 0) or 0):int(section.get("end", len(questions)) or len(questions))]
+        section_attempted = len([q for q in section_questions if str(answer_map.get(q["id"], "")).strip()])
+        section_marks = get_exam_max_marks(section_questions)
+        section_score = 0
+        for q in section_questions:
+            saved_answer = answer_map.get(q["id"], "")
+            if q.get("type") == "programming":
+                try:
+                    section_score += int((json.loads(saved_answer) if saved_answer else {}).get("earned", 0) or 0)
+                except Exception:
+                    pass
+            elif q.get("type") == "mcq":
+                if check_mcq_correct(saved_answer, q):
+                    section_score += 1
+            elif str(saved_answer).strip().lower() == str(q.get("correct_answer", "")).strip().lower():
+                section_score += 1
+        section_pct = (section_score / section_marks * 100) if section_marks else 0
+        section_rows.append(
+            f"<tr><td><strong>{html.escape(str(section.get('title') or 'Section'))}</strong></td>"
+            f"<td>{section_attempted} / {len(section_questions)}</td>"
+            f"<td>{section_score} / {max(section_marks - section_score, 0)}</td>"
+            f"<td>{section_score:.2f} / {section_marks}</td>"
+            f"<td>{section_pct:.2f}</td><td>{section_pct:.2f}</td></tr>"
+        )
+    section_rows_html = "".join(section_rows)
     time_spent = get_attempt_time_spent_seconds(attempt.get("id"))
     qualifying_pct = 80
     status = "Qualified" if pct >= qualifying_pct else "Not Qualified"
@@ -1627,7 +1764,7 @@ def render_exam_result_summary(exam, questions, attempt, show_return=True):
         <div class="result-table">
         <table>
             <thead><tr><th>SECTION</th><th>ATTEMPTED</th><th>CORRECT / WRONG</th><th>MARKS</th><th>PERCENTAGE</th><th>ACCURACY</th></tr></thead>
-            <tbody><tr><td><strong>{html.escape(str(exam.get('title') or st.session_state.exam_title))}</strong></td><td>{attempted} / {len(questions)}</td><td>{score} / {wrong}</td><td>{score:.2f} / {max_marks}</td><td>{pct:.2f}</td><td>{pct:.2f}</td></tr></tbody>
+            <tbody>{section_rows_html}</tbody>
         </table>
         </div>
         """,
@@ -1664,10 +1801,16 @@ def render_exam_detail_view(exam):
     active_session = get_active_programming_session(st.session_state.user_id, exam["id"]) if is_programming_exam(exam["id"]) else None
     tab_details, tab_attempts = st.tabs(["Assessment Details", "Previous Attempts"])
     with tab_details:
-        c1, c2, c3 = st.columns(3)
+        sections = normalize_exam_sections(exam, len(questions))
+        c1, c2, c3, c4 = st.columns(4)
         c1.metric("Duration", f"{int(exam.get('duration_mins') or 30)} mins")
         c2.metric("Questions", len(questions))
         c3.metric("Marks", get_exam_max_marks(questions))
+        c4.metric("Proctoring", "Camera On" if is_exam_proctoring_enabled(exam) else "Off")
+        if len(sections) > 1:
+            st.markdown("#### Sections")
+            for section in sections:
+                st.caption(f"{section['title']} - {section['duration_mins']} mins - Q{section['start'] + 1} to Q{section['end']}")
         has_pwd = exam.get("password") and str(exam["password"]).strip()
         entered_pwd = st.text_input(f"Access Code for {exam['title']}", type="password", key=f"detail_pwd_{exam['id']}") if has_pwd else ""
         if st.button("Start Exam", key=f"detail_start_{exam['id']}", type="primary", use_container_width=True):
@@ -1838,6 +1981,7 @@ def show_admin_exam_folders_tab():
     st.subheader("Exam Folders")
     with st.expander("Database SQL setup", expanded=False):
         st.code(get_exam_folders_sql(), language="sql")
+        st.code(get_exam_enhancements_sql(), language="sql")
     folders = fetch_exam_folders(show_warning=True)
     folder_options = build_exam_folder_options(folders)
     folder_parent_map = {str(folder.get("id")): str(folder.get("parent_id") or "") for folder in folders}
@@ -1974,7 +2118,8 @@ def load_programming_exam_session(user_id, exam, questions):
     session = get_active_programming_session(user_id, exam["id"])
     if not session:
         return None
-    duration = int(exam.get("duration_mins", 30) or 30)
+    sections = normalize_exam_sections(exam, len(questions))
+    duration = sum(int(section.get("duration_mins", 0) or 0) for section in sections) or int(exam.get("duration_mins", 30) or 30)
     end_time = float(session.get("exam_end_time") or 0)
     if end_time < 0:
         end_time = time.time() + abs(end_time)
@@ -1989,6 +2134,10 @@ def load_programming_exam_session(user_id, exam, questions):
         "question_index": min(int(session.get("question_index") or 0), max(len(questions) - 1, 0)),
         "current_questions": questions,
         "exam_end_time": end_time,
+        "exam_section_end_time": time.time() + (int(sections[0].get("duration_mins", duration) or duration) * 60),
+        "exam_sections": sections,
+        "exam_section_index": 0,
+        "exam_proctoring_enabled": is_exam_proctoring_enabled(exam),
         "program_run_results": {},
         "program_custom_results": {},
         "program_submissions": session.get("program_submissions") or {},
@@ -2003,7 +2152,9 @@ def start_exam_with_questions(exam, questions):
     if resumed:
         st.session_state.update(resumed)
         return
-    duration = int(exam.get("duration_mins", 30) or 30)
+    sections = normalize_exam_sections(exam, len(questions))
+    duration = sum(int(section.get("duration_mins", 0) or 0) for section in sections) or int(exam.get("duration_mins", 30) or 30)
+    first_section_duration = int(sections[0].get("duration_mins", duration) or duration) if sections else duration
     st.session_state.update({
         "exam_id": exam["id"],
         "exam_title": exam["title"],
@@ -2013,6 +2164,10 @@ def start_exam_with_questions(exam, questions):
         "question_index": 0,
         "current_questions": questions,
         "exam_end_time": time.time() + (duration * 60),
+        "exam_section_end_time": time.time() + (first_section_duration * 60),
+        "exam_sections": sections,
+        "exam_section_index": 0,
+        "exam_proctoring_enabled": is_exam_proctoring_enabled(exam),
         "program_run_results": {},
         "program_custom_results": {},
         "program_submissions": {},
@@ -2024,8 +2179,9 @@ def start_exam_with_questions(exam, questions):
 
 
 def report_programming_malpractice(reason):
-    if not st.session_state.get("exam_id") or not is_programming_exam(st.session_state.exam_id):
+    if not st.session_state.get("exam_id"):
         return
+    is_prog = is_programming_exam(st.session_state.exam_id)
     key = f"{st.session_state.user_id}:{st.session_state.exam_id}:{reason}"
     if key in st.session_state.malpractice_reported_keys:
         return
@@ -2034,6 +2190,8 @@ def report_programming_malpractice(reason):
         uinfo = supabase.table("users").select("name, email").eq("id", st.session_state.user_id).execute().data or [{}]
         uname = uinfo[0].get("name") or uinfo[0].get("email") or "Student"
         send_admin_notification(f"Malpractice alert: {uname} - {st.session_state.exam_title} - {reason}")
+        if not is_prog:
+            return
         session = get_active_programming_session(st.session_state.user_id, st.session_state.exam_id) or {}
         count = int(session.get("malpractice_count") or 0) + 1
         save_programming_exam_session(status="active", malpractice_reason=reason)
@@ -2044,6 +2202,50 @@ def report_programming_malpractice(reason):
         }).eq("user_id", str(st.session_state.user_id)).eq("exam_id", str(st.session_state.exam_id)).execute()
     except Exception:
         pass
+
+def render_live_proctoring_panel(enabled=True):
+    if not enabled:
+        return
+    st.markdown("### Live Proctoring")
+    components.html(
+        """
+        <div style="border:1px solid #d8dee8;border-radius:8px;padding:10px;background:#ffffff;font-family:system-ui,Segoe UI,Arial,sans-serif;">
+          <video id="proctorVideo" autoplay playsinline muted
+            style="width:100%;aspect-ratio:4/3;background:#111827;border-radius:6px;object-fit:cover;"></video>
+          <div id="proctorStatus" style="margin-top:8px;font-size:13px;color:#475569;font-weight:600;">
+            Camera permission waiting...
+          </div>
+        </div>
+        <script>
+        const statusEl = document.getElementById("proctorStatus");
+        const videoEl = document.getElementById("proctorVideo");
+        async function startProctorCamera() {
+          try {
+            const stream = await navigator.mediaDevices.getUserMedia({video: true, audio: false});
+            videoEl.srcObject = stream;
+            statusEl.textContent = "Camera live";
+            statusEl.style.color = "#047857";
+          } catch (err) {
+            statusEl.textContent = "Camera access blocked. Please allow camera permission and refresh.";
+            statusEl.style.color = "#b91c1c";
+            try {
+              const url = new URL(window.parent.location.href);
+              url.searchParams.set("malpractice", "1");
+              url.searchParams.set("mal_reason", "Camera permission blocked");
+              window.parent.location.href = url.toString();
+            } catch(e) {}
+          }
+        }
+        if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+          startProctorCamera();
+        } else {
+          statusEl.textContent = "Camera not supported in this browser.";
+          statusEl.style.color = "#b91c1c";
+        }
+        </script>
+        """,
+        height=270,
+    )
 
 def user_attempted_question(user_id, question_id):
     try:
@@ -3960,13 +4162,23 @@ def admin_dashboard():
                 e_pwd = st.text_input("Exam Password (Optional)", type="password")
                 c_en = st.checkbox("Turn On Exam", value=True)
                 c_ans = st.checkbox("Enable Answers Visibility")
+                c_proctor = st.checkbox("Enable Camera Proctoring")
+                section_json = st.text_area(
+                    "Sectional Timer Config (Optional JSON)",
+                    value='[{"title":"Aptitude","duration_mins":10,"question_count":10},{"title":"Programming","duration_mins":45,"question_count":2},{"title":"Reasoning","duration_mins":20,"question_count":15}]',
+                    help="Blank ga vadilesthe normal single timer exam. question_count order lo questions sections ki assign avuthayi.",
+                    height=110,
+                )
                 if st.form_submit_button(" Generate Exam Layout"):
                     if sel_cls in cls_options:
+                        parsed_sections = parse_exam_section_config(section_json) if section_json.strip() else []
                         create_exam_record({
                             "class_id": cls_options[sel_cls], "title": e_title,
                             "duration_mins": int(e_duration),
                             "password": e_pwd.strip() if e_pwd.strip() else None,
                             "enabled": c_en, "show_answers": c_ans,
+                            "proctoring_enabled": c_proctor,
+                            "section_config": parsed_sections,
                             "folder_id": exam_folder_options.get(sel_exam_folder)
                         })
                         st.success("Exam Created!"); st.rerun()
@@ -3983,6 +4195,14 @@ def admin_dashboard():
                     builder_pwd = st.text_input("Password (Optional)", type="password", key="prog_builder_pwd")
                     builder_enabled = st.checkbox("Turn On Exam", value=True, key="prog_builder_enabled")
                     builder_show_answers = st.checkbox("Enable Answers Visibility", value=True, key="prog_builder_show_answers")
+                    builder_proctor = st.checkbox("Enable Camera Proctoring", value=True, key="prog_builder_proctor")
+                    builder_section_json = st.text_area(
+                        "Sectional Timer Config (Optional JSON)",
+                        value="",
+                        key="prog_builder_sections",
+                        help="Programming-only exam ki blank ok. Mixed exam ki sections JSON use cheyyandi.",
+                        height=90,
+                    )
 
                     q_options = {}
                     for q in prog_questions:
@@ -4006,6 +4226,8 @@ def admin_dashboard():
                                 "password": builder_pwd.strip() if builder_pwd.strip() else None,
                                 "enabled": builder_enabled,
                                 "show_answers": builder_show_answers,
+                                "proctoring_enabled": builder_proctor,
+                                "section_config": parse_exam_section_config(builder_section_json) if builder_section_json.strip() else [],
                                 "folder_id": exam_folder_options.get(builder_folder),
                             })
                             new_exam = created[0] if created else None
@@ -4046,16 +4268,29 @@ def admin_dashboard():
                     with col_e3:
                         t_active = st.toggle("Active", value=ex["enabled"], key=f"tog_en_{ex['id']}")
                         t_ans = st.toggle("Show Answers", value=ex["show_answers"], key=f"tog_ans_{ex['id']}")
+                        t_proctor = st.toggle("Camera Proctoring", value=bool(ex.get("proctoring_enabled")), key=f"tog_proc_{ex['id']}")
+                    current_sections = parse_exam_section_config(ex.get("section_config"))
+                    sections_text = json.dumps(current_sections, ensure_ascii=False, indent=2) if current_sections else ""
+                    updated_sections_text = st.text_area(
+                        "Sectional Timer Config JSON",
+                        value=sections_text,
+                        key=f"sections_{ex['id']}",
+                        height=110,
+                        placeholder='[{"title":"Aptitude","duration_mins":10,"question_count":10},{"title":"Programming","duration_mins":45,"question_count":2}]',
+                    )
                     col_btn1, col_btn2 = st.columns(2)
                     with col_btn1:
                         if st.button("Save", key=f"up_ex_{ex['id']}", type="primary", use_container_width=True):
                             old_pwd = str(ex.get("password") or "")
                             new_pwd = updated_pwd.strip()
-                            supabase.table("exams").update({
+                            parsed_sections = parse_exam_section_config(updated_sections_text) if updated_sections_text.strip() else []
+                            update_exam_record(ex["id"], {
                                 "duration_mins": int(updated_dur),
                                 "password": new_pwd if new_pwd else None,
-                                "enabled": t_active, "show_answers": t_ans
-                            }).eq("id", ex["id"]).execute()
+                                "enabled": t_active, "show_answers": t_ans,
+                                "proctoring_enabled": t_proctor,
+                                "section_config": parsed_sections,
+                            })
                             if new_pwd and new_pwd != old_pwd:
                                 send_notification(f" '{ex['title']}' exam  password set : {new_pwd}")
                             st.success("Updated!"); st.rerun()
@@ -5582,10 +5817,11 @@ def exam_workspace_view():
     questions = st.session_state.current_questions
     total_questions = len(questions)
     is_prog_exam = is_programming_exam(st.session_state.exam_id) if st.session_state.get("exam_id") else False
+    is_proctored = bool(st.session_state.get("exam_proctoring_enabled"))
     inject_programming_exam_shell(is_prog_exam and not st.session_state.exam_submitted)
     if is_prog_exam and not st.session_state.exam_submitted:
         enable_fullscreen_exam_lock()
-    if is_prog_exam and not st.session_state.exam_submitted:
+    if (is_prog_exam or is_proctored) and not st.session_state.exam_submitted:
         qp = st.query_params
         if qp.get("malpractice") == "1":
             reason = qp.get("mal_reason", "Tab switched or exam window lost focus")
@@ -5595,6 +5831,7 @@ def exam_workspace_view():
                 del st.query_params["mal_reason"]
             except Exception:
                 pass
+    if is_prog_exam and not st.session_state.exam_submitted:
         session = get_active_programming_session(st.session_state.user_id, st.session_state.exam_id)
         if session and session.get("force_submit"):
             st.error("Admin force submit requested. Exam automatic ga submit avuthundi...")
@@ -5613,16 +5850,30 @@ def exam_workspace_view():
 
     remaining_time = 0
     if not st.session_state.exam_submitted:
-        remaining_time = int(st.session_state.exam_end_time - time.time())
+        sections = st.session_state.get("exam_sections") or []
+        current_section = get_current_section()
+        section_start = int(current_section.get("start", 0) or 0)
+        section_end = int(current_section.get("end", total_questions) or total_questions)
+        if st.session_state.question_index < section_start or st.session_state.question_index >= section_end:
+            st.session_state.question_index = section_start
+        overall_remaining = int(st.session_state.exam_end_time - time.time())
+        section_remaining = int((st.session_state.get("exam_section_end_time") or st.session_state.exam_end_time) - time.time())
+        remaining_time = min(overall_remaining, section_remaining) if len(sections) > 1 else overall_remaining
         if remaining_time <= 0:
-            st.error("Time out. Submitting exam...")
-            time.sleep(1)
-            try:
-                submit_exam_attempt(questions, include_time=False)
-                st.session_state.exam_submitted = True; st.rerun()
-            except Exception as e:
-                st.error(f"Submit failed: {e}")
-                return
+            next_section_index = int(st.session_state.get("exam_section_index", 0) or 0) + 1
+            if len(sections) > 1 and move_to_exam_section(next_section_index):
+                st.warning("Section time over. Next section start ayyindi.")
+                time.sleep(1)
+                st.rerun()
+            else:
+                st.error("Time out. Submitting exam...")
+                time.sleep(1)
+                try:
+                    submit_exam_attempt(questions, include_time=False)
+                    st.session_state.exam_submitted = True; st.rerun()
+                except Exception as e:
+                    st.error(f"Submit failed: {e}")
+                    return
 
     if st.session_state.exam_submitted:
         exam_data = supabase.table("exams").select("*").eq("id", st.session_state.exam_id).execute().data or [{}]
@@ -5644,6 +5895,11 @@ def exam_workspace_view():
     else:
         current = st.session_state.question_index
         question = questions[current]
+        sections = st.session_state.get("exam_sections") or []
+        current_section = get_current_section()
+        section_start = int(current_section.get("start", 0) or 0)
+        section_end = int(current_section.get("end", total_questions) or total_questions)
+        section_label = str(current_section.get("title") or st.session_state.exam_title)
         mins, secs = divmod(remaining_time, 60)
         if is_prog_exam:
             st.markdown(
@@ -5652,6 +5908,7 @@ def exam_workspace_view():
                     <div class="exam-title">{clean_ui_text(st.session_state.exam_title)}</div>
                     <div class="exam-status">
                         <span class="lock-pill">Fullscreen locked</span>
+                        <span>{clean_ui_text(section_label)}</span>
                         <span>Question {current + 1}/{total_questions}</span>
                         <span>{mins:02d}:{secs:02d}</span>
                     </div>
@@ -5663,6 +5920,9 @@ def exam_workspace_view():
             st.title(st.session_state.exam_title)
         left, right = st.columns([4, 1])
         with right:
+            if is_proctored:
+                render_live_proctoring_panel(enabled=True)
+                st.divider()
             st.components.v1.html(f"""
                 <div id="timer" style="font-size:2rem;font-weight:600;text-align:center;padding:12px;border-radius:8px;
                     background:{'#fff3cd' if remaining_time<300 else '#e8f4fd'};
@@ -5689,9 +5949,12 @@ def exam_workspace_view():
                     }});
                 </script>""", height=80)
             st.divider()
+            if len(sections) > 1:
+                st.subheader(section_label)
+                st.caption(f"Section {int(st.session_state.get('exam_section_index', 0) or 0) + 1}/{len(sections)}")
             st.subheader("Questions")
             cols = st.columns(3)
-            for i in range(total_questions):
+            for i in range(section_start, section_end):
                 with cols[i % 3]:
                     q_id = questions[i]["id"]
                     label = f" {i+1}" if i==current else (f" {i+1}" if q_id in st.session_state.answers and st.session_state.answers[q_id] else f" {i+1}")
@@ -5716,6 +5979,12 @@ def exam_workspace_view():
                         st.session_state.exam_submitted = True; st.rerun()
                     except Exception as e:
                         st.error(f"Submit failed: {e}")
+            if len(sections) > 1 and int(st.session_state.get("exam_section_index", 0) or 0) < len(sections) - 1:
+                st.divider()
+                if st.button("Next Section", key="next_section_manual", use_container_width=True):
+                    move_to_exam_section(int(st.session_state.get("exam_section_index", 0) or 0) + 1)
+                    save_programming_exam_session(status="active")
+                    st.rerun()
 
         with left:
             hcol1, hcol2 = st.columns([4, 1])
@@ -5939,10 +6208,10 @@ def exam_workspace_view():
 
             nav_col1, nav_col2, pause_col, submit_col = st.columns([1, 1, 1.2, 2])
             with nav_col1:
-                if st.button("Previous", disabled=(current==0), use_container_width=True):
+                if st.button("Previous", disabled=(current <= section_start), use_container_width=True):
                     save_current_q_time(); st.session_state.question_index -= 1; save_programming_exam_session(status="active"); st.rerun()
             with nav_col2:
-                if st.button("Next ", disabled=(current==total_questions-1), use_container_width=True):
+                if st.button("Next ", disabled=(current >= section_end - 1), use_container_width=True):
                     save_current_q_time(); st.session_state.question_index += 1; save_programming_exam_session(status="active"); st.rerun()
             with pause_col:
                 if st.button("Pause & Back", use_container_width=True):
