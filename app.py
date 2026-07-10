@@ -101,6 +101,8 @@ defaults = {
     "malpractice_reported_keys": set(),
     "suprabhatam_index": 0,
     "suprabhatam_language": "Telugu",
+    "hidden_test_access": {},
+    "hidden_test_edit_access": {},
 }
 for key, val in defaults.items():
     if key not in st.session_state:
@@ -165,6 +167,17 @@ def show_logout_redirect():
     st.stop()
 
 
+def user_account_status(user_row):
+    status = str((user_row or {}).get("approval_status") or "approved").strip().lower()
+    return status or "approved"
+
+
+def is_user_account_approved(user_row):
+    if (user_row or {}).get("role") == "admin":
+        return True
+    return user_account_status(user_row) not in {"pending", "rejected", "blocked"}
+
+
 def apply_saved_login(saved_uid, saved_role):
     if not saved_uid or not saved_role:
         return False
@@ -179,7 +192,7 @@ def apply_saved_login(saved_uid, saved_role):
                 return True
         else:
             urow_data = supabase.table("users").select("*").eq("id", saved_uid).execute().data
-            if urow_data and urow_data[0]["role"] == saved_role:
+            if urow_data and urow_data[0]["role"] == saved_role and is_user_account_approved(urow_data[0]):
                 st.session_state.logged_in = True
                 st.session_state.role = saved_role
                 st.session_state.user_id = saved_uid
@@ -1477,6 +1490,90 @@ def run_programming_test_cases(question, code, language=None):
         })
     pct = int((earned / total_marks) * 100) if total_marks else 0
     return {"earned": earned, "total": total_marks, "percentage": pct, "language": selected_language, "results": results}
+
+def normalize_id_list(value):
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return [str(v) for v in value if str(v).strip()]
+    raw = str(value or "").strip()
+    if not raw:
+        return []
+    try:
+        parsed = json.loads(raw)
+        if isinstance(parsed, list):
+            return [str(v) for v in parsed if str(v).strip()]
+    except Exception:
+        pass
+    return [item.strip() for item in raw.split(",") if item.strip()]
+
+def user_account_status(user_row):
+    status = str((user_row or {}).get("approval_status") or "approved").strip().lower()
+    return status or "approved"
+
+def is_user_account_approved(user_row):
+    if (user_row or {}).get("role") == "admin":
+        return True
+    return user_account_status(user_row) not in {"pending", "rejected", "blocked"}
+
+def generate_numeric_pin(length=6):
+    return str(uuid.uuid4().int)[-length:].zfill(length)
+
+def get_hidden_test_acl():
+    try:
+        admins = supabase.table("users").select("*").eq("role", "admin").execute().data or []
+    except Exception:
+        return {}
+    for row in admins:
+        if row.get("hidden_test_view_pin") or row.get("hidden_test_edit_pin"):
+            return row
+    return admins[0] if admins else {}
+
+def current_user_hidden_access(question_id, mode="view"):
+    if st.session_state.get("role") == "admin":
+        return True
+    qid = str(question_id)
+    state_key = "hidden_test_edit_access" if mode == "edit" else "hidden_test_access"
+    if st.session_state.get(state_key, {}).get(qid):
+        return True
+    acl = get_hidden_test_acl()
+    user_id = str(st.session_state.get("user_id") or "")
+    ids_key = "hidden_test_edit_user_ids" if mode == "edit" else "hidden_test_view_user_ids"
+    allowed_ids = normalize_id_list(acl.get(ids_key))
+    return bool(user_id and user_id in allowed_ids and st.session_state.get(state_key, {}).get("__global__"))
+
+def verify_hidden_test_pin(pin, mode="view"):
+    acl = get_hidden_test_acl()
+    pin_key = "hidden_test_edit_pin" if mode == "edit" else "hidden_test_view_pin"
+    allowed_ids_key = "hidden_test_edit_user_ids" if mode == "edit" else "hidden_test_view_user_ids"
+    expected_pin = str(acl.get(pin_key) or "").strip()
+    allowed_ids = normalize_id_list(acl.get(allowed_ids_key))
+    user_id = str(st.session_state.get("user_id") or "")
+    if not expected_pin:
+        return False, "Admin inka PIN generate cheyyaledu."
+    if user_id not in allowed_ids:
+        return False, "Mee account ki hidden test access ivvaledu."
+    if str(pin or "").strip() != expected_pin:
+        return False, "Wrong PIN."
+    return True, ""
+
+def current_user_can_request_hidden_access(mode="view"):
+    if st.session_state.get("role") == "admin":
+        return True
+    acl = get_hidden_test_acl()
+    ids_key = "hidden_test_edit_user_ids" if mode == "edit" else "hidden_test_view_user_ids"
+    return str(st.session_state.get("user_id") or "") in normalize_id_list(acl.get(ids_key))
+
+def get_account_access_sql():
+    return """
+alter table users add column if not exists approval_status text not null default 'approved';
+alter table users add column if not exists username text;
+alter table users add column if not exists requested_pin text;
+alter table users add column if not exists hidden_test_view_pin text;
+alter table users add column if not exists hidden_test_edit_pin text;
+alter table users add column if not exists hidden_test_view_user_ids jsonb not null default '[]'::jsonb;
+alter table users add column if not exists hidden_test_edit_user_ids jsonb not null default '[]'::jsonb;
+"""
 
 def is_programming_exam(exam_id):
     try:
@@ -2819,59 +2916,113 @@ def extract_question_from_image(image_source):
 
 def login():
     st.title("LMS Login")
-    login_method = st.radio("Login method:", ["Email & Password", "PIN Login"], horizontal=True, key="login_method_radio")
+    login_tab, signup_tab = st.tabs(["Login", "Signup"])
 
-    if login_method == "Email & Password":
-        email = st.text_input("Email", key="login_email")
-        password = st.text_input("Password", type="password", key="login_password")
-        if st.button("Login", type="primary", use_container_width=True, key="email_login_btn"):
-            try:
-                response = supabase.auth.sign_in_with_password({"email": email, "password": password})
-                user = response.user
-                user_data = supabase.table("users").select("*").eq("email", email).execute()
-                if user_data.data:
-                    urow = user_data.data[0]
-                    st.session_state.email_temp = email
-                    st.session_state.user_id_temp = user.id
-                    st.session_state.role_temp = urow["role"]
-                    st.session_state.pin_setup_mode = not bool(urow.get("app_pin"))
-                    st.session_state.pin_verified = False
-                    st.rerun()
-                else:
-                    st.error("User record not found.")
-            except Exception as e:
-                st.error(str(e))
-    else:
-        st.caption("Enter your unique PIN.")
-        pin = st.text_input("PIN", type="password", max_chars=6, key="pin_only_input")
-        if st.button("Enter App", type="primary", use_container_width=True, key="pin_only_btn"):
-            if not pin:
-                st.error("Enter PIN.")
-            else:
+    with login_tab:
+        login_method = st.radio("Login method:", ["Email & Password", "PIN Login"], horizontal=True, key="login_method_radio")
+
+        if login_method == "Email & Password":
+            email = st.text_input("Email", key="login_email")
+            password = st.text_input("Password", type="password", key="login_password")
+            if st.button("Login", type="primary", use_container_width=True, key="email_login_btn"):
                 try:
-                    user_data = supabase.table("users").select("*").eq("app_pin", pin).execute()
+                    response = supabase.auth.sign_in_with_password({"email": email, "password": password})
+                    user = response.user
+                    user_data = supabase.table("users").select("*").eq("email", email).execute()
                     if user_data.data:
                         urow = user_data.data[0]
-                        st.session_state.logged_in = True
-                        st.session_state.role = urow["role"]
-                        st.session_state.user_id = urow["id"]
-                        st.session_state.pin_verified = True
-                        st.query_params["uid"] = str(urow["id"])
-                        st.query_params["role"] = urow["role"]
+                        if not is_user_account_approved(urow):
+                            st.error("Mee account admin approval kosam pending lo undi.")
+                            try:
+                                supabase.auth.sign_out()
+                            except Exception:
+                                pass
+                            return
+                        st.session_state.email_temp = email
+                        st.session_state.user_id_temp = user.id
+                        st.session_state.role_temp = urow["role"]
+                        st.session_state.pin_setup_mode = not bool(urow.get("app_pin"))
+                        st.session_state.pin_verified = False
                         st.rerun()
-                    card_user_data = supabase.table("card_users").select("*").eq("app_pin", pin).execute()
-                    if card_user_data.data:
-                        urow = card_user_data.data[0]
-                        st.session_state.logged_in = True
-                        st.session_state.role = "card_user"
-                        st.session_state.user_id = urow["id"]
-                        st.session_state.pin_verified = True
-                        st.query_params["uid"] = str(urow["id"])
-                        st.query_params["role"] = "card_user"
-                        st.rerun()
-                    st.error("Wrong PIN. Try again.")
+                    else:
+                        st.error("User record not found.")
                 except Exception as e:
                     st.error(str(e))
+        else:
+            st.caption("Enter your unique PIN.")
+            pin = st.text_input("PIN", type="password", max_chars=6, key="pin_only_input")
+            if st.button("Enter App", type="primary", use_container_width=True, key="pin_only_btn"):
+                if not pin:
+                    st.error("Enter PIN.")
+                else:
+                    try:
+                        user_data = supabase.table("users").select("*").eq("app_pin", pin).execute()
+                        if user_data.data:
+                            urow = user_data.data[0]
+                            if not is_user_account_approved(urow):
+                                st.error("Mee account admin approval kosam pending lo undi.")
+                                return
+                            st.session_state.logged_in = True
+                            st.session_state.role = urow["role"]
+                            st.session_state.user_id = urow["id"]
+                            st.session_state.pin_verified = True
+                            st.query_params["uid"] = str(urow["id"])
+                            st.query_params["role"] = urow["role"]
+                            st.rerun()
+                        card_user_data = supabase.table("card_users").select("*").eq("app_pin", pin).execute()
+                        if card_user_data.data:
+                            urow = card_user_data.data[0]
+                            st.session_state.logged_in = True
+                            st.session_state.role = "card_user"
+                            st.session_state.user_id = urow["id"]
+                            st.session_state.pin_verified = True
+                            st.query_params["uid"] = str(urow["id"])
+                            st.query_params["role"] = "card_user"
+                            st.rerun()
+                        st.error("Wrong PIN. Try again.")
+                    except Exception as e:
+                        st.error(str(e))
+
+    with signup_tab:
+        st.subheader("Create Account")
+        st.caption("Details submit chesaka admin approve chestadu. Approval taruvatha login avvachu.")
+        with st.form("signup_request_form", clear_on_submit=True):
+            full_name = st.text_input("Name")
+            signup_email = st.text_input("Mail")
+            signup_username = st.text_input("Username")
+            signup_password = st.text_input("Password", type="password")
+            requested_pin = st.text_input("PIN for account creation", type="password", max_chars=6)
+            submitted = st.form_submit_button("Request Account", type="primary", use_container_width=True)
+        if submitted:
+            if not all([full_name.strip(), signup_email.strip(), signup_username.strip(), signup_password, requested_pin.strip()]):
+                st.error("Name, mail, username, password, PIN anni enter cheyyandi.")
+            elif not requested_pin.isdigit() or len(requested_pin) < 4:
+                st.error("PIN 4-6 digits undali.")
+            else:
+                try:
+                    existing_pin = supabase.table("users").select("id").eq("app_pin", requested_pin).execute().data
+                    existing_req_pin = supabase.table("users").select("id").eq("requested_pin", requested_pin).execute().data
+                    if existing_pin or existing_req_pin:
+                        st.error("Ee PIN already use lo undi. Vere PIN try cheyyandi.")
+                    else:
+                        auth_resp = supabase.auth.sign_up({"email": signup_email.strip(), "password": signup_password})
+                        auth_user = auth_resp.user
+                        if not auth_user:
+                            st.error("Signup create avvaledu. Email/password check cheyyandi.")
+                            return
+                        supabase.table("users").insert({
+                            "id": auth_user.id,
+                            "name": full_name.strip(),
+                            "email": signup_email.strip(),
+                            "username": signup_username.strip(),
+                            "role": "user",
+                            "approval_status": "pending",
+                            "requested_pin": requested_pin.strip(),
+                            "app_pin": None,
+                        }).execute()
+                        st.success("Account request sent. Admin approve chesaka login cheyyandi.")
+                except Exception as e:
+                    st.error(f"Signup failed: {e}")
 
 
 def pin_screen():
@@ -4342,7 +4493,7 @@ def admin_dashboard():
     label = f"Group Chat ({unread_admin})" if unread_admin > 0 else "Group Chat"
     
     menu = st.sidebar.selectbox("Navigation Control",
-        ["Manage Course Content", "Manage Exams & Questions", "Student Results & Ranks", "Credit Cards", "Suprabhatam", label],
+        ["Manage Course Content", "Manage Exams & Questions", "Student Results & Ranks", "Users & Access", "Credit Cards", "Suprabhatam", label],
         key="admin_navigation")
     if "Group Chat" in menu:
         menu = "Group Chat"
@@ -4351,6 +4502,80 @@ def admin_dashboard():
         return
     if menu == "Suprabhatam":
         show_suprabhatam_admin()
+        return
+
+    if menu == "Users & Access":
+        st.subheader("Users & Access")
+        with st.expander("Required Supabase columns - run once if signup/access errors vasthe"):
+            st.code(get_account_access_sql(), language="sql")
+
+        try:
+            users = supabase.table("users").select("*").order("name").execute().data or []
+        except Exception as e:
+            st.error(f"Users load avvaledu: {e}")
+            users = []
+
+        pending_users = [u for u in users if user_account_status(u) == "pending"]
+        st.markdown("#### Pending Account Requests")
+        if not pending_users:
+            st.info("Pending signup requests levu.")
+        for u in pending_users:
+            with st.container(border=True):
+                st.markdown(f"**{u.get('name','')}**  |  {u.get('email','')}  |  @{u.get('username','') or '-'}")
+                st.caption(f"Requested account PIN: {u.get('requested_pin') or '-'}")
+                approve_col, reject_col = st.columns(2)
+                with approve_col:
+                    if st.button("Approve Login", key=f"approve_user_{u['id']}", type="primary", use_container_width=True):
+                        pin = str(u.get("requested_pin") or "").strip()
+                        if not pin:
+                            pin = generate_numeric_pin()
+                        supabase.table("users").update({
+                            "approval_status": "approved",
+                            "app_pin": pin,
+                            "requested_pin": None,
+                        }).eq("id", u["id"]).execute()
+                        st.success("User approved.")
+                        st.rerun()
+                with reject_col:
+                    if st.button("Reject", key=f"reject_user_{u['id']}", use_container_width=True):
+                        supabase.table("users").update({"approval_status": "rejected"}).eq("id", u["id"]).execute()
+                        st.warning("User rejected.")
+                        st.rerun()
+
+        st.divider()
+        st.markdown("#### Hidden Test Case PIN Access")
+        admin_row = get_hidden_test_acl()
+        view_pin = str(admin_row.get("hidden_test_view_pin") or "")
+        edit_pin = str(admin_row.get("hidden_test_edit_pin") or "")
+        st.caption(f"See PIN: {view_pin or 'Not generated'}")
+        st.caption(f"Edit PIN: {edit_pin or 'Not generated'}")
+        pin_col1, pin_col2 = st.columns(2)
+        with pin_col1:
+            if st.button("Generate See PIN", use_container_width=True):
+                supabase.table("users").update({"hidden_test_view_pin": generate_numeric_pin()}).eq("id", st.session_state.user_id).execute()
+                st.success("See PIN generated.")
+                st.rerun()
+        with pin_col2:
+            if st.button("Generate Edit PIN", use_container_width=True):
+                supabase.table("users").update({"hidden_test_edit_pin": generate_numeric_pin()}).eq("id", st.session_state.user_id).execute()
+                st.success("Edit PIN generated.")
+                st.rerun()
+
+        student_users = [u for u in users if u.get("role") == "user" and user_account_status(u) == "approved"]
+        user_labels = {f"{u.get('name','')} ({u.get('email','')})": str(u.get("id")) for u in student_users}
+        current_view_ids = normalize_id_list(admin_row.get("hidden_test_view_user_ids"))
+        current_edit_ids = normalize_id_list(admin_row.get("hidden_test_edit_user_ids"))
+        current_view_labels = [label for label, uid in user_labels.items() if uid in current_view_ids]
+        current_edit_labels = [label for label, uid in user_labels.items() if uid in current_edit_ids]
+        view_labels = st.multiselect("Hidden test cases chudagalige accounts", list(user_labels.keys()), default=current_view_labels, key="hidden_view_users")
+        edit_labels = st.multiselect("Hidden test cases edit cheyagalige accounts", list(user_labels.keys()), default=current_edit_labels, key="hidden_edit_users")
+        if st.button("Save Hidden Test Access", type="primary", use_container_width=True):
+            supabase.table("users").update({
+                "hidden_test_view_user_ids": [user_labels[label] for label in view_labels],
+                "hidden_test_edit_user_ids": [user_labels[label] for label in edit_labels],
+            }).eq("id", st.session_state.user_id).execute()
+            st.success("Access saved.")
+            st.rerun()
         return
 
     if menu == "Manage Course Content":
@@ -6406,6 +6631,77 @@ def exam_workspace_view():
                                 st.code(tc.get("input", ""), language="text")
                                 st.caption("Expected Output")
                                 st.code(tc.get("expected_output", ""), language="text")
+                        hidden_cases = [tc for tc in meta.get("test_cases", []) if tc.get("hidden", False)]
+                        if hidden_cases and current_user_can_request_hidden_access("view"):
+                            qid_key = str(question["id"])
+                            if not st.session_state.hidden_test_access.get(qid_key):
+                                view_pin = st.text_input(
+                                    "Hidden test cases see PIN",
+                                    type="password",
+                                    key=f"hidden_view_pin_{question['id']}",
+                                    max_chars=6,
+                                )
+                                if st.button("Unlock Hidden Test Cases", key=f"unlock_hidden_view_{question['id']}", use_container_width=True):
+                                    ok, msg = verify_hidden_test_pin(view_pin, "view")
+                                    if ok:
+                                        st.session_state.hidden_test_access[qid_key] = True
+                                        st.success("Hidden test cases unlocked.")
+                                        st.rerun()
+                                    else:
+                                        st.error(msg)
+                            if st.session_state.hidden_test_access.get(qid_key):
+                                st.markdown("#### Hidden Test Cases")
+                                for idx, tc in enumerate(hidden_cases, start=1):
+                                    with st.container(border=True):
+                                        st.caption(f"Hidden Case {idx}")
+                                        st.caption("Input")
+                                        st.code(tc.get("input", ""), language="text")
+                                        st.caption("Expected Output")
+                                        st.code(tc.get("expected_output", ""), language="text")
+
+                        if hidden_cases and current_user_can_request_hidden_access("edit"):
+                            qid_key = str(question["id"])
+                            if not st.session_state.hidden_test_edit_access.get(qid_key):
+                                edit_pin = st.text_input(
+                                    "Hidden test cases edit PIN",
+                                    type="password",
+                                    key=f"hidden_edit_pin_{question['id']}",
+                                    max_chars=6,
+                                )
+                                if st.button("Unlock Hidden Test Editing", key=f"unlock_hidden_edit_{question['id']}", use_container_width=True):
+                                    ok, msg = verify_hidden_test_pin(edit_pin, "edit")
+                                    if ok:
+                                        st.session_state.hidden_test_edit_access[qid_key] = True
+                                        st.success("Hidden test editing unlocked.")
+                                        st.rerun()
+                                    else:
+                                        st.error(msg)
+                            if st.session_state.hidden_test_edit_access.get(qid_key):
+                                with st.form(f"hidden_case_edit_form_{question['id']}"):
+                                    st.markdown("#### Edit Hidden Test Cases")
+                                    rebuilt_cases = []
+                                    hidden_seen = 0
+                                    for tc_idx, tc in enumerate(meta.get("test_cases", [])):
+                                        if not tc.get("hidden", False):
+                                            rebuilt_cases.append(tc)
+                                            continue
+                                        hidden_seen += 1
+                                        with st.container(border=True):
+                                            st.caption(f"Hidden Case {hidden_seen}")
+                                            edit_in = st.text_area("Input", value=tc.get("input", ""), key=f"hidden_edit_input_{question['id']}_{tc_idx}", height=75)
+                                            edit_out = st.text_area("Expected Output", value=tc.get("expected_output", ""), key=f"hidden_edit_output_{question['id']}_{tc_idx}", height=75)
+                                            edit_marks = st.number_input("Marks", min_value=1, max_value=100, value=int(tc.get("marks", 1) or 1), key=f"hidden_edit_marks_{question['id']}_{tc_idx}")
+                                        rebuilt_cases.append({
+                                            "input": edit_in,
+                                            "expected_output": edit_out,
+                                            "marks": int(edit_marks),
+                                            "hidden": True,
+                                        })
+                                    if st.form_submit_button("Save Hidden Test Cases", type="primary", use_container_width=True):
+                                        new_explanation = make_programming_meta(meta.get("description", ""), rebuilt_cases, selected_language if 'selected_language' in locals() else meta.get("language", "java"))
+                                        supabase.table("questions").update({"explanation": new_explanation}).eq("id", question["id"]).execute()
+                                        st.success("Hidden test cases updated.")
+                                        st.rerun()
                         st.markdown("</div>", unsafe_allow_html=True)
                 with p_right:
                     selected_language_label = st.selectbox(
@@ -6501,7 +6797,23 @@ def exam_workspace_view():
                                 unsafe_allow_html=True,
                             )
                             if is_hidden:
-                                st.caption("Hidden input/output counted in scoring.")
+                                if st.session_state.hidden_test_access.get(str(question["id"])):
+                                    st.caption(f"Status: {res.get('status','')}")
+                                    c_in, c_exp, c_act = st.columns(3)
+                                    with c_in:
+                                        st.caption("Input")
+                                        st.code(res.get("input", ""), language="text")
+                                    with c_exp:
+                                        st.caption("Expected")
+                                        st.code(res.get("expected_output", ""), language="text")
+                                    with c_act:
+                                        st.caption("Actual")
+                                        st.code(res.get("actual_output", ""), language="text")
+                                    if res.get("error"):
+                                        st.caption("Runtime / compiler log")
+                                        st.code(res["error"], language="text")
+                                else:
+                                    st.caption("Hidden input/output counted in scoring.")
                             elif not res["passed"]:
                                 st.caption(f"Status: {res.get('status','')}")
                                 c_exp, c_act = st.columns(2)
