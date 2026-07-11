@@ -1528,6 +1528,61 @@ def normalize_id_list(value):
         pass
     return [item.strip() for item in raw.split(",") if item.strip()]
 
+def get_user_course_access(user_id):
+    if st.session_state.get("role") == "admin" and str(user_id) == str(st.session_state.get("user_id")):
+        return "all", []
+    try:
+        rows = supabase.table("users").select("course_access_mode, allowed_module_ids").eq("id", str(user_id)).limit(1).execute().data or []
+    except Exception:
+        return "all", []
+    if not rows:
+        return "all", []
+    mode = str(rows[0].get("course_access_mode") or "all").strip().lower()
+    allowed = normalize_id_list(rows[0].get("allowed_module_ids"))
+    return ("selected" if mode == "selected" else "all"), allowed
+
+def get_accessible_module_ids(user_id):
+    mode, allowed = get_user_course_access(user_id)
+    if mode == "all":
+        return None
+    return {str(mid) for mid in allowed}
+
+def filter_modules_for_user(modules, user_id):
+    allowed_ids = get_accessible_module_ids(user_id)
+    if allowed_ids is None:
+        return modules or []
+    return [m for m in (modules or []) if str(m.get("id")) in allowed_ids]
+
+def filter_course_rows_for_user(modules, submodules, classes, exams, user_id):
+    allowed_module_ids = get_accessible_module_ids(user_id)
+    modules = modules or []
+    submodules = submodules or []
+    classes = classes or []
+    exams = exams or []
+    if allowed_module_ids is None:
+        return modules, submodules, classes, exams
+    modules = [m for m in modules if str(m.get("id")) in allowed_module_ids]
+    allowed_sub_ids = {str(s.get("id")) for s in submodules if str(s.get("module_id")) in allowed_module_ids}
+    submodules = [s for s in submodules if str(s.get("id")) in allowed_sub_ids]
+    allowed_class_ids = {str(c.get("id")) for c in classes if str(c.get("submodule_id")) in allowed_sub_ids}
+    classes = [c for c in classes if str(c.get("id")) in allowed_class_ids]
+    exams = [e for e in exams if str(e.get("class_id")) in allowed_class_ids]
+    return modules, submodules, classes, exams
+
+def get_accessible_exam_ids(user_id):
+    try:
+        modules = supabase.table("modules").select("*").execute().data or []
+        submodules = supabase.table("submodules").select("*").execute().data or []
+        classes = supabase.table("classes").select("*").execute().data or []
+        exams = supabase.table("exams").select("id, class_id").execute().data or []
+    except Exception:
+        return None
+    _, _, _, filtered_exams = filter_course_rows_for_user(modules, submodules, classes, exams, user_id)
+    mode, _ = get_user_course_access(user_id)
+    if mode == "all":
+        return None
+    return {str(e.get("id")) for e in filtered_exams}
+
 def user_account_status(user_row):
     status = str((user_row or {}).get("approval_status") or "approved").strip().lower()
     return status or "approved"
@@ -1763,6 +1818,8 @@ alter table users add column if not exists hidden_test_edit_pin text;
 alter table users add column if not exists hidden_test_view_user_ids jsonb not null default '[]'::jsonb;
 alter table users add column if not exists hidden_test_edit_user_ids jsonb not null default '[]'::jsonb;
 alter table users add column if not exists hidden_test_view_limit integer not null default 0;
+alter table users add column if not exists course_access_mode text not null default 'all';
+alter table users add column if not exists allowed_module_ids jsonb not null default '[]'::jsonb;
 
 create table if not exists hidden_test_case_views (
   id uuid primary key default gen_random_uuid(),
@@ -2390,6 +2447,10 @@ def show_student_exams_tab(user_id):
     series_list = fetch_exam_series(show_warning=False)
     try:
         exams = supabase.table("exams").select("*").execute().data or []
+        access_modules = supabase.table("modules").select("*").execute().data or []
+        access_submodules = supabase.table("submodules").select("*").execute().data or []
+        access_classes = supabase.table("classes").select("*").execute().data or []
+        _, _, _, exams = filter_course_rows_for_user(access_modules, access_submodules, access_classes, exams, user_id)
     except Exception as e:
         st.error(f"Exams load avvaledu: {e}")
         return
@@ -2398,9 +2459,18 @@ def show_student_exams_tab(user_id):
         return
 
     folder_by_id = {str(folder.get("id")): folder for folder in folders}
+    allowed_exam_ids = {str(exam.get("id")) for exam in exams}
+    filtered_series = []
+    for series in series_list:
+        if not bool(series.get("enabled")):
+            continue
+        round_ids = [str(round_cfg.get("exam_id")) for round_cfg in parse_exam_series_rounds(series.get("rounds")) if round_cfg.get("exam_id")]
+        if round_ids and all(rid in allowed_exam_ids for rid in round_ids):
+            filtered_series.append(series)
+    series_list = filtered_series
     series_exam_ids = {
         str(round_cfg.get("exam_id"))
-        for series in series_list if bool(series.get("enabled"))
+        for series in series_list
         for round_cfg in parse_exam_series_rounds(series.get("rounds"))
     }
     exams_by_folder = {}
@@ -3613,6 +3683,7 @@ def collect_student_progress(user_id):
     submodules = supabase.table("submodules").select("*").execute().data or []
     classes = supabase.table("classes").select("*").execute().data or []
     exams = supabase.table("exams").select("*").execute().data or []
+    modules, submodules, classes, exams = filter_course_rows_for_user(modules, submodules, classes, exams, user_id)
     attempts = supabase.table("exam_attempts").select("*").eq("user_id", user_id).execute().data or []
 
     sub_by_module = {}
@@ -3859,6 +3930,13 @@ def show_java_practice_tab():
 def show_programming_questions_tab(user_id):
     st.title("Programming Questions")
     exams = supabase.table("exams").select("*").eq("enabled", True).execute().data or []
+    try:
+        access_modules = supabase.table("modules").select("*").execute().data or []
+        access_submodules = supabase.table("submodules").select("*").execute().data or []
+        access_classes = supabase.table("classes").select("*").execute().data or []
+        _, _, _, exams = filter_course_rows_for_user(access_modules, access_submodules, access_classes, exams, user_id)
+    except Exception:
+        pass
     exam_rows = []
     for exam in exams:
         q_rows = supabase.table("questions").select("*").eq("exam_id", exam["id"]).eq("type", "programming").execute().data or []
@@ -4780,6 +4858,51 @@ def admin_dashboard():
                         st.rerun()
 
         st.divider()
+        st.markdown("#### Course / Module Access")
+        st.caption("Each user ki all modules access ivvachu, leda selected modules matrame ivvachu.")
+        student_users = [u for u in users if u.get("role") == "user" and user_account_status(u) == "approved"]
+        try:
+            course_modules = supabase.table("modules").select("*").order("title").execute().data or []
+        except Exception as e:
+            course_modules = []
+            st.warning(f"Modules load avvaledu: {e}")
+        module_labels = {f"{m.get('title','Untitled')}": str(m.get("id")) for m in course_modules}
+        if not student_users:
+            st.info("Approved users levu.")
+        elif not course_modules:
+            st.info("Modules levu. First Manage Course Content lo modules add cheyyandi.")
+        for u in student_users:
+            uid = str(u.get("id"))
+            mode = str(u.get("course_access_mode") or "all").strip().lower()
+            allowed_ids = normalize_id_list(u.get("allowed_module_ids"))
+            with st.container(border=True):
+                st.markdown(f"**{u.get('name','')}** ({u.get('email','')})")
+                mode_label = st.radio(
+                    "Access",
+                    ["All Access", "Selected Modules Only"],
+                    index=1 if mode == "selected" else 0,
+                    horizontal=True,
+                    key=f"course_access_mode_{uid}",
+                )
+                default_labels = [label for label, mid in module_labels.items() if mid in allowed_ids]
+                selected_labels = []
+                if mode_label == "Selected Modules Only":
+                    selected_labels = st.multiselect(
+                        "Modules",
+                        list(module_labels.keys()),
+                        default=default_labels,
+                        key=f"course_access_modules_{uid}",
+                    )
+                if st.button("Save Course Access", key=f"save_course_access_{uid}", use_container_width=True, type="primary"):
+                    new_mode = "selected" if mode_label == "Selected Modules Only" else "all"
+                    supabase.table("users").update({
+                        "course_access_mode": new_mode,
+                        "allowed_module_ids": [module_labels[label] for label in selected_labels] if new_mode == "selected" else [],
+                    }).eq("id", uid).execute()
+                    st.success("Course access saved.")
+                    st.rerun()
+
+        st.divider()
         st.markdown("#### Hidden Test Case PIN Access")
         admin_row = get_hidden_test_acl()
         view_pin = str(admin_row.get("hidden_test_view_pin") or "")
@@ -4798,7 +4921,6 @@ def admin_dashboard():
                 st.success("Edit PIN generated.")
                 st.rerun()
 
-        student_users = [u for u in users if u.get("role") == "user" and user_account_status(u) == "approved"]
         user_labels = {f"{u.get('name','')} ({u.get('email','')})": str(u.get("id")) for u in student_users}
         current_view_ids = normalize_id_list(admin_row.get("hidden_test_view_user_ids"))
         current_edit_ids = normalize_id_list(admin_row.get("hidden_test_edit_user_ids"))
@@ -6599,8 +6721,18 @@ def user_dashboard(preview_mode=False):
         st.error("Suprabhatam access ledu. Admin ni contact cheyyandi."); return
 
     # My Classes
-    modules = supabase.table("modules").select("*").execute().data
-    modules = modules or []
+    modules = supabase.table("modules").select("*").execute().data or []
+    all_submodules_for_access = supabase.table("submodules").select("*").execute().data or []
+    all_classes_for_access = supabase.table("classes").select("*").execute().data or []
+    modules, allowed_submodules, allowed_classes, _ = filter_course_rows_for_user(
+        modules,
+        all_submodules_for_access,
+        all_classes_for_access,
+        [],
+        st.session_state.user_id,
+    )
+    allowed_sub_ids = {str(s.get("id")) for s in allowed_submodules}
+    allowed_class_ids = {str(c.get("id")) for c in allowed_classes}
     if st.session_state.completed_ids is None:
         all_completions = supabase.table("class_completions").select("class_id").eq("user_id", st.session_state.user_id).execute().data
         st.session_state.completed_ids = {str(c["class_id"]) for c in all_completions}
@@ -6608,11 +6740,8 @@ def user_dashboard(preview_mode=False):
     focus_class_id = str(st.session_state.get("focus_class_id", ""))
     focus_exam_id = str(st.session_state.get("focus_exam_id", ""))
     inject_student_home_styles()
-    try:
-        all_classes_count = len(supabase.table("classes").select("id").execute().data or [])
-    except Exception:
-        all_classes_count = 0
-    done_count = len(completed_ids)
+    all_classes_count = len(allowed_classes)
+    done_count = len([cid for cid in completed_ids if cid in allowed_class_ids])
     pending_count = max(all_classes_count - done_count, 0)
     st.markdown(
         f"""
@@ -6630,12 +6759,12 @@ def user_dashboard(preview_mode=False):
     )
 
     for module in modules:
-        module_submodules = supabase.table("submodules").select("id").eq("module_id", module["id"]).execute().data
+        module_submodules = [s for s in allowed_submodules if str(s.get("module_id")) == str(module["id"])]
         sub_ids = [s["id"] for s in module_submodules]
         module_has_focus = False
         module_total = 0; module_done = 0
         for sid in sub_ids:
-            cls_list = supabase.table("classes").select("id").eq("submodule_id", sid).execute().data
+            cls_list = [c for c in allowed_classes if str(c.get("submodule_id")) == str(sid)]
             module_total += len(cls_list)
             module_done += sum(1 for c in cls_list if str(c["id"]) in completed_ids)
             if focus_class_id and any(str(c["id"]) == focus_class_id for c in cls_list):
@@ -6654,15 +6783,15 @@ def user_dashboard(preview_mode=False):
             )
             if module_total > 0:
                 st.progress(pct / 100, text=f"Module Progress: {pct}%")
-            submodules = supabase.table("submodules").select("*").eq("module_id", module["id"]).execute().data
+            submodules = [s for s in allowed_submodules if str(s.get("module_id")) == str(module["id"])]
             for sub in submodules:
-                sub_classes = supabase.table("classes").select("id").eq("submodule_id", sub["id"]).execute().data
+                sub_classes = [c for c in allowed_classes if str(c.get("submodule_id")) == str(sub["id"])]
                 sub_total = len(sub_classes)
                 sub_done = sum(1 for c in sub_classes if str(c["id"]) in completed_ids)
                 sub_pct = int((sub_done / sub_total * 100)) if sub_total > 0 else 0
                 st.subheader(f"{sub['title']}   {sub_done}/{sub_total}")
                 if sub_total > 0: st.progress(sub_pct / 100)
-                classes = supabase.table("classes").select("*").eq("submodule_id", sub["id"]).execute().data
+                classes = [c for c in allowed_classes if str(c.get("submodule_id")) == str(sub["id"])]
                 for cls in classes:
                     is_done = str(cls.get("id")) in completed_ids
                     is_focused_class = focus_class_id and str(cls.get("id")) == focus_class_id
