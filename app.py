@@ -39,6 +39,26 @@ def upload_image_to_imgbb(image_file):
 # =========================
 st.set_page_config(page_title="Advanced LMS Portal", layout="wide")
 
+st.markdown("""
+<style>
+/* Streamlit/BaseWeb selectbox menus can extend below the viewport in the sidebar.
+   Keep the popup visible by making the options panel scroll internally. */
+div[data-baseweb="popover"] div[role="listbox"],
+div[data-baseweb="popover"] ul[role="listbox"],
+div[data-baseweb="popover"] [data-testid="stVirtualDropdown"] {
+    max-height: min(420px, 55vh) !important;
+    overflow-y: auto !important;
+}
+div[data-baseweb="popover"] {
+    max-height: 70vh !important;
+    z-index: 999999 !important;
+}
+[data-testid="stSidebar"] div[data-baseweb="select"] {
+    z-index: 999999 !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
 # =========================
 # SUPABASE + GEMINI INIT
 # =========================
