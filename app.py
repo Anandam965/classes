@@ -103,6 +103,7 @@ defaults = {
     "suprabhatam_language": "Telugu",
     "hidden_test_access": {},
     "hidden_test_edit_access": {},
+    "hidden_test_viewed_cases": {},
 }
 for key, val in defaults.items():
     if key not in st.session_state:
@@ -1564,6 +1565,174 @@ def current_user_can_request_hidden_access(mode="view"):
     ids_key = "hidden_test_edit_user_ids" if mode == "edit" else "hidden_test_view_user_ids"
     return str(st.session_state.get("user_id") or "") in normalize_id_list(acl.get(ids_key))
 
+def get_hidden_case_view_limit(user_id=None):
+    user_id = str(user_id or st.session_state.get("user_id") or "")
+    if not user_id:
+        return 0
+    try:
+        rows = supabase.table("users").select("hidden_test_view_limit").eq("id", user_id).limit(1).execute().data or []
+        return int(rows[0].get("hidden_test_view_limit") or 0) if rows else 0
+    except Exception:
+        return 0
+
+def get_hidden_case_views_used(user_id=None):
+    user_id = str(user_id or st.session_state.get("user_id") or "")
+    if not user_id:
+        return 0
+    try:
+        rows = supabase.table("hidden_test_case_views").select("id").eq("user_id", user_id).execute().data or []
+        return len(rows)
+    except Exception:
+        return 0
+
+def get_hidden_case_views_remaining(user_id=None):
+    return max(0, get_hidden_case_view_limit(user_id) - get_hidden_case_views_used(user_id))
+
+def hidden_case_view_key(question_id, case_no):
+    return f"{question_id}:{case_no}"
+
+def has_hidden_case_viewed(question_id, case_no, user_id=None):
+    if st.session_state.get("role") == "admin":
+        return True
+    user_id = str(user_id or st.session_state.get("user_id") or "")
+    key = hidden_case_view_key(question_id, case_no)
+    if st.session_state.hidden_test_viewed_cases.get(key):
+        return True
+    try:
+        rows = supabase.table("hidden_test_case_views").select("id").eq("user_id", user_id).eq("question_id", str(question_id)).eq("case_no", int(case_no)).limit(1).execute().data or []
+        if rows:
+            st.session_state.hidden_test_viewed_cases[key] = True
+            return True
+    except Exception:
+        pass
+    return False
+
+def consume_hidden_case_view(question_id, case_no):
+    if st.session_state.get("role") == "admin":
+        return True, ""
+    if has_hidden_case_viewed(question_id, case_no):
+        return True, ""
+    remaining = get_hidden_case_views_remaining()
+    if remaining <= 0:
+        return False, "Hidden test case view limit ayipoyindi. Admin limit increase cheyyali."
+    try:
+        supabase.table("hidden_test_case_views").insert({
+            "user_id": str(st.session_state.user_id),
+            "question_id": str(question_id),
+            "case_no": int(case_no),
+        }).execute()
+        st.session_state.hidden_test_viewed_cases[hidden_case_view_key(question_id, case_no)] = True
+        return True, ""
+    except Exception as e:
+        return False, f"View record save avvaledu: {e}"
+
+def get_user_question_hint(question_id):
+    try:
+        rows = supabase.table("hint_requests").select("*").eq("user_id", str(st.session_state.user_id)).eq("question_id", str(question_id)).order("created_at", desc=True).limit(1).execute().data or []
+    except Exception:
+        return None
+    return rows[0] if rows else None
+
+def submit_hint_request(exam_id, question_id):
+    existing = get_user_question_hint(question_id)
+    if existing and existing.get("status") == "pending":
+        return False, "Hint request already pending lo undi."
+    try:
+        supabase.table("hint_requests").insert({
+            "user_id": str(st.session_state.user_id),
+            "exam_id": str(exam_id),
+            "question_id": str(question_id),
+            "status": "pending",
+        }).execute()
+        return True, "Hint request admin ki sent."
+    except Exception as e:
+        return False, f"Hint request failed: {e}"
+
+def submit_test_case_report(exam_id, question_id, case_no, report_text, result_payload=None):
+    try:
+        supabase.table("test_case_reports").insert({
+            "user_id": str(st.session_state.user_id),
+            "exam_id": str(exam_id),
+            "question_id": str(question_id),
+            "case_no": int(case_no),
+            "report_text": str(report_text or "").strip(),
+            "result_payload": result_payload or {},
+            "status": "pending",
+        }).execute()
+        return True, "Report admin ki sent."
+    except Exception as e:
+        return False, f"Report failed: {e}"
+
+def generate_programming_questions_ppt(questions, exam_title):
+    from pptx import Presentation
+    from pptx.util import Inches, Pt
+    from pptx.dml.color import RGBColor
+    from pptx.enum.text import PP_ALIGN
+    import io
+
+    def rgb(h):
+        h = h.lstrip("#")
+        return RGBColor(int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16))
+
+    def txt(sl, text, x, y, w, h, sz=13, bold=False, color="1A1A2E", align=PP_ALIGN.LEFT):
+        tb = sl.shapes.add_textbox(Inches(x), Inches(y), Inches(w), Inches(h))
+        tf = tb.text_frame
+        tf.word_wrap = True
+        p = tf.paragraphs[0]
+        p.alignment = align
+        r = p.add_run()
+        r.text = str(text or "")
+        r.font.size = Pt(sz)
+        r.font.bold = bold
+        r.font.color.rgb = rgb(color)
+        return tb
+
+    def box(sl, x, y, w, h, fill, border="D0D8E8"):
+        s = sl.shapes.add_shape(1, Inches(x), Inches(y), Inches(w), Inches(h))
+        s.fill.solid()
+        s.fill.fore_color.rgb = rgb(fill)
+        s.line.color.rgb = rgb(border)
+        return s
+
+    prs = Presentation()
+    prs.slide_width = Inches(10)
+    prs.slide_height = Inches(5.625)
+    blank = prs.slide_layouts[6]
+
+    title_slide = prs.slides.add_slide(blank)
+    box(title_slide, 0, 0, 10, 5.625, "1E2761", "1E2761")
+    txt(title_slide, exam_title or "Programming Questions", 0.6, 1.4, 8.8, 1.0, sz=32, bold=True, color="FFFFFF", align=PP_ALIGN.CENTER)
+    txt(title_slide, f"{len(questions)} programming questions with all test cases", 0.8, 2.65, 8.4, 0.5, sz=18, color="CADCFC", align=PP_ALIGN.CENTER)
+
+    for q_index, q in enumerate(questions, start=1):
+        meta = get_programming_meta(q)
+        test_cases = meta.get("test_cases", []) or []
+        overview = prs.slides.add_slide(blank)
+        box(overview, 0, 0, 10, 5.625, "F4F6FB", "F4F6FB")
+        txt(overview, f"Q{q_index}. {q.get('question', '')}", 0.35, 0.2, 9.3, 0.55, sz=18, bold=True)
+        txt(overview, f"Language: {get_programming_language_meta(meta.get('language', 'java'))['label']}  |  Marks: {get_question_max_marks(q)}", 0.35, 0.82, 9.2, 0.3, sz=11, color="4B587C")
+        box(overview, 0.35, 1.22, 9.3, 3.85, "FFFFFF")
+        txt(overview, meta.get("description", ""), 0.55, 1.38, 8.9, 3.45, sz=12)
+        txt(overview, f"{q_index}/{len(questions)}", 8.7, 5.25, 0.9, 0.2, sz=9, color="7F8C8D", align=PP_ALIGN.RIGHT)
+
+        for tc_idx, tc in enumerate(test_cases, start=1):
+            slide = prs.slides.add_slide(blank)
+            box(slide, 0, 0, 10, 5.625, "F4F6FB", "F4F6FB")
+            badge = "Hidden" if tc.get("hidden") else "Sample"
+            txt(slide, f"Q{q_index} - Test Case {tc_idx} ({badge})", 0.35, 0.2, 9.3, 0.45, sz=18, bold=True)
+            txt(slide, f"Marks: {tc.get('marks', 1)}", 0.35, 0.7, 9, 0.25, sz=11, color="4B587C")
+            box(slide, 0.35, 1.08, 4.5, 3.95, "FFFFFF")
+            box(slide, 5.15, 1.08, 4.5, 3.95, "FFFFFF")
+            txt(slide, "Input", 0.55, 1.23, 4.1, 0.25, sz=12, bold=True, color="1E2761")
+            txt(slide, tc.get("input", ""), 0.55, 1.58, 4.1, 3.1, sz=11)
+            txt(slide, "Expected Output", 5.35, 1.23, 4.1, 0.25, sz=12, bold=True, color="1E2761")
+            txt(slide, tc.get("expected_output", ""), 5.35, 1.58, 4.1, 3.1, sz=11)
+
+    buf = io.BytesIO()
+    prs.save(buf)
+    buf.seek(0)
+    return buf.read()
+
 def get_account_access_sql():
     return """
 alter table users add column if not exists approval_status text not null default 'approved';
@@ -1573,6 +1742,41 @@ alter table users add column if not exists hidden_test_view_pin text;
 alter table users add column if not exists hidden_test_edit_pin text;
 alter table users add column if not exists hidden_test_view_user_ids jsonb not null default '[]'::jsonb;
 alter table users add column if not exists hidden_test_edit_user_ids jsonb not null default '[]'::jsonb;
+alter table users add column if not exists hidden_test_view_limit integer not null default 0;
+
+create table if not exists hidden_test_case_views (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references users(id) on delete cascade,
+  question_id uuid not null references questions(id) on delete cascade,
+  case_no integer not null,
+  viewed_at timestamptz default now(),
+  unique(user_id, question_id, case_no)
+);
+
+create table if not exists hint_requests (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references users(id) on delete cascade,
+  exam_id uuid references exams(id) on delete cascade,
+  question_id uuid not null references questions(id) on delete cascade,
+  status text not null default 'pending',
+  admin_hint text,
+  created_at timestamptz default now(),
+  reviewed_at timestamptz
+);
+
+create table if not exists test_case_reports (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references users(id) on delete cascade,
+  exam_id uuid references exams(id) on delete cascade,
+  question_id uuid not null references questions(id) on delete cascade,
+  case_no integer not null,
+  report_text text,
+  result_payload jsonb not null default '{}'::jsonb,
+  status text not null default 'pending',
+  admin_note text,
+  created_at timestamptz default now(),
+  reviewed_at timestamptz
+);
 """
 
 def is_programming_exam(exam_id):
@@ -3671,6 +3875,18 @@ def show_programming_questions_tab(user_id):
                 entered_pwd = ""
                 if has_pwd:
                     entered_pwd = st.text_input("Access Code", type="password", key=f"prog_pwd_exam_{exam['id']}", label_visibility="collapsed")
+                try:
+                    ppt_bytes = generate_programming_questions_ppt(q_rows, exam.get("title", "Programming Questions"))
+                    st.download_button(
+                        "Download Questions PPT",
+                        data=ppt_bytes,
+                        file_name=f"{str(exam.get('title','programming'))[:25]}_programming_questions.pptx",
+                        mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                        key=f"download_prog_ppt_{exam['id']}",
+                        use_container_width=True,
+                    )
+                except Exception as e:
+                    st.caption(f"PPT download ready avvaledu: {e}")
                 if st.button(label, key=f"solve_prog_exam_{exam['id']}", use_container_width=True, type="primary" if not attempted else "secondary"):
                     if has_pwd and entered_pwd.strip() != str(exam.get("password")).strip():
                         st.error("Wrong Password!")
@@ -4576,6 +4792,23 @@ def admin_dashboard():
             }).eq("id", st.session_state.user_id).execute()
             st.success("Access saved.")
             st.rerun()
+
+        st.markdown("#### Hidden Test Case View Limits")
+        st.caption("Oka hidden test case view chesthe 1 limit consume avuthundi. Already viewed case malli chuste limit taggadu.")
+        for u in student_users:
+            used = get_hidden_case_views_used(u.get("id"))
+            limit_val = int(u.get("hidden_test_view_limit") or 0)
+            c_user, c_limit, c_save = st.columns([4, 2, 1])
+            with c_user:
+                st.markdown(f"**{u.get('name','')}** ({u.get('email','')})")
+                st.caption(f"Used: {used} | Remaining: {max(0, limit_val - used)}")
+            with c_limit:
+                new_limit = st.number_input("Limit", min_value=0, max_value=1000, value=limit_val, step=1, key=f"hidden_limit_{u['id']}", label_visibility="collapsed")
+            with c_save:
+                if st.button("Save", key=f"save_hidden_limit_{u['id']}", use_container_width=True):
+                    supabase.table("users").update({"hidden_test_view_limit": int(new_limit)}).eq("id", u["id"]).execute()
+                    st.success("Limit saved.")
+                    st.rerun()
         return
 
     if menu == "Manage Course Content":
@@ -5345,9 +5578,9 @@ def admin_dashboard():
             show_admin_exam_series_tab()
 
     elif menu == "Student Results & Ranks":
-        r_tab1, r_tab2, r_tab3, r_tab4, r_tab5, r_tab6, r_tab7 = st.tabs([
+        r_tab1, r_tab2, r_tab3, r_tab4, r_tab5, r_tab6, r_tab7, r_tab8, r_tab9 = st.tabs([
             " Leaderboards", " Manual Evaluation", " Score Summary",
-            " Re-Exam Requests", " Explain Requests", " Attendance", " Live Programming Exams"
+            " Re-Exam Requests", " Explain Requests", " Hint Requests", " Test Case Reports", " Attendance", " Live Programming Exams"
         ])
 
         with r_tab1:
@@ -5475,6 +5708,99 @@ def admin_dashboard():
                                     st.rerun()
 
         with r_tab6:
+            st.title("Hint Requests")
+            try:
+                hint_requests = supabase.table("hint_requests").select("*").order("created_at", desc=True).execute().data or []
+            except Exception as e:
+                hint_requests = []
+                st.warning(f"Hint requests table ready ledu: {e}")
+            if not hint_requests:
+                st.info("Hint requests levu.")
+            for req in hint_requests:
+                u_info = supabase.table("users").select("name, email").eq("id", req["user_id"]).execute().data or [{}]
+                q_info = supabase.table("questions").select("*").eq("id", req["question_id"]).execute().data or [{}]
+                e_info = supabase.table("exams").select("title").eq("id", req.get("exam_id")).execute().data or [{}]
+                with st.container(border=True):
+                    st.markdown(f"**{u_info[0].get('name','Unknown')}** ({u_info[0].get('email','')})")
+                    st.caption(f"{e_info[0].get('title','Unknown Exam')} | Status: {req.get('status','pending')}")
+                    st.markdown(f"Question: **{q_info[0].get('question','')}**")
+                    admin_hint = st.text_area("Admin custom hint", value=req.get("admin_hint") or q_info[0].get("hint", "") or "", key=f"admin_hint_{req['id']}", height=90)
+                    approve_col, reject_col = st.columns(2)
+                    with approve_col:
+                        if st.button("Approve Hint", key=f"approve_hint_{req['id']}", type="primary", use_container_width=True):
+                            supabase.table("hint_requests").update({
+                                "status": "approved",
+                                "admin_hint": admin_hint.strip(),
+                                "reviewed_at": "now()",
+                            }).eq("id", req["id"]).execute()
+                            st.success("Hint approved.")
+                            st.rerun()
+                    with reject_col:
+                        if st.button("Reject", key=f"reject_hint_{req['id']}", use_container_width=True):
+                            supabase.table("hint_requests").update({"status": "rejected", "reviewed_at": "now()"}).eq("id", req["id"]).execute()
+                            st.warning("Hint rejected.")
+                            st.rerun()
+
+        with r_tab7:
+            st.title("Test Case Reports")
+            try:
+                reports = supabase.table("test_case_reports").select("*").order("created_at", desc=True).execute().data or []
+            except Exception as e:
+                reports = []
+                st.warning(f"Test case reports table ready ledu: {e}")
+            if not reports:
+                st.info("Reports levu.")
+            for rep in reports:
+                u_info = supabase.table("users").select("name, email").eq("id", rep["user_id"]).execute().data or [{}]
+                q_rows = supabase.table("questions").select("*").eq("id", rep["question_id"]).execute().data or []
+                if not q_rows:
+                    continue
+                q = q_rows[0]
+                meta = get_programming_meta(q)
+                case_no = int(rep.get("case_no") or 0)
+                tc = (meta.get("test_cases", []) or [])[case_no - 1] if 0 < case_no <= len(meta.get("test_cases", []) or []) else {}
+                with st.container(border=True):
+                    st.markdown(f"**{u_info[0].get('name','Unknown')}** ({u_info[0].get('email','')})")
+                    st.caption(f"Q: {q.get('question','')} | Test Case {case_no} | Status: {rep.get('status','pending')}")
+                    if rep.get("report_text"):
+                        st.info(rep.get("report_text"))
+                    payload = rep.get("result_payload") or {}
+                    if payload:
+                        c_exp, c_act = st.columns(2)
+                        with c_exp:
+                            st.caption("Expected")
+                            st.code(payload.get("expected_output", ""), language="text")
+                        with c_act:
+                            st.caption("Actual")
+                            st.code(payload.get("actual_output", ""), language="text")
+                    if st.button("Edit Question/Test Case", key=f"open_report_edit_{rep['id']}", use_container_width=True):
+                        st.session_state[f"report_edit_{rep['id']}"] = not st.session_state.get(f"report_edit_{rep['id']}", False)
+                        st.rerun()
+                    if st.session_state.get(f"report_edit_{rep['id']}", False):
+                        with st.form(f"report_edit_form_{rep['id']}"):
+                            new_q_title = st.text_area("Question / Title", value=q.get("question", ""), height=80)
+                            new_desc = st.text_area("Description", value=meta.get("description", ""), height=140)
+                            new_input = st.text_area("Test Input", value=tc.get("input", ""), height=80)
+                            new_output = st.text_area("Expected Output", value=tc.get("expected_output", ""), height=80)
+                            new_marks = st.number_input("Marks", min_value=1, max_value=100, value=int(tc.get("marks", 1) or 1), step=1)
+                            new_hidden = st.checkbox("Hidden", value=bool(tc.get("hidden", False)))
+                            note = st.text_input("Admin note", value=rep.get("admin_note") or "")
+                            if st.form_submit_button("Save Fix & Close Report", type="primary", use_container_width=True):
+                                cases = meta.get("test_cases", []) or []
+                                if 0 < case_no <= len(cases):
+                                    cases[case_no - 1] = {
+                                        "input": new_input,
+                                        "expected_output": new_output,
+                                        "marks": int(new_marks),
+                                        "hidden": bool(new_hidden),
+                                    }
+                                new_explanation = make_programming_meta(new_desc, cases, meta.get("language", "java"))
+                                supabase.table("questions").update({"question": new_q_title, "explanation": new_explanation}).eq("id", q["id"]).execute()
+                                supabase.table("test_case_reports").update({"status": "fixed", "admin_note": note, "reviewed_at": "now()"}).eq("id", rep["id"]).execute()
+                                st.success("Question/test case updated.")
+                                st.rerun()
+
+        with r_tab8:
             st.title("Student Attendance")
             all_students = supabase.table("users").select("id, name, email").eq("role","user").execute().data
             if not all_students:
@@ -5485,7 +5811,7 @@ def admin_dashboard():
                 sel_uid = all_students[sel_idx]["id"]
                 show_attendance_tab(sel_uid)
 
-        with r_tab7:
+        with r_tab9:
             st.title("Live Programming Exams")
             with st.expander("Programming session database SQL setup"):
                 st.code(get_programming_session_sql(), language="sql")
@@ -6615,6 +6941,19 @@ def exam_workspace_view():
                         if meta.get("description"):
                             st.markdown(meta["description"])
                         st.caption(f"Marks: {max_marks}")
+                        hint_req = get_user_question_hint(question["id"]) if st.session_state.get("role") != "admin" else None
+                        if hint_req and hint_req.get("status") == "approved" and hint_req.get("admin_hint"):
+                            st.info(f"Hint: {hint_req.get('admin_hint')}")
+                        elif hint_req and hint_req.get("status") == "pending":
+                            st.caption("Hint request pending with admin.")
+                        elif st.session_state.get("role") != "admin":
+                            if st.button("Request Hint", key=f"hint_request_{question['id']}", use_container_width=True):
+                                ok, msg = submit_hint_request(st.session_state.exam_id, question["id"])
+                                if ok:
+                                    st.success(msg)
+                                    st.rerun()
+                                else:
+                                    st.warning(msg)
                         visible_cases = [tc for tc in meta.get("test_cases", []) if not tc.get("hidden", False)]
                         if visible_cases:
                             st.markdown("#### Samples")
@@ -6651,13 +6990,29 @@ def exam_workspace_view():
                                         st.error(msg)
                             if st.session_state.hidden_test_access.get(qid_key):
                                 st.markdown("#### Hidden Test Cases")
-                                for idx, tc in enumerate(hidden_cases, start=1):
+                                if st.session_state.get("role") != "admin":
+                                    st.caption(f"Remaining views: {get_hidden_case_views_remaining()}")
+                                hidden_seen = 0
+                                for case_no, tc in enumerate(meta.get("test_cases", []), start=1):
+                                    if not tc.get("hidden", False):
+                                        continue
+                                    hidden_seen += 1
+                                    viewed = has_hidden_case_viewed(question["id"], case_no)
                                     with st.container(border=True):
-                                        st.caption(f"Hidden Case {idx}")
-                                        st.caption("Input")
-                                        st.code(tc.get("input", ""), language="text")
-                                        st.caption("Expected Output")
-                                        st.code(tc.get("expected_output", ""), language="text")
+                                        st.caption(f"Hidden Case {hidden_seen} (Case {case_no})")
+                                        if not viewed:
+                                            if st.button("View This Case", key=f"view_hidden_case_{question['id']}_{case_no}", use_container_width=True):
+                                                ok, msg = consume_hidden_case_view(question["id"], case_no)
+                                                if ok:
+                                                    st.success("Case unlocked.")
+                                                    st.rerun()
+                                                else:
+                                                    st.error(msg)
+                                        if viewed:
+                                            st.caption("Input")
+                                            st.code(tc.get("input", ""), language="text")
+                                            st.caption("Expected Output")
+                                            st.code(tc.get("expected_output", ""), language="text")
 
                         if hidden_cases and current_user_can_request_hidden_access("edit"):
                             qid_key = str(question["id"])
@@ -6797,7 +7152,11 @@ def exam_workspace_view():
                                 unsafe_allow_html=True,
                             )
                             if is_hidden:
-                                if st.session_state.hidden_test_access.get(str(question["id"])):
+                                can_show_hidden_result = (
+                                    st.session_state.hidden_test_access.get(str(question["id"]))
+                                    and has_hidden_case_viewed(question["id"], int(res.get("case") or 0))
+                                )
+                                if can_show_hidden_result:
                                     st.caption(f"Status: {res.get('status','')}")
                                     c_in, c_exp, c_act = st.columns(3)
                                     with c_in:
@@ -6826,6 +7185,21 @@ def exam_workspace_view():
                                 if res.get("error"):
                                     st.caption("Runtime / compiler log")
                                     st.code(res["error"], language="text")
+                            if st.session_state.get("role") != "admin":
+                                with st.expander(f"Report Case {res.get('case')}"):
+                                    report_text = st.text_area("Issue / doubt", key=f"report_text_{question['id']}_{res.get('case')}", height=70)
+                                    if st.button("Send Report", key=f"send_report_{question['id']}_{res.get('case')}", use_container_width=True):
+                                        ok, msg = submit_test_case_report(
+                                            st.session_state.exam_id,
+                                            question["id"],
+                                            int(res.get("case") or 0),
+                                            report_text,
+                                            res,
+                                        )
+                                        if ok:
+                                            st.success(msg)
+                                        else:
+                                            st.error(msg)
                     st.markdown("</div>", unsafe_allow_html=True)
 
             def save_current_q_time():
