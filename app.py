@@ -4710,6 +4710,9 @@ def admin_dashboard():
             st.session_state[key] = defaults[key]
         show_logout_redirect()
 
+    unread_admin = get_unread_count(st.session_state.user_id)
+    label = f"Group Chat ({unread_admin})" if unread_admin > 0 else "Group Chat"
+
     st.sidebar.divider()
     if st.session_state.admin_preview_mode:
         if st.sidebar.button("Back to Admin View", use_container_width=True, type="primary"):
@@ -4717,22 +4720,20 @@ def admin_dashboard():
             st.rerun()
         user_dashboard(preview_mode=True)
         return
-    else:
-        show_notification_banner(st.session_state.user_id)
-        if st.sidebar.button("Student View Preview", use_container_width=True):
-            st.session_state.admin_preview_mode = True
-            st.rerun()
-    st.sidebar.divider()
 
-    
-    unread_admin = get_unread_count(st.session_state.user_id)
-    label = f"Group Chat ({unread_admin})" if unread_admin > 0 else "Group Chat"
-    
-    menu = st.sidebar.selectbox("Navigation Control",
+    menu = st.sidebar.radio("Navigation Control",
         ["Manage Course Content", "Manage Exams & Questions", "Student Results & Ranks", "Users & Access", "Credit Cards", "Suprabhatam", label],
         key="admin_navigation")
     if "Group Chat" in menu:
         menu = "Group Chat"
+
+    st.sidebar.divider()
+    show_notification_banner(st.session_state.user_id)
+    if st.sidebar.button("Student View Preview", use_container_width=True):
+        st.session_state.admin_preview_mode = True
+        st.rerun()
+    st.sidebar.divider()
+
     if menu == "Credit Cards":
         admin_credit_cards_dashboard()
         return
