@@ -5035,7 +5035,8 @@ def show_ai_mock_interview(user_id):
             try:
                 st.query_params["comm_exam"] = "1"
                 st.query_params["comm_question"] = "0"
-                st.query_params["comm_phase"] = "ask"
+                st.query_params["comm_exam_id"] = selected_exam_id
+                st.query_params["comm_phase"] = "record" # దీన్ని 'record' కి మార్చండి!
             except Exception: pass
             st.rerun()
         return
@@ -5100,11 +5101,16 @@ def show_ai_mock_interview(user_id):
         if not section_already_done:
             return
     if phase != "record":
-        st.caption(f"Question {idx + 1}/{len(questions)} is being read. Recording time starts after the voice finishes.")
+        st.caption(f"Question {idx + 1}/{len(questions)} is being read...")
         spoken_key = f"{current['id']}:ask"
         if st.session_state.get("interview_spoken_for") != spoken_key:
             st.session_state.interview_spoken_for = spoken_key
             speak_interview_question(current.get("question", ""), finish_phase="record")
+        
+        # బ్రౌజర్ లో JavaScript ఆగిపోయినా స్టూడెంట్ మాన్యువల్ గా రికార్డింగ్ మోడ్ కి వెళ్ళడానికి ఒక బటన్
+        if st.button("Start Recording Now 🎙️", type="primary", use_container_width=True):
+            st.query_params["comm_phase"] = "record"
+            st.rerun()
         return
     seconds = max(10, int(current.get("time_seconds") or 60))
     started = float(st.session_state.get("interview_question_started_at") or time.time())
