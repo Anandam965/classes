@@ -5141,14 +5141,30 @@ def show_ai_mock_interview(user_id):
                     "user_id": user_id, "question_id": current["id"], "audio_path": path,
                     "score": score, "evaluation": evaluation, "evaluated_by_ai": ai_done,
                 }).execute()
-                st.session_state.interview_question_index = idx + 1
+                
+                # ఇండెక్స్ మరియు టైమర్ క్లియర్ చేసి అప్‌డేట్ చేయడం
+                next_idx = idx + 1
+                st.session_state.interview_question_index = next_idx
                 st.session_state.interview_question_started_at = time.time()
+                st.session_state.interview_recording_phase_for = next_idx  # రికార్డింగ్ ఫేజ్ రీసెట్
+                
+                # క్వశ్చన్ మారినప్పుడు వాయిస్ మళ్లీ పలకడానికి ఈ కీలను డిలీట్ చేయాలి
+                if "interview_spoken_for" in st.session_state:
+                    del st.session_state.interview_spoken_for
+                    
                 try:
-                    st.query_params["comm_question"] = str(idx + 1)
+                    st.query_params["comm_question"] = str(next_idx)
                     st.query_params["comm_phase"] = "ask"
+                    # ఒకవేళ సెక్షన్ ఇన్స్ట్రక్షన్స్ ఉంటే వాటిని రీసెట్ చేయడానికి
+                    if "comm_section_done" in st.query_params:
+                        del st.query_params["comm_section_done"]
                 except Exception: pass
-                st.success("Answer saved.")
+                
+                st.success("Answer saved! Moving to next question...")
+                import time as _time
+                _time.sleep(1) # సక్సెస్ మెసేజ్ చూపించడానికి చిన్న గ్యాప్
                 st.rerun()
+       
             except Exception as e:
                 st.error(f"Recording save avvaledu. Storage bucket/table setup check cheyyandi: {e}")
 
