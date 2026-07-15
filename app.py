@@ -5100,43 +5100,40 @@ def show_ai_mock_interview(user_id):
             st.rerun()
         if not section_already_done:
             return
-    if phase != "record":
-        st.caption(f"Question {idx + 1}/{len(questions)} is being read...")
-        spoken_key = f"{current['id']}:ask"
-        if st.session_state.get("interview_spoken_for") != spoken_key:
-            st.session_state.interview_spoken_for = spoken_key
-            speak_interview_question(current.get("question", ""), finish_phase="record")
-        
-        # బ్రౌజర్ లో JavaScript ఆగిపోయినా స్టూడెంట్ మాన్యువల్ గా రికార్డింగ్ మోడ్ కి వెళ్ళడానికి ఒక బటన్
-        if st.button("Start Recording Now 🎙️", type="primary", use_container_width=True):
-            st.query_params["comm_phase"] = "record"
-            st.rerun()
-        return
+    
+    # 1. వాయిస్ ప్లే చేయడం (బ్యాక్‌గ్రౌండ్‌లో రన్ అవుతుంది)
+    spoken_key = f"{current['id']}:ask"
+    if st.session_state.get("interview_spoken_for") != spoken_key:
+        st.session_state.interview_spoken_for = spoken_key
+        speak_interview_question(current.get("question", ""), finish_phase="")
+
+    # 2. టైమర్ లాజిక్
     seconds = max(10, int(current.get("time_seconds") or 60))
-    started = float(st.session_state.get("interview_question_started_at") or time.time())
-    remaining = max(0, seconds - int(time.time() - started))
-    if remaining <= 0:
-        st.session_state.interview_question_index = idx + 1
+    
+    if st.session_state.get("interview_recording_phase_for") != idx:
         st.session_state.interview_question_started_at = time.time()
-        try:
-            st.query_params["comm_question"] = str(idx + 1)
-            st.query_params["comm_phase"] = "ask"
-        except Exception: pass
-        st.rerun()
-    st.caption(f"Question {idx + 1}/{len(questions)} • Time remaining: {remaining} seconds")
+        st.session_state.interview_recording_phase_for = idx
+
+    started = float(st.session_state.interview_question_started_at)
+    remaining = max(0, seconds - int(time.time() - started))
+
+    # 3. స్క్రీన్ UI డిస్‌ప్లే
+    st.markdown(f"### 🎧 Listening to Question {idx + 1}/{len(questions)}")
+    st.caption("వాయిస్ వినబడుతుంది, రికార్డింగ్ మరియు టైమర్ స్టార్ట్ అయ్యాయి...")
+    
     render_communication_timer(remaining, idx + 1)
-    if st.button("Skip & Next Question", key=f"skip_comm_question_{current['id']}_{idx}", use_container_width=True):
-        st.session_state.interview_question_index = idx + 1
-        try:
-            st.query_params["comm_question"] = str(idx + 1)
-            st.query_params["comm_phase"] = "ask"
-        except Exception: pass
-        st.rerun()
+
+    # 4. ఆడియో రికార్డర్ ఆప్షన్
     audio = st.audio_input("Record your answer", key=f"interview_audio_{current['id']}_{idx}")
     if audio:
         st.audio(audio)
-        if st.button("Save Answer & Next", type="primary", use_container_width=True):
-            try:
+
+    # 5. టైమ్ అయిపోతే ఆటో-సేవ్ లేదా నెక్స్ట్ బటన్ లాజిక్
+    next_clicked = st.button("Next Question ➡️", type="primary", use_container_width=True, key=f"next_comm_btn_{idx}")
+
+    if remaining <= 0 or next_clicked:
+        try:
+            if audio:
                 ext = "wav" if "wav" in str(audio.type or "") else "webm"
                 path = f"{user_id}/{uuid.uuid4()}.{ext}"
                 supabase.storage.from_("interview-recordings").upload(
@@ -5147,33 +5144,20 @@ def show_ai_mock_interview(user_id):
                     "user_id": user_id, "question_id": current["id"], "audio_path": path,
                     "score": score, "evaluation": evaluation, "evaluated_by_ai": ai_done,
                 }).execute()
-                
-                # ఇండెక్స్ మరియు టైమర్ క్లియర్ చేసి అప్‌డేట్ చేయడం
-                next_idx = idx + 1
-                st.session_state.interview_question_index = next_idx
-                st.session_state.interview_question_started_at = time.time()
-                st.session_state.interview_recording_phase_for = next_idx  # రికార్డింగ్ ఫేజ్ రీసెట్
-                
-                # క్వశ్చన్ మారినప్పుడు వాయిస్ మళ్లీ పలకడానికి ఈ కీలను డిలీట్ చేయాలి
-                if "interview_spoken_for" in st.session_state:
-                    del st.session_state.interview_spoken_for
-                    
-                try:
-                    st.query_params["comm_question"] = str(next_idx)
-                    st.query_params["comm_phase"] = "ask"
-                    # ఒకవేళ సెక్షన్ ఇన్స్ట్రక్షన్స్ ఉంటే వాటిని రీసెట్ చేయడానికి
-                    if "comm_section_done" in st.query_params:
-                        del st.query_params["comm_section_done"]
-                except Exception: pass
-                
-                st.success("Answer saved! Moving to next question...")
-                import time as _time
-                _time.sleep(1) # సక్సెస్ మెసేజ్ చూపించడానికి చిన్న గ్యాప్
-                st.rerun()
-       
-            except Exception as e:
-                st.error(f"Recording save avvaledu. Storage bucket/table setup check cheyyandi: {e}")
-
+        except Exception as e:
+            st.error(f"Response save అవ్వడంలో ఇబ్బంది: {e}")
+        
+        # తదుపరి క్వశ్చన్‌కి వెళ్ళడం
+        next_idx = idx + 1
+        st.session_state.interview_question_index = next_idx
+        try:
+            st.query_params["comm_exam"] = "1"
+            st.query_params["comm_question"] = str(next_idx)
+            st.query_params["comm_exam_id"] = selected_exam_id
+            st.query_params["comm_phase"] = "record"
+        except Exception: 
+            pass
+        st.rerun()
 
 def admin_ai_feedback_notes():
     st.subheader("AI Interview, Feedback & Notes")
