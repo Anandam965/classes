@@ -5029,7 +5029,6 @@ def show_ai_mock_interview(user_id):
         if str(st.query_params.get("comm_phase", "")) != "instructions_read":
             speak_interview_question(selected_exam.get("instructions", ""), finish_phase="instructions_read")
             st.caption("Instructions are being read aloud...")
-            return
         if st.button("Next", type="primary", use_container_width=True):
             st.session_state.communication_round_started = True
             st.session_state.interview_question_index = 0
@@ -5092,7 +5091,6 @@ def show_ai_mock_interview(user_id):
             st.write(section.get("instructions", ""))
             speak_interview_question(section.get("instructions", ""), finish_phase=section_done_phase)
             st.caption("These instructions are being read aloud...")
-            return
         if not section_already_done and st.button("Next", key=f"section_next_{section['id']}", type="primary", use_container_width=True):
             try:
                 st.query_params["comm_phase"] = "ask"
@@ -5121,6 +5119,13 @@ def show_ai_mock_interview(user_id):
         st.rerun()
     st.caption(f"Question {idx + 1}/{len(questions)} • Time remaining: {remaining} seconds")
     render_communication_timer(remaining, idx + 1)
+    if st.button("Skip & Next Question", key=f"skip_comm_question_{current['id']}_{idx}", use_container_width=True):
+        st.session_state.interview_question_index = idx + 1
+        try:
+            st.query_params["comm_question"] = str(idx + 1)
+            st.query_params["comm_phase"] = "ask"
+        except Exception: pass
+        st.rerun()
     audio = st.audio_input("Record your answer", key=f"interview_audio_{current['id']}_{idx}")
     if audio:
         st.audio(audio)
