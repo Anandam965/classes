@@ -5066,6 +5066,11 @@ def get_assigned_interview_link(interview_token):
     return f"{base_url}/{path}" if base_url else path
 
 
+def get_live_video_interview_link(interview_token):
+    """Jitsi provides a browser-based room with camera, mic, and screen sharing."""
+    return f"https://meet.jit.si/classes-aptitude-{interview_token}"
+
+
 def show_student_interviews_tab(user_id):
     st.subheader("My Interviews")
     try:
@@ -5089,9 +5094,26 @@ def show_student_interviews_tab(user_id):
             if interview.get("instructions"):
                 st.write(interview["instructions"])
             if interview.get("meeting_link"):
-                st.link_button("Join Interview", interview["meeting_link"], use_container_width=True)
+                st.link_button("Join Live Video Interview (Camera / Mic / Screen Share)", interview["meeting_link"], use_container_width=True, type="primary")
+                st.caption("Browser lo camera/microphone allow chesi, Jitsi toolbar lo Screen Share select cheyyandi.")
             st.markdown("#### Complete interview recording")
-            st.caption("Interview motham oka continuous recording ga record చేసి upload cheyyandi. Admin/instructor review cheyagaladu.")
+            st.caption("Live call lo Jitsi local recording use chesi video file upload cheyyandi, leda audio-only recording ikkada record cheyyandi. Admin/instructor review cheyagaladu.")
+            video_recording = st.file_uploader("Upload full video recording", type=["mp4", "webm", "mov"], key=f"assigned_interview_video_{interview['id']}")
+            if video_recording and st.button("Save Video Recording", key=f"save_assigned_video_{interview['id']}", type="primary", use_container_width=True):
+                try:
+                    ext = (video_recording.name.rsplit(".", 1)[-1] if "." in video_recording.name else "webm").lower()
+                    path = f"assigned-interviews/{interview['id']}/{uuid.uuid4()}.{ext}"
+                    supabase.storage.from_("interview-recordings").upload(path, video_recording.getvalue(), {"content-type": video_recording.type or "video/webm"})
+                    supabase.table("instructor_interviews").update({
+                        "recording_path": path,
+                        "recording_uploaded_at": datetime.now(timezone.utc).isoformat(),
+                        "status": "recorded",
+                    }).eq("id", interview["id"]).execute()
+                    send_notification(f"Interview video recording uploaded: {interview.get('title')}", interview["instructor_id"])
+                    st.success("Video recording saved for instructor review.")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Video recording save avvaledu: {e}")
             recording = st.audio_input("Record full interview", key=f"assigned_interview_recording_{interview['id']}")
             if recording:
                 st.audio(recording)
@@ -5402,23 +5424,26 @@ def admin_ai_feedback_notes():
             selected_student = st.selectbox("Student", list(student_options.keys()) or ["No approved students"])
             assigned_title = st.text_input("Interview title")
             scheduled_at = st.text_input("Schedule (example: 2026-08-01 10:30 AM)")
-            meeting_link = st.text_input("Meeting link (optional)")
+            meeting_link = st.text_input("Custom meeting link (optional — blank unte live Jitsi video room automatic ga create avuthundi)")
             assigned_instructions = st.text_area("Instructions / topic")
             if st.form_submit_button("Assign Interview", type="primary"):
                 if selected_student in student_options and assigned_title.strip():
                     try:
                         student_id = student_options[selected_student]
                         interview_token = uuid.uuid4().hex
+                        live_meeting_link = meeting_link.strip() or get_live_video_interview_link(interview_token)
                         supabase.table("instructor_interviews").insert({
                             "student_id": student_id, "instructor_id": st.session_state.user_id,
                             "title": assigned_title.strip(), "scheduled_at": scheduled_at.strip() or None,
-                            "meeting_link": meeting_link.strip() or None, "instructions": assigned_instructions.strip() or None,
+                            "meeting_link": live_meeting_link, "instructions": assigned_instructions.strip() or None,
                             "interview_token": interview_token,
                         }).execute()
                         send_notification(f"New interview assigned: {assigned_title.strip()}. Check the Interviews tab.", student_id)
                         st.success("Interview assigned. Student Interviews tab lo immediate ga kanipistundi.")
                         st.code(get_assigned_interview_link(interview_token), language=None)
-                        st.caption("Generated interview link. APP_BASE_URL secret set chesthe complete shareable URL automatic ga vastundi.")
+                        st.markdown("Live video meeting link")
+                        st.code(live_meeting_link, language=None)
+                        st.caption("Generated links: student app interview page + live video room with camera, mic and screen share.")
                         st.rerun()
                     except Exception as e:
                         st.error(f"Interview assign avvaledu: {e}")
@@ -5434,11 +5459,17 @@ def admin_ai_feedback_notes():
                     if item.get("interview_token"):
                         st.markdown("Student interview link")
                         st.code(get_assigned_interview_link(item["interview_token"]), language=None)
+                    if item.get("meeting_link"):
+                        st.markdown("Live video room")
+                        st.link_button("Open Live Video Interview", item["meeting_link"], type="primary", use_container_width=True)
                     if item.get("recording_path"):
                         try:
                             recording_url = supabase.storage.from_("interview-recordings").create_signed_url(item["recording_path"], 3600).get("signedURL")
                             st.markdown("#### Student interview recording")
-                            st.audio(recording_url)
+                            if str(item["recording_path"]).lower().endswith((".mp4", ".webm", ".mov")):
+                                st.video(recording_url)
+                            else:
+                                st.audio(recording_url)
                         except Exception as e:
                             st.warning(f"Recording open avvaledu: {e}")
                     feedback = st.text_area("Interviewer feedback", value=item.get("interviewer_feedback") or "", key=f"interview_feedback_{item['id']}")
