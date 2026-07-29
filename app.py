@@ -5096,7 +5096,15 @@ def send_interview_reminder_email(recipient, interview):
     )
     try:
         port = int(st.secrets.get("SMTP_PORT", 465))
-        with smtplib.SMTP_SSL(host, port, context=ssl.create_default_context()) as server:
+        security = str(st.secrets.get("SMTP_SECURITY", "starttls" if port == 587 else "ssl")).strip().lower()
+        if security in {"starttls", "tls"}:
+            server = smtplib.SMTP(host, port, timeout=30)
+            server.ehlo()
+            server.starttls(context=ssl.create_default_context())
+            server.ehlo()
+        else:
+            server = smtplib.SMTP_SSL(host, port, context=ssl.create_default_context(), timeout=30)
+        with server:
             server.login(username, password)
             server.send_message(message)
         return True, "Reminder email sent."
