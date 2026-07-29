@@ -4877,6 +4877,10 @@ create table if not exists instructor_interviews (
   created_at timestamptz default now()
 );
 create index if not exists instructor_interviews_student_idx on instructor_interviews(student_id, scheduled_at desc);
+alter table instructor_interviews add column if not exists interview_token text;
+alter table instructor_interviews add column if not exists recording_path text;
+alter table instructor_interviews add column if not exists recording_uploaded_at timestamptz;
+create unique index if not exists instructor_interviews_token_idx on instructor_interviews(interview_token) where interview_token is not null;
 alter table ai_interview_responses add column if not exists communication_exam_id bigint references communication_exams(id) on delete set null;
 alter table ai_interview_responses add column if not exists attempt_id uuid;
 create table if not exists ai_interview_attempts (
@@ -5055,10 +5059,21 @@ def finish_ai_interview_attempt(user_id, attempt_id, questions):
         st.error(f"Interview score load avvaledu: {e}")
 
 
+def get_assigned_interview_link(interview_token):
+    """Use APP_BASE_URL secret when deployed; otherwise show a same-site relative link."""
+    base_url = str(st.secrets.get("APP_BASE_URL", "https://classes-aptitude.streamlit.app/")).strip().rstrip("/")
+    path = f"?assigned_interview={interview_token}"
+    return f"{base_url}/{path}" if base_url else path
+
+
 def show_student_interviews_tab(user_id):
     st.subheader("My Interviews")
     try:
-        interviews = supabase.table("instructor_interviews").select("*, users!instructor_interviews_instructor_id_fkey(name, email)").eq("student_id", user_id).order("scheduled_at", desc=True).execute().data or []
+        invite_token = str(st.query_params.get("assigned_interview", "")).strip()
+        query = supabase.table("instructor_interviews").select("*, users!instructor_interviews_instructor_id_fkey(name, email)").eq("student_id", user_id)
+        if invite_token:
+            query = query.eq("interview_token", invite_token)
+        interviews = query.order("scheduled_at", desc=True).execute().data or []
     except Exception as e:
         st.error(f"Interviews load avvaledu. Admin SQL setup run cheyyandi: {e}")
         return
@@ -5075,6 +5090,28 @@ def show_student_interviews_tab(user_id):
                 st.write(interview["instructions"])
             if interview.get("meeting_link"):
                 st.link_button("Join Interview", interview["meeting_link"], use_container_width=True)
+            st.markdown("#### Complete interview recording")
+            st.caption("Interview motham oka continuous recording ga record చేసి upload cheyyandi. Admin/instructor review cheyagaladu.")
+            recording = st.audio_input("Record full interview", key=f"assigned_interview_recording_{interview['id']}")
+            if recording:
+                st.audio(recording)
+                if st.button("Save Interview Recording", key=f"save_assigned_recording_{interview['id']}", type="primary", use_container_width=True):
+                    try:
+                        ext = "wav" if "wav" in str(recording.type or "") else "webm"
+                        path = f"assigned-interviews/{interview['id']}/{uuid.uuid4()}.{ext}"
+                        supabase.storage.from_("interview-recordings").upload(path, recording.getvalue(), {"content-type": recording.type or "audio/webm"})
+                        supabase.table("instructor_interviews").update({
+                            "recording_path": path,
+                            "recording_uploaded_at": datetime.now(timezone.utc).isoformat(),
+                            "status": "recorded",
+                        }).eq("id", interview["id"]).execute()
+                        send_notification(f"Interview recording uploaded: {interview.get('title')}", interview["instructor_id"])
+                        st.success("Full interview recording saved. Instructor ki review notification vellindi.")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Recording save avvaledu: {e}")
+            elif interview.get("recording_path"):
+                st.success("Interview recording already submitted for review.")
             if interview.get("interviewer_feedback"):
                 st.success("Interviewer feedback")
                 st.write(interview["interviewer_feedback"])
@@ -5371,13 +5408,17 @@ def admin_ai_feedback_notes():
                 if selected_student in student_options and assigned_title.strip():
                     try:
                         student_id = student_options[selected_student]
+                        interview_token = uuid.uuid4().hex
                         supabase.table("instructor_interviews").insert({
                             "student_id": student_id, "instructor_id": st.session_state.user_id,
                             "title": assigned_title.strip(), "scheduled_at": scheduled_at.strip() or None,
                             "meeting_link": meeting_link.strip() or None, "instructions": assigned_instructions.strip() or None,
+                            "interview_token": interview_token,
                         }).execute()
                         send_notification(f"New interview assigned: {assigned_title.strip()}. Check the Interviews tab.", student_id)
                         st.success("Interview assigned. Student Interviews tab lo immediate ga kanipistundi.")
+                        st.code(get_assigned_interview_link(interview_token), language=None)
+                        st.caption("Generated interview link. APP_BASE_URL secret set chesthe complete shareable URL automatic ga vastundi.")
                         st.rerun()
                     except Exception as e:
                         st.error(f"Interview assign avvaledu: {e}")
@@ -5390,6 +5431,16 @@ def admin_ai_feedback_notes():
                 student = item.get("users") or {}
                 with st.expander(f"{item.get('title')} — {student.get('name') or student.get('email') or 'Student'}"):
                     st.caption(f"Schedule: {item.get('scheduled_at') or 'Pending'} | Status: {item.get('status', 'scheduled')}")
+                    if item.get("interview_token"):
+                        st.markdown("Student interview link")
+                        st.code(get_assigned_interview_link(item["interview_token"]), language=None)
+                    if item.get("recording_path"):
+                        try:
+                            recording_url = supabase.storage.from_("interview-recordings").create_signed_url(item["recording_path"], 3600).get("signedURL")
+                            st.markdown("#### Student interview recording")
+                            st.audio(recording_url)
+                        except Exception as e:
+                            st.warning(f"Recording open avvaledu: {e}")
                     feedback = st.text_area("Interviewer feedback", value=item.get("interviewer_feedback") or "", key=f"interview_feedback_{item['id']}")
                     status = st.selectbox("Status", ["scheduled", "completed", "cancelled"], index=["scheduled", "completed", "cancelled"].index(item.get("status", "scheduled")) if item.get("status", "scheduled") in ["scheduled", "completed", "cancelled"] else 0, key=f"interview_status_{item['id']}")
                     if st.button("Send Feedback to Student", key=f"send_interview_feedback_{item['id']}", type="primary"):
@@ -7352,6 +7403,8 @@ def user_dashboard(preview_mode=False):
         try:
             if str(st.query_params.get("comm_exam", "")) == "1" or st.query_params.get("comm_exam_id", ""):
                 st.session_state.user_page = "AI Mock Interview"
+            elif st.query_params.get("assigned_interview", ""):
+                st.session_state.user_page = "Interviews"
         except Exception:
             pass
     if not preview_mode:
