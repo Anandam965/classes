@@ -5,7 +5,10 @@ import json
 import html
 import tempfile
 import requests
+import smtplib
+import ssl
 from datetime import date, timedelta, datetime, timezone
+from email.message import EmailMessage
 
 import streamlit as st
 import streamlit.components.v1 as components
@@ -128,6 +131,8 @@ defaults = {
     "interview_question_index": 0,
     "interview_answer_recorded": False,
     "communication_attempt_id": "",
+    "open_live_interview_id": "",
+    "admin_live_interview_id": "",
 }
 for key, val in defaults.items():
     if key not in st.session_state:
@@ -5071,6 +5076,34 @@ def get_live_video_interview_link(interview_token):
     return f"https://meet.jit.si/classes-aptitude-{interview_token}"
 
 
+def send_interview_reminder_email(recipient, interview):
+    """Send a reminder when SMTP secrets are configured; never expose credentials in UI."""
+    host = str(st.secrets.get("SMTP_HOST", "")).strip()
+    username = str(st.secrets.get("SMTP_USERNAME", "")).strip()
+    password = str(st.secrets.get("SMTP_PASSWORD", "")).strip()
+    sender = str(st.secrets.get("SMTP_FROM", username)).strip()
+    if not all([host, username, password, sender, recipient]):
+        return False, "Email is not configured. Add SMTP_HOST, SMTP_USERNAME, SMTP_PASSWORD and SMTP_FROM to Streamlit secrets."
+    message = EmailMessage()
+    message["Subject"] = f"Interview reminder: {interview.get('title', 'Interview')}"
+    message["From"] = sender
+    message["To"] = recipient
+    message.set_content(
+        f"This is a reminder for your interview.\n\n"
+        f"Title: {interview.get('title', 'Interview')}\n"
+        f"Schedule: {interview.get('scheduled_at') or 'To be confirmed'}\n"
+        f"Join the interview from your student portal or use this video room:\n{interview.get('meeting_link') or ''}\n"
+    )
+    try:
+        port = int(st.secrets.get("SMTP_PORT", 465))
+        with smtplib.SMTP_SSL(host, port, context=ssl.create_default_context()) as server:
+            server.login(username, password)
+            server.send_message(message)
+        return True, "Reminder email sent."
+    except Exception as e:
+        return False, f"Reminder email could not be sent: {e}"
+
+
 def show_student_interviews_tab(user_id):
     st.subheader("My Interviews")
     try:
@@ -5094,10 +5127,16 @@ def show_student_interviews_tab(user_id):
             if interview.get("instructions"):
                 st.write(interview["instructions"])
             if interview.get("meeting_link"):
-                st.link_button("Join Live Video Interview (Camera / Mic / Screen Share)", interview["meeting_link"], use_container_width=True, type="primary")
-                st.caption("Browser lo camera/microphone allow chesi, Jitsi toolbar lo Screen Share select cheyyandi.")
+                is_live_open = str(st.session_state.get("open_live_interview_id") or "") == str(interview["id"])
+                if st.button("Open Live Video Interview", key=f"open_live_interview_{interview['id']}", type="primary", use_container_width=True):
+                    st.session_state.open_live_interview_id = "" if is_live_open else str(interview["id"])
+                    st.rerun()
+                if is_live_open:
+                    st.caption("Allow camera and microphone permissions. Use the Jitsi toolbar to share your screen.")
+                    components.iframe(interview["meeting_link"], height=720, scrolling=False)
+                    st.info("The live call is embedded in this portal. For review, use Jitsi local recording and upload the saved video below.")
             st.markdown("#### Complete interview recording")
-            st.caption("Live call lo Jitsi local recording use chesi video file upload cheyyandi, leda audio-only recording ikkada record cheyyandi. Admin/instructor review cheyagaladu.")
+            st.caption("Use Jitsi local recording and upload the saved video, or record audio here. Your instructor can review it privately.")
             video_recording = st.file_uploader("Upload full video recording", type=["mp4", "webm", "mov"], key=f"assigned_interview_video_{interview['id']}")
             if video_recording and st.button("Save Video Recording", key=f"save_assigned_video_{interview['id']}", type="primary", use_container_width=True):
                 try:
@@ -5114,7 +5153,7 @@ def show_student_interviews_tab(user_id):
                     st.rerun()
                 except Exception as e:
                     st.error(f"Video recording save avvaledu: {e}")
-            recording = st.audio_input("Record full interview", key=f"assigned_interview_recording_{interview['id']}")
+            recording = st.audio_input("Record full interview audio", key=f"assigned_interview_recording_{interview['id']}")
             if recording:
                 st.audio(recording)
                 if st.button("Save Interview Recording", key=f"save_assigned_recording_{interview['id']}", type="primary", use_container_width=True):
@@ -5128,12 +5167,12 @@ def show_student_interviews_tab(user_id):
                             "status": "recorded",
                         }).eq("id", interview["id"]).execute()
                         send_notification(f"Interview recording uploaded: {interview.get('title')}", interview["instructor_id"])
-                        st.success("Full interview recording saved. Instructor ki review notification vellindi.")
+                        st.success("Interview audio recording saved. Your instructor has been notified.")
                         st.rerun()
                     except Exception as e:
                         st.error(f"Recording save avvaledu: {e}")
             elif interview.get("recording_path"):
-                st.success("Interview recording already submitted for review.")
+                st.success("A recording has already been submitted for review.")
             if interview.get("interviewer_feedback"):
                 st.success("Interviewer feedback")
                 st.write(interview["interviewer_feedback"])
@@ -5461,7 +5500,20 @@ def admin_ai_feedback_notes():
                         st.code(get_assigned_interview_link(item["interview_token"]), language=None)
                     if item.get("meeting_link"):
                         st.markdown("Live video room")
-                        st.link_button("Open Live Video Interview", item["meeting_link"], type="primary", use_container_width=True)
+                        is_live_open = str(st.session_state.get("admin_live_interview_id") or "") == str(item["id"])
+                        if st.button("Open Interview Console", key=f"open_admin_live_interview_{item['id']}", type="primary", use_container_width=True):
+                            st.session_state.admin_live_interview_id = "" if is_live_open else str(item["id"])
+                            st.rerun()
+                        if is_live_open:
+                            live_column, feedback_column = st.columns([2, 1])
+                            with live_column:
+                                st.caption("Live meeting — camera, microphone and screen sharing are available in the embedded room.")
+                                components.iframe(item["meeting_link"], height=680, scrolling=False)
+                            feedback_area = feedback_column
+                        else:
+                            feedback_area = st.container()
+                    else:
+                        feedback_area = st.container()
                     if item.get("recording_path"):
                         try:
                             recording_url = supabase.storage.from_("interview-recordings").create_signed_url(item["recording_path"], 3600).get("signedURL")
@@ -5472,13 +5524,19 @@ def admin_ai_feedback_notes():
                                 st.audio(recording_url)
                         except Exception as e:
                             st.warning(f"Recording open avvaledu: {e}")
-                    feedback = st.text_area("Interviewer feedback", value=item.get("interviewer_feedback") or "", key=f"interview_feedback_{item['id']}")
-                    status = st.selectbox("Status", ["scheduled", "completed", "cancelled"], index=["scheduled", "completed", "cancelled"].index(item.get("status", "scheduled")) if item.get("status", "scheduled") in ["scheduled", "completed", "cancelled"] else 0, key=f"interview_status_{item['id']}")
-                    if st.button("Send Feedback to Student", key=f"send_interview_feedback_{item['id']}", type="primary"):
-                        supabase.table("instructor_interviews").update({"interviewer_feedback": feedback.strip() or None, "status": status, "feedback_sent_at": datetime.now(timezone.utc).isoformat()}).eq("id", item["id"]).execute()
-                        send_notification(f"Interview feedback received: {item.get('title')}. Check the Interviews tab.", item["student_id"])
-                        st.success("Feedback student ki send ayyindi.")
-                        st.rerun()
+                    with feedback_area:
+                        st.markdown("#### Interviewer Feedback")
+                        feedback = st.text_area("Private notes and feedback", value=item.get("interviewer_feedback") or "", key=f"interview_feedback_{item['id']}", height=220)
+                        valid_statuses = ["scheduled", "recorded", "completed", "cancelled"]
+                        status = st.selectbox("Interview status", valid_statuses, index=valid_statuses.index(item.get("status", "scheduled")) if item.get("status", "scheduled") in valid_statuses else 0, key=f"interview_status_{item['id']}")
+                        if st.button("Send Feedback to Student", key=f"send_interview_feedback_{item['id']}", type="primary", use_container_width=True):
+                            supabase.table("instructor_interviews").update({"interviewer_feedback": feedback.strip() or None, "status": status, "feedback_sent_at": datetime.now(timezone.utc).isoformat()}).eq("id", item["id"]).execute()
+                            send_notification(f"Interview feedback received: {item.get('title')}. Check the Interviews tab.", item["student_id"])
+                            st.success("Feedback sent to the student.")
+                            st.rerun()
+                        if st.button("Send Reminder Email", key=f"send_interview_reminder_{item['id']}", use_container_width=True):
+                            sent, message = send_interview_reminder_email(student.get("email"), item)
+                            (st.success if sent else st.error)(message)
         except Exception as e:
             st.info(f"Assigned interviews unavailable until SQL setup is completed: {e}")
     with tabs[2]:
