@@ -41,7 +41,63 @@ def upload_image_to_imgbb(image_file):
 # =========================
 # PAGE CONFIG
 # =========================
-st.set_page_config(page_title="Advanced LMS Portal", layout="wide")
+st.set_page_config(
+    page_title="Aptitude Classes | Learning Platform",
+    page_icon="✦",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
+
+# Business-grade visual system shared by every workspace and page.
+st.markdown("""
+<style>
+:root { --ink:#18263f; --muted:#60708a; --brand:#315efb; --brand-dark:#2449cc; --canvas:#f5f7fb; --line:#e2e8f2; --surface:#fff; }
+html, body, [class*="css"] { font-family:Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+.stApp { background:var(--canvas); color:var(--ink); }
+[data-testid="stHeader"] { background:rgba(245,247,251,.88); backdrop-filter:blur(12px); }
+[data-testid="stMainBlockContainer"] { max-width:1440px; padding:2rem 2.4rem 3.5rem; }
+
+/* Dark, focused workspace navigation */
+[data-testid="stSidebar"] { background:linear-gradient(180deg,#111d35,#182a4b); border-right:0; }
+[data-testid="stSidebar"] > div:first-child { padding:1rem .8rem 1.5rem; }
+[data-testid="stSidebar"] * { color:#e7edf9; }
+[data-testid="stSidebar"] h1, [data-testid="stSidebar"] h2, [data-testid="stSidebar"] h3 { color:#fff; letter-spacing:-.025em; }
+[data-testid="stSidebar"] hr { border-color:rgba(255,255,255,.12); }
+[data-testid="stSidebar"] button { min-height:42px; border:1px solid transparent; border-radius:10px; background:transparent; color:#d9e3f5; font-weight:650; text-align:left; transition:.18s ease; }
+[data-testid="stSidebar"] button:hover { background:rgba(255,255,255,.1); color:#fff; transform:none; }
+[data-testid="stSidebar"] button[kind="primary"] { background:rgba(87,126,255,.28); border-color:rgba(151,173,255,.32); color:#fff; }
+
+/* Typography and actions */
+h1,h2,h3 { color:var(--ink); letter-spacing:-.035em; }
+h1 { font-size:clamp(1.75rem,3vw,2.45rem)!important; font-weight:800!important; }
+h2 { font-size:1.48rem!important; font-weight:760!important; }
+h3 { font-size:1.12rem!important; font-weight:720!important; }
+p,.stMarkdown { color:var(--muted); }
+.stButton > button,.stDownloadButton > button,.stLinkButton > a { min-height:42px; border-radius:9px; border:1px solid #d5ddec; background:#fff; color:#26354e; font-weight:700; box-shadow:0 1px 2px rgba(22,35,61,.03); transition:.18s ease; }
+.stButton > button:hover,.stDownloadButton > button:hover,.stLinkButton > a:hover { border-color:#aebfec; color:var(--brand); box-shadow:0 6px 16px rgba(49,94,251,.1); transform:translateY(-1px); }
+.stButton > button[kind="primary"],.stFormSubmitButton > button[kind="primary"] { background:linear-gradient(135deg,var(--brand),#547bff); color:#fff; border-color:var(--brand); box-shadow:0 8px 18px rgba(49,94,251,.22); }
+.stButton > button[kind="primary"]:hover,.stFormSubmitButton > button[kind="primary"]:hover { color:#fff; background:linear-gradient(135deg,var(--brand-dark),var(--brand)); }
+input,textarea,[data-baseweb="select"] > div { border-radius:9px!important; border-color:#d6dfed!important; background:#fff!important; }
+input:focus,textarea:focus { border-color:var(--brand)!important; box-shadow:0 0 0 3px rgba(49,94,251,.12)!important; }
+label,[data-testid="stWidgetLabel"] p { color:#3c4a62!important; font-weight:650!important; font-size:.9rem!important; }
+
+/* Surfaces, data and feedback */
+[data-testid="stVerticalBlockBorderWrapper"],[data-testid="stExpander"],[data-testid="stForm"] { border:1px solid var(--line)!important; border-radius:14px!important; background:var(--surface); box-shadow:0 2px 10px rgba(22,35,61,.025); }
+[data-testid="stVerticalBlockBorderWrapper"] { padding:.15rem; }
+[data-testid="stExpander"] { overflow:hidden; }
+[data-testid="stExpander"] details summary { font-weight:700; color:var(--ink); }
+[data-testid="stMetric"] { background:#fff; border:1px solid var(--line); border-radius:13px; padding:1rem 1.1rem; box-shadow:0 3px 12px rgba(22,35,61,.035); }
+[data-testid="stMetricLabel"] { color:var(--muted); font-weight:650; }
+[data-testid="stMetricValue"] { color:var(--ink); font-weight:780; }
+[data-baseweb="tab-list"] { gap:1.1rem; border-bottom:1px solid var(--line); }
+[data-baseweb="tab"] { height:44px; padding:0 .2rem; color:var(--muted); font-weight:700; }
+[aria-selected="true"][data-baseweb="tab"] { color:var(--brand); }
+[data-baseweb="tab-highlight"] { background-color:var(--brand)!important; height:3px!important; border-radius:4px; }
+[data-testid="stDataFrame"],[data-testid="stTable"] { border:1px solid var(--line); border-radius:12px; overflow:hidden; }
+[data-testid="stAlert"] { border-radius:11px; border:1px solid var(--line); }
+@media (max-width:900px) { [data-testid="stMainBlockContainer"] { padding:1.2rem 1rem 2.5rem; } h1 { font-size:1.7rem!important; } }
+</style>
+""", unsafe_allow_html=True)
 
 st.markdown("""
 <style>
