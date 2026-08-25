@@ -7394,7 +7394,7 @@ def card_user_dashboard():
             st.session_state[key] = defaults[key]
         show_logout_redirect()
     st.sidebar.divider()
-    pages = ["Monthly Bill", "Pending Bills", "Paid Bills", "Add Transaction", "Transaction History"]
+    pages = ["Monthly Bill", "Upcoming", "Pending Bills", "Paid Bills", "Add Transaction", "Transaction History"]
     for pg in pages:
         if st.sidebar.button(pg, use_container_width=True, type="primary" if st.session_state.card_user_page == pg else "secondary", key=f"card_nav_{pg}"):
             st.session_state.card_user_page = pg
@@ -7460,6 +7460,48 @@ def card_user_dashboard():
             st.dataframe([{"Date": r.get("transaction_date"), "Card": get_card_label(r.get("card_code")), "Merchant / purpose": r.get("purpose"), "Amount (Rs.)": money_value(r.get("amount")), "Status": str(r.get("status", "pending")).title(), "Administrator note": r.get("admin_note") or "-"} for r in rows], use_container_width=True, hide_index=True)
         else:
             st.info("No transactions have been recorded yet.")
+        return
+
+    if st.session_state.card_user_page == "Upcoming":
+        st.subheader("Upcoming transactions and bills")
+        st.caption("These are estimates based on your active monthly scheduled transactions. They do not include new one-time purchases.")
+        try:
+            recurring_rows = supabase.table("card_recurring_transactions").select("*").eq("user_id", user_id).eq("active", True).order("card_code").execute().data or []
+        except Exception as e:
+            st.error(f"Unable to load upcoming scheduled transactions: {e}")
+            recurring_rows = []
+
+        forecasts = []
+        for card_code in assigned_cards:
+            next_start, next_end = get_statement_period(card_code, add_months(date.today(), 1))
+            scheduled_items = []
+            for row in recurring_rows:
+                if row.get("card_code") != card_code:
+                    continue
+                try:
+                    recurrence_start = date.fromisoformat(str(row.get("start_date"))[:10])
+                    recurrence_end = date.fromisoformat(str(row.get("end_date"))[:10]) if row.get("end_date") else None
+                except (TypeError, ValueError):
+                    continue
+                if recurrence_start <= next_end and (not recurrence_end or recurrence_end >= next_start):
+                    scheduled_items.append({
+                        "Scheduled date": max(recurrence_start, next_start).strftime("%d %b %Y"),
+                        "Merchant / purpose": row.get("purpose") or "Monthly scheduled transaction",
+                        "Estimated amount (Rs.)": money_value(row.get("amount")),
+                    })
+            forecasts.append({"code": card_code, "start": next_start, "end": next_end, "items": scheduled_items})
+
+        for forecast in forecasts:
+            projected_total = sum(item["Estimated amount (Rs.)"] for item in forecast["items"])
+            with st.container(border=True):
+                c1, c2, c3 = st.columns([1.5, 1, 1])
+                c1.markdown(f"**{get_card_label(forecast['code'])}**\n\nNext billing cycle: {forecast['start'].strftime('%d %b %Y')} to {forecast['end'].strftime('%d %b %Y')}")
+                c2.metric("Scheduled transactions", len(forecast["items"]))
+                c3.metric("Projected next bill", f"Rs. {projected_total:,.2f}")
+                if forecast["items"]:
+                    st.dataframe(forecast["items"], use_container_width=True, hide_index=True)
+                else:
+                    st.info("No monthly scheduled transactions are expected for this card in the next billing cycle.")
         return
 
     if st.session_state.card_user_page == "Pending Bills":
