@@ -4,6 +4,7 @@ import time
 import json
 import html
 import tempfile
+import io
 import hashlib
 import posixpath
 import re
@@ -7600,7 +7601,7 @@ def parse_infosys_workbook(workbook_bytes):
     doc_rel_ns = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
     ns = {"m": main_ns, "xdr": "http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing",
           "a": "http://schemas.openxmlformats.org/drawingml/2006/main"}
-    with zipfile.ZipFile(workbook_bytes) as archive:
+    with zipfile.ZipFile(io.BytesIO(workbook_bytes)) as archive:
         workbook = ET.fromstring(archive.read("xl/workbook.xml"))
         workbook_rels = ET.fromstring(archive.read("xl/_rels/workbook.xml.rels"))
         workbook_relmap = {r.attrib["Id"]: r.attrib["Target"] for r in workbook_rels}
