@@ -7552,6 +7552,91 @@ def card_user_dashboard():
 # =========================
 # USER DASHBOARD
 # =========================
+LEETCODE_QUESTION_BANK = [
+    (1, "Reverse an Array", "Easy", ""),
+    (2, "Check Palindrome String", "Easy", ""),
+    (3, "Second Largest Element in an Array", "Easy", ""),
+    (4, "Count Vowels and Consonants in a String", "Easy", ""),
+    (5, "Find the Missing Number (1 to N)", "Easy", "https://leetcode.com/problems/missing-number/"),
+    (6, "Check if a Number is Prime", "Easy", ""),
+    (7, "Print Fibonacci Series up to N Terms", "Easy", ""),
+    (8, "Binary Search in a Sorted Array", "Easy", "https://leetcode.com/problems/binary-search/"),
+    (9, "Reverse a Singly Linked List", "Easy", "https://leetcode.com/problems/reverse-linked-list/"),
+    (10, "Check if Two Strings are Anagrams", "Easy", "https://leetcode.com/problems/valid-anagram/"),
+    (11, "Find All Duplicates in an Array", "Easy", "https://leetcode.com/problems/find-all-duplicates-in-an-array/"),
+    (12, "Rotate Array by K Steps to the Right", "Easy", "https://leetcode.com/problems/rotate-array/"),
+    (13, "Sum of Both Diagonals of a Matrix", "Easy", "https://leetcode.com/problems/matrix-diagonal-sum/"),
+    (14, "Implement Bubble Sort", "Easy", ""),
+    (15, "Check if a Number is a Power of 2", "Easy", "https://leetcode.com/problems/power-of-two/"),
+    (16, "Remove One Digit to Make Number Maximum", "Easy", ""),
+    (17, "Count Repeated and Non-Repeated Elements", "Easy", ""),
+    (18, "Zigzag Level-Order Traversal of Binary Tree", "Easy", "https://leetcode.com/problems/binary-tree-zigzag-level-order-traversal/"),
+    (19, "Smallest Power of 2 Greater Than or Equal to N", "Easy", ""),
+    (20, "First Non-Repeating Character in a String", "Easy", ""),
+    (21, "Longest Substring Without Repeating Characters", "Medium", "https://leetcode.com/problems/longest-substring-without-repeating-characters/"),
+    (22, "Next Permutation", "Medium", "https://leetcode.com/problems/next-permutation/"),
+    (23, "Detect a Loop in a Linked List", "Medium", "https://leetcode.com/problems/linked-list-cycle/"),
+    (24, "Maximum Product Subarray", "Medium", "https://leetcode.com/problems/maximum-product-subarray/"),
+    (25, "Valid Parentheses / Balanced Brackets", "Medium", "https://leetcode.com/problems/valid-parentheses/"),
+    (26, "Longest Palindromic Substring", "Medium", "https://leetcode.com/problems/longest-palindromic-substring/"),
+    (27, "Merge Intervals", "Medium", "https://leetcode.com/problems/merge-intervals/"),
+    (28, "Longest Increasing Subsequence (LIS)", "Medium", "https://leetcode.com/problems/longest-increasing-subsequence/"),
+    (29, "Word Break Problem", "Medium", "https://leetcode.com/problems/word-break/"),
+    (30, "Reverse a Stack Using Recursion", "Medium", ""),
+    (31, "Subset Sum Problem", "Medium", "https://leetcode.com/problems/partition-equal-subset-sum/"),
+    (32, "Check if a Linked List is a Palindrome", "Medium", "https://leetcode.com/problems/palindrome-linked-list/"),
+    (33, "Combination Sum", "Medium", "https://leetcode.com/problems/combination-sum/"),
+    (34, "Implement a Trie (Prefix Tree)", "Medium", "https://leetcode.com/problems/implement-trie-prefix-tree/"),
+    (35, "LRU Cache Implementation", "Medium", "https://leetcode.com/problems/lru-cache/"),
+    (36, "RPG Monster Defeat (Greedy Sorting)", "Hard", ""),
+    (37, "Xor-Sum Maximization", "Hard", ""),
+    (38, "LIS with Bitwise Condition", "Hard", ""),
+    (39, "Array Partition into K Segments", "Hard", ""),
+    (40, "Coin Change – Minimum Coins", "Hard", "https://leetcode.com/problems/coin-change/"),
+    (41, "Edit Distance", "Hard", "https://leetcode.com/problems/edit-distance/"),
+    (42, "Minimum Insertions to Make a String Palindrome", "Hard", ""),
+    (43, "0/1 Knapsack", "Hard", ""),
+    (44, "Maximum XOR Subset (N/2 Elements)", "Hard", ""),
+    (45, "Minimum Inversions via XOR", "Hard", ""),
+    (46, "Gift Packing into K Boxes", "Hard", ""),
+    (47, "Heroes vs Villains (Prefix Sum)", "Hard", ""),
+    (48, "Ugliness Minimization", "Hard", ""),
+    (49, "Road Terrain Transformation", "Hard", ""),
+    (50, "Mountain Array Transformation", "Hard", ""),
+]
+
+
+def show_leetcode_tab(user_id):
+    st.title("LeetCode Practice")
+    st.caption("Infosys SP / DSE Top 50 practice list. Solve opens LeetCode in a new tab.")
+    state_key = f"leetcode_completed_{user_id}"
+    if state_key not in st.session_state:
+        st.session_state[state_key] = set()
+    completed = st.session_state[state_key]
+    done_count = len(completed)
+    st.progress(done_count / len(LEETCODE_QUESTION_BANK), text=f"{done_count} of {len(LEETCODE_QUESTION_BANK)} completed")
+    difficulty = st.selectbox("Difficulty", ["All", "Easy", "Medium", "Hard"], key="leetcode_difficulty")
+    search = st.text_input("Search questions", key="leetcode_search").strip().lower()
+    questions = [q for q in LEETCODE_QUESTION_BANK if (difficulty == "All" or q[2] == difficulty) and (not search or search in q[1].lower())]
+    for number, title, level, problem_url in questions:
+        done = number in completed
+        with st.container(border=True):
+            left, mid, right = st.columns([7, 1, 2])
+            left.markdown(f"**{number}. {title}**  \n`{level}`")
+            if problem_url:
+                solve_url = problem_url
+            else:
+                solve_url = "https://leetcode.com/problemset/?search=" + requests.utils.quote(title)
+            mid.link_button("Solve", solve_url, use_container_width=True)
+            if right.button("Completed ✓" if done else "Mark complete", key=f"leetcode_done_{user_id}_{number}", use_container_width=True, type="primary" if done else "secondary"):
+                if done:
+                    completed.discard(number)
+                else:
+                    completed.add(number)
+                st.session_state[state_key] = completed
+                st.rerun()
+
+
 def user_dashboard(preview_mode=False):
     # Timed communication exam can return through a browser URL after time-out.
     # Restore its page explicitly so a new Streamlit session does not land on My Classes.
@@ -7571,7 +7656,7 @@ def user_dashboard(preview_mode=False):
                 st.session_state[key] = defaults[key]
             show_logout_redirect()
         st.sidebar.divider()
-        pages = ["My Classes", "Exams", "Interviews", "AI Mock Interview", "Notes", "Feedback", "Progress", "Code Practice", "Group Chat", "Attendance"]
+        pages = ["My Classes", "Exams", "Interviews", "AI Mock Interview", "Notes", "Feedback", "Progress", "Code Practice", "LeetCode", "Group Chat", "Attendance"]
         if user_has_suprabhatam_access(st.session_state.user_id):
             pages.append("Suprabhatam")
         for pg in pages:
@@ -7616,6 +7701,8 @@ def user_dashboard(preview_mode=False):
         show_student_exams_tab(st.session_state.user_id); return
     if user_page == "Attendance":
         show_attendance_tab(st.session_state.user_id); return
+    if user_page == "LeetCode":
+        show_leetcode_tab(st.session_state.user_id); return
     if user_page == "Suprabhatam":
         if user_has_suprabhatam_access(st.session_state.user_id):
             render_suprabhatam_reader(); return
