@@ -5660,7 +5660,7 @@ def admin_dashboard():
         return
 
     menu = st.sidebar.radio("Navigation Control",
-        ["Manage Course Content", "Manage Exams & Questions", "Student Results & Ranks", "Users & Access", "AI Interview / Feedback / Notes", "Credit Cards", "Suprabhatam", label],
+        ["Manage Course Content", "Manage Exams & Questions", "Student Results & Ranks", "Users & Access", "AI Interview / Feedback / Notes", "Infosys Questions", "Credit Cards", "Suprabhatam", label],
         key="admin_navigation")
     if "Group Chat" in menu:
         menu = "Group Chat"
@@ -5680,6 +5680,9 @@ def admin_dashboard():
         return
     if menu == "AI Interview / Feedback / Notes":
         admin_ai_feedback_notes()
+        return
+    if menu == "Infosys Questions":
+        show_infosys_tab(st.session_state.user_id)
         return
 
     if menu == "Users & Access":
