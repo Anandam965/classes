@@ -7588,6 +7588,31 @@ insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_typ
 values ('infosys-question-images', 'infosys-question-images', false, 52428800,
         array['image/png','image/jpeg','image/webp','image/gif'])
 on conflict (id) do nothing;
+
+grant select, insert, update, delete on public.infosys_questions to anon, authenticated, service_role;
+grant select, insert, update, delete on public.infosys_question_notes to anon, authenticated, service_role;
+grant select, insert, update, delete on public.infosys_question_images to anon, authenticated, service_role;
+
+alter table public.infosys_questions enable row level security;
+alter table public.infosys_question_notes enable row level security;
+alter table public.infosys_question_images enable row level security;
+
+drop policy if exists infosys_questions_app_access on public.infosys_questions;
+create policy infosys_questions_app_access on public.infosys_questions
+    for all to anon, authenticated using (true) with check (true);
+drop policy if exists infosys_question_notes_app_access on public.infosys_question_notes;
+create policy infosys_question_notes_app_access on public.infosys_question_notes
+    for all to anon, authenticated using (true) with check (true);
+drop policy if exists infosys_question_images_app_access on public.infosys_question_images;
+create policy infosys_question_images_app_access on public.infosys_question_images
+    for all to anon, authenticated using (true) with check (true);
+
+drop policy if exists infosys_question_storage_app_access on storage.objects;
+create policy infosys_question_storage_app_access on storage.objects
+    for all to anon, authenticated
+    using (bucket_id = 'infosys-question-images')
+    with check (bucket_id = 'infosys-question-images');
+grant select, insert, update, delete on storage.objects to anon, authenticated, service_role;
 """
 
 
@@ -7735,6 +7760,10 @@ def show_infosys_tab(user_id):
                 st.rerun()
             except Exception as exc:
                 st.error(f"Workbook import failed: {exc}")
+                if "row-level security" in str(exc).casefold() or "unauthorized" in str(exc).casefold():
+                    st.warning("Run the updated infosys_schema.sql in Supabase SQL Editor to add the Infosys access policies, then retry this import.")
+                    with st.expander("Show updated Infosys SQL"):
+                        st.code(INFOSYS_SCHEMA_SQL, language="sql")
         return
     if not questions:
         st.info("An administrator needs to import the Excel workbook before questions can be shown.")
