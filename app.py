@@ -7584,6 +7584,19 @@ create table if not exists public.infosys_question_images (
     file_name text not null, is_source boolean not null default false,
     created_at timestamptz not null default now()
 );
+create table if not exists public.infosys_question_progress (
+    user_id uuid not null references public.users(id) on delete cascade,
+    question_id text not null references public.infosys_questions(question_id) on delete cascade,
+    completed_at timestamptz not null default now(),
+    primary key (user_id, question_id)
+);
+create table if not exists public.infosys_java_solutions (
+    user_id uuid not null references public.users(id) on delete cascade,
+    question_id text not null references public.infosys_questions(question_id) on delete cascade,
+    solution_code text not null default '',
+    updated_at timestamptz not null default now(),
+    primary key (user_id, question_id)
+);
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 values ('infosys-question-images', 'infosys-question-images', false, 52428800,
         array['image/png','image/jpeg','image/webp','image/gif'])
@@ -7592,10 +7605,14 @@ on conflict (id) do nothing;
 grant select, insert, update, delete on public.infosys_questions to anon, authenticated, service_role;
 grant select, insert, update, delete on public.infosys_question_notes to anon, authenticated, service_role;
 grant select, insert, update, delete on public.infosys_question_images to anon, authenticated, service_role;
+grant select, insert, update, delete on public.infosys_question_progress to anon, authenticated, service_role;
+grant select, insert, update, delete on public.infosys_java_solutions to anon, authenticated, service_role;
 
 alter table public.infosys_questions enable row level security;
 alter table public.infosys_question_notes enable row level security;
 alter table public.infosys_question_images enable row level security;
+alter table public.infosys_question_progress enable row level security;
+alter table public.infosys_java_solutions enable row level security;
 
 drop policy if exists infosys_questions_app_access on public.infosys_questions;
 create policy infosys_questions_app_access on public.infosys_questions
@@ -7605,6 +7622,12 @@ create policy infosys_question_notes_app_access on public.infosys_question_notes
     for all to anon, authenticated using (true) with check (true);
 drop policy if exists infosys_question_images_app_access on public.infosys_question_images;
 create policy infosys_question_images_app_access on public.infosys_question_images
+    for all to anon, authenticated using (true) with check (true);
+drop policy if exists infosys_question_progress_app_access on public.infosys_question_progress;
+create policy infosys_question_progress_app_access on public.infosys_question_progress
+    for all to anon, authenticated using (true) with check (true);
+drop policy if exists infosys_java_solutions_app_access on public.infosys_java_solutions;
+create policy infosys_java_solutions_app_access on public.infosys_java_solutions
     for all to anon, authenticated using (true) with check (true);
 
 drop policy if exists infosys_question_storage_app_access on storage.objects;
@@ -7787,6 +7810,15 @@ def show_infosys_tab(user_id):
 
     notes_rows = supabase.table("infosys_question_notes").select("question_id,note_text").eq("user_id", str(user_id)).execute().data or []
     notes = {row["question_id"]: row.get("note_text", "") for row in notes_rows}
+    try:
+        progress_rows = supabase.table("infosys_question_progress").select("question_id").eq("user_id", str(user_id)).execute().data or []
+    except Exception as exc:
+        st.error(f"Run the updated infosys_schema.sql in Supabase SQL Editor to enable completion tracking. Details: {exc}")
+        with st.expander("Show updated Infosys SQL"):
+            st.code(INFOSYS_SCHEMA_SQL, language="sql")
+        return
+    completed_ids = {row["question_id"] for row in progress_rows}
+    st.progress(len(completed_ids) / max(len(questions), 1), text=f"{len(completed_ids)} of {len(questions)} completed")
     image_rows = supabase.table("infosys_question_images").select("question_id,user_id,file_name,object_path,is_source").execute().data or []
     images_by_question = {}
     for image in image_rows:
@@ -7799,8 +7831,19 @@ def show_infosys_tab(user_id):
     st.caption(f"Showing {len(filtered)} of {len(questions)} unique questions")
     for q in filtered:
         qid = q["question_id"]
-        with st.expander(f"{q.get('display_order', '')}. {q.get('title', 'Question')} · {q.get('topic', 'Uncategorized')}"):
+        is_completed = qid in completed_ids
+        status_mark = "✅ " if is_completed else ""
+        with st.expander(f"{status_mark}{q.get('display_order', '')}. {q.get('title', 'Question')} · {q.get('topic', 'Uncategorized')}"):
             st.markdown(f"**Topic:** {q.get('topic') or 'Uncategorized'}")
+            if st.button("Mark incomplete" if is_completed else "Mark as complete", key=f"infosys_complete_{user_id}_{qid}",
+                         type="primary" if not is_completed else "secondary"):
+                if is_completed:
+                    supabase.table("infosys_question_progress").delete().eq("user_id", str(user_id)).eq("question_id", qid).execute()
+                else:
+                    supabase.table("infosys_question_progress").upsert(
+                        {"user_id": str(user_id), "question_id": qid}, on_conflict="user_id,question_id"
+                    ).execute()
+                st.rerun()
             if q.get("source_status"):
                 st.caption(f"Workbook status: {q['source_status']}")
             if q.get("solution"):
@@ -7847,6 +7890,39 @@ def show_infosys_tab(user_id):
                     st.rerun()
                 except Exception as exc:
                     st.error(f"Could not save notes or images: {exc}")
+
+
+def show_infosys_java_solutions_tab(user_id):
+    st.title("Java Solutions")
+    st.caption("Choose an Infosys question, write your Java solution, and save it to your account.")
+    try:
+        questions = supabase.table("infosys_questions").select("question_id,title,topic,display_order").order("display_order").execute().data or []
+        if not questions:
+            st.info("The Infosys question bank has not been imported yet.")
+            return
+        labels = {f"{q['display_order']}. {q['title']} · {q.get('topic', '')}": q for q in questions}
+        selected_label = st.selectbox("Choose question", list(labels.keys()), key="infosys_java_question")
+        question = labels[selected_label]
+        qid = question["question_id"]
+        st.markdown(f"**Topic:** {question.get('topic') or 'Uncategorized'}")
+        saved_rows = supabase.table("infosys_java_solutions").select("solution_code,updated_at").eq(
+            "user_id", str(user_id)
+        ).eq("question_id", qid).limit(1).execute().data or []
+        saved = saved_rows[0] if saved_rows else {}
+        editor_key = f"infosys_java_code_{user_id}_{qid}"
+        code = st.text_area("Java solution", value=saved.get("solution_code", ""), height=420,
+                            key=editor_key, placeholder="// Write your Java solution here\nimport java.util.*;\n\nclass Solution {\n    // ...\n}")
+        if saved.get("updated_at"):
+            st.caption(f"Last saved: {saved['updated_at']}")
+        if st.button("Save Java solution", type="primary", key=f"save_infosys_java_{user_id}_{qid}"):
+            supabase.table("infosys_java_solutions").upsert({
+                "user_id": str(user_id), "question_id": qid, "solution_code": code,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }, on_conflict="user_id,question_id").execute()
+            st.success("Java solution saved.")
+            st.rerun()
+    except Exception as exc:
+        st.error(f"Java Solutions database is not ready. Run the updated infosys_schema.sql in Supabase SQL Editor. Details: {exc}")
 
 
 LEETCODE_QUESTION_BANK = [
@@ -8040,7 +8116,7 @@ def user_dashboard(preview_mode=False):
                 st.session_state[key] = defaults[key]
             show_logout_redirect()
         st.sidebar.divider()
-        pages = ["My Classes", "Exams", "Interviews", "AI Mock Interview", "Notes", "Feedback", "Progress", "Code Practice", "LeetCode", "Infosys", "Group Chat", "Attendance"]
+        pages = ["My Classes", "Exams", "Interviews", "AI Mock Interview", "Notes", "Feedback", "Progress", "Code Practice", "LeetCode", "Infosys", "Java Solutions", "Group Chat", "Attendance"]
         if user_has_suprabhatam_access(st.session_state.user_id):
             pages.append("Suprabhatam")
         for pg in pages:
@@ -8089,6 +8165,8 @@ def user_dashboard(preview_mode=False):
         show_leetcode_db_tab(st.session_state.user_id); return
     if user_page == "Infosys":
         show_infosys_tab(st.session_state.user_id); return
+    if user_page == "Java Solutions":
+        show_infosys_java_solutions_tab(st.session_state.user_id); return
     if user_page == "Suprabhatam":
         if user_has_suprabhatam_access(st.session_state.user_id):
             render_suprabhatam_reader(); return
