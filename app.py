@@ -7769,6 +7769,22 @@ def show_infosys_tab(user_id):
         st.info("An administrator needs to import the Excel workbook before questions can be shown.")
         return
 
+    if st.session_state.get("role") == "admin":
+        with st.expander("Import or retry workbook images"):
+            st.caption("Re-uploading the same workbook safely retries missing questions or source images without duplicating them.")
+            retry_workbook = st.file_uploader("Select the Excel workbook again", type=["xlsx"], key="infosys_retry_workbook", max_upload_size=200)
+            if retry_workbook and st.button("Retry workbook import", type="primary", key="infosys_retry_import"):
+                try:
+                    with st.spinner("Retrying question and image uploads…"):
+                        question_count, image_count = import_infosys_workbook(retry_workbook.getvalue())
+                    st.success(f"Import complete: {question_count} questions and {image_count} source images processed.")
+                    st.rerun()
+                except Exception as exc:
+                    st.error(f"Import did not finish: {exc}")
+                    with st.expander("Supabase access setup"):
+                        st.markdown("If the error mentions row-level security or unauthorized access, run the updated `infosys_schema.sql` in Supabase SQL Editor and retry.")
+                        st.code(INFOSYS_SCHEMA_SQL, language="sql")
+
     notes_rows = supabase.table("infosys_question_notes").select("question_id,note_text").eq("user_id", str(user_id)).execute().data or []
     notes = {row["question_id"]: row.get("note_text", "") for row in notes_rows}
     image_rows = supabase.table("infosys_question_images").select("question_id,user_id,file_name,object_path,is_source").execute().data or []
