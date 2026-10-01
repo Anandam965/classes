@@ -7606,6 +7606,93 @@ LEETCODE_QUESTION_BANK = [
 ]
 
 
+LEETCODE_TOPICS = {
+    1: "Arrays", 2: "Strings · Two Pointers", 3: "Arrays · Sorting", 4: "Strings",
+    5: "Arrays · Hashing", 6: "Math · Number Theory", 7: "Math · Dynamic Programming", 8: "Binary Search",
+    9: "Linked Lists", 10: "Strings · Hashing", 11: "Arrays · Hashing", 12: "Arrays · Two Pointers",
+    13: "Matrices", 14: "Sorting", 15: "Bit Manipulation · Math", 16: "Greedy · Strings",
+    17: "Arrays · Hashing", 18: "Trees · Breadth-First Search", 19: "Bit Manipulation · Math", 20: "Strings · Hashing",
+    21: "Strings · Sliding Window", 22: "Arrays · Two Pointers", 23: "Linked Lists · Fast and Slow Pointers",
+    24: "Arrays · Dynamic Programming", 25: "Stacks · Strings", 26: "Strings · Dynamic Programming",
+    27: "Arrays · Sorting · Intervals", 28: "Arrays · Dynamic Programming · Binary Search",
+    29: "Strings · Dynamic Programming", 30: "Stacks · Recursion", 31: "Arrays · Dynamic Programming",
+    32: "Linked Lists · Two Pointers", 33: "Backtracking · Arrays", 34: "Trie · Strings",
+    35: "Hashing · Design · Doubly Linked Lists", 36: "Greedy · Sorting", 37: "Bit Manipulation · Greedy",
+    38: "Dynamic Programming · Bit Manipulation", 39: "Arrays · Dynamic Programming · Binary Search",
+    40: "Dynamic Programming · Greedy", 41: "Strings · Dynamic Programming",
+    42: "Strings · Dynamic Programming", 43: "Dynamic Programming · Knapsack",
+    44: "Bit Manipulation · Greedy", 45: "Bit Manipulation · Arrays", 46: "Greedy · Binary Search",
+    47: "Arrays · Prefix Sum · Greedy", 48: "Greedy · Dynamic Programming", 49: "Graphs · Greedy",
+    50: "Arrays · Dynamic Programming · Two Pointers",
+}
+
+LEETCODE_SCHEMA_SQL = """
+create table if not exists public.leetcode_questions (
+    question_no integer primary key,
+    title text not null,
+    difficulty text not null check (difficulty in ('Easy', 'Medium', 'Hard')),
+    topic text not null,
+    leetcode_url text not null default '',
+    display_order integer not null,
+    updated_at timestamptz not null default now()
+);
+create table if not exists public.leetcode_completions (
+    user_id uuid not null references public.users(id) on delete cascade,
+    question_no integer not null references public.leetcode_questions(question_no) on delete cascade,
+    completed_at timestamptz not null default now(),
+    primary key (user_id, question_no)
+);
+"""
+
+
+def show_leetcode_db_tab(user_id):
+    st.title("LeetCode Practice")
+    st.caption("Infosys SP / DSE Top 50 practice list. Questions and progress are stored in Supabase.")
+    seed_rows = [{"question_no": n, "title": title, "difficulty": level,
+                  "topic": LEETCODE_TOPICS[n], "leetcode_url": url, "display_order": n}
+                 for n, title, level, url in LEETCODE_QUESTION_BANK]
+    try:
+        supabase.table("leetcode_questions").upsert(seed_rows, on_conflict="question_no").execute()
+        questions = supabase.table("leetcode_questions").select(
+            "question_no,title,difficulty,topic,leetcode_url,display_order"
+        ).order("display_order").execute().data or []
+        completed_rows = supabase.table("leetcode_completions").select("question_no").eq(
+            "user_id", str(user_id)
+        ).execute().data or []
+        completed = {int(row["question_no"]) for row in completed_rows}
+        db_ready = True
+    except Exception as exc:
+        questions = [{"question_no": n, "title": title, "difficulty": level,
+                      "topic": LEETCODE_TOPICS[n], "leetcode_url": url}
+                     for n, title, level, url in LEETCODE_QUESTION_BANK]
+        completed = set()
+        db_ready = False
+        st.error(f"LeetCode database tables are not ready. Run leetcode_schema.sql in Supabase SQL Editor, then reload. Details: {exc}")
+
+    st.progress(len(completed) / max(len(questions), 1), text=f"{len(completed)} of {len(questions)} completed")
+    difficulty = st.selectbox("Difficulty", ["All", "Easy", "Medium", "Hard"], key="leetcode_difficulty")
+    search = st.text_input("Search questions or topics", key="leetcode_search").strip().lower()
+    filtered = [q for q in questions if (difficulty == "All" or q["difficulty"] == difficulty)
+                and (not search or search in q["title"].lower() or search in q["topic"].lower())]
+    for q in filtered:
+        number = int(q["question_no"])
+        done = number in completed
+        with st.container(border=True):
+            left, mid, right = st.columns([7, 1, 2])
+            left.markdown(f"**{number}. {q['title']}**  \n`{q['difficulty']}` · **Topic:** {q['topic']}")
+            solve_url = q.get("leetcode_url") or ("https://leetcode.com/problemset/?search=" + requests.utils.quote(q["title"]))
+            mid.link_button("Solve", solve_url, use_container_width=True)
+            if right.button("Completed ✓" if done else "Mark complete", key=f"leetcode_db_done_{user_id}_{number}",
+                            use_container_width=True, type="primary" if done else "secondary", disabled=not db_ready):
+                if done:
+                    supabase.table("leetcode_completions").delete().eq("user_id", str(user_id)).eq("question_no", number).execute()
+                else:
+                    supabase.table("leetcode_completions").upsert(
+                        {"user_id": str(user_id), "question_no": number}, on_conflict="user_id,question_no"
+                    ).execute()
+                st.rerun()
+
+
 def show_leetcode_tab(user_id):
     st.title("LeetCode Practice")
     st.caption("Infosys SP / DSE Top 50 practice list. Solve opens LeetCode in a new tab.")
@@ -7702,7 +7789,7 @@ def user_dashboard(preview_mode=False):
     if user_page == "Attendance":
         show_attendance_tab(st.session_state.user_id); return
     if user_page == "LeetCode":
-        show_leetcode_tab(st.session_state.user_id); return
+        show_leetcode_db_tab(st.session_state.user_id); return
     if user_page == "Suprabhatam":
         if user_has_suprabhatam_access(st.session_state.user_id):
             render_suprabhatam_reader(); return
