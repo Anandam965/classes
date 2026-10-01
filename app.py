@@ -4,6 +4,12 @@ import time
 import json
 import html
 import tempfile
+import hashlib
+import posixpath
+import re
+import unicodedata
+import zipfile
+import xml.etree.ElementTree as ET
 import requests
 import smtplib
 import ssl
@@ -7552,6 +7558,248 @@ def card_user_dashboard():
 # =========================
 # USER DASHBOARD
 # =========================
+INFOSYS_IMAGE_BUCKET = "infosys-question-images"
+INFOSYS_SOURCE_XLSX = r"C:\Users\anand\OneDrive\Desktop\coding_questions_solutions_youtube.xlsx"
+INFOSYS_SCHEMA_SQL = """
+create table if not exists public.infosys_questions (
+    question_id text primary key, title text not null, solution text not null default '',
+    topic text not null default '', youtube_url text not null default '',
+    source_status text not null default '', display_order integer not null,
+    created_at timestamptz not null default now()
+);
+create table if not exists public.infosys_question_notes (
+    user_id uuid not null references public.users(id) on delete cascade,
+    question_id text not null references public.infosys_questions(question_id) on delete cascade,
+    note_text text not null default '', updated_at timestamptz not null default now(),
+    primary key (user_id, question_id)
+);
+create table if not exists public.infosys_question_images (
+    object_path text primary key,
+    question_id text not null references public.infosys_questions(question_id) on delete cascade,
+    user_id uuid references public.users(id) on delete cascade,
+    file_name text not null, is_source boolean not null default false,
+    created_at timestamptz not null default now()
+);
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values ('infosys-question-images', 'infosys-question-images', false, 52428800,
+        array['image/png','image/jpeg','image/webp','image/gif'])
+on conflict (id) do nothing;
+"""
+
+
+def _infosys_normalize(value):
+    return re.sub(r"\W+", "", unicodedata.normalize("NFKC", str(value or "")).casefold())
+
+
+def parse_infosys_workbook(workbook_bytes):
+    """Extract workbook rows, hyperlinks, and anchored images using Python's stdlib."""
+    main_ns = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+    doc_rel_ns = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+    ns = {"m": main_ns, "xdr": "http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing",
+          "a": "http://schemas.openxmlformats.org/drawingml/2006/main"}
+    with zipfile.ZipFile(workbook_bytes) as archive:
+        workbook = ET.fromstring(archive.read("xl/workbook.xml"))
+        workbook_rels = ET.fromstring(archive.read("xl/_rels/workbook.xml.rels"))
+        workbook_relmap = {r.attrib["Id"]: r.attrib["Target"] for r in workbook_rels}
+        sheet_node = workbook.find(".//m:sheet", ns)
+        if sheet_node is None:
+            raise ValueError("The workbook has no worksheet.")
+        sheet_path = posixpath.normpath(posixpath.join("xl", workbook_relmap[sheet_node.attrib[f"{{{doc_rel_ns}}}id"]]))
+        sheet_root = ET.fromstring(archive.read(sheet_path))
+        shared_strings = []
+        if "xl/sharedStrings.xml" in archive.namelist():
+            shared_root = ET.fromstring(archive.read("xl/sharedStrings.xml"))
+            shared_strings = ["".join(t.text or "" for t in si.findall(".//m:t", ns)) for si in shared_root.findall("m:si", ns)]
+        sheet_rels_path = posixpath.join(posixpath.dirname(sheet_path), "_rels", posixpath.basename(sheet_path) + ".rels")
+        sheet_rels = ET.fromstring(archive.read(sheet_rels_path)) if sheet_rels_path in archive.namelist() else None
+        sheet_relmap = {r.attrib["Id"]: r.attrib for r in sheet_rels} if sheet_rels is not None else {}
+        hyperlinks = {}
+        for link in sheet_root.findall(".//m:hyperlink", ns):
+            match = re.search(r"\d+", link.attrib.get("ref", ""))
+            rel = sheet_relmap.get(link.attrib.get(f"{{{doc_rel_ns}}}id"), {})
+            if match and rel.get("TargetMode") == "External":
+                hyperlinks[int(match.group())] = rel.get("Target", "")
+
+        images_by_row = {}
+        for rel in sheet_relmap.values():
+            if not rel.get("Type", "").endswith("/drawing"):
+                continue
+            drawing_path = posixpath.normpath(posixpath.join(posixpath.dirname(sheet_path), rel["Target"]))
+            rels_path = posixpath.join(posixpath.dirname(drawing_path), "_rels", posixpath.basename(drawing_path) + ".rels")
+            if drawing_path not in archive.namelist() or rels_path not in archive.namelist():
+                continue
+            drawing_rels = ET.fromstring(archive.read(rels_path))
+            drawing_relmap = {r.attrib["Id"]: r.attrib["Target"] for r in drawing_rels}
+            for anchor in ET.fromstring(archive.read(drawing_path)):
+                from_node, blip = anchor.find("xdr:from", ns), anchor.find(".//a:blip", ns)
+                if from_node is None or blip is None:
+                    continue
+                row_no = int(from_node.find("xdr:row", ns).text) + 1
+                target = drawing_relmap.get(blip.attrib.get(f"{{{doc_rel_ns}}}embed"))
+                if target:
+                    path = posixpath.normpath(posixpath.join(posixpath.dirname(drawing_path), target))
+                    images_by_row.setdefault(row_no, []).append((path, posixpath.basename(path)))
+
+        grouped = {}
+        for row in sheet_root.findall(".//m:sheetData/m:row", ns):
+            row_no = int(row.attrib.get("r", "0"))
+            values = {}
+            for cell in row.findall("m:c", ns):
+                col = "".join(ch for ch in cell.attrib.get("r", "") if ch.isalpha())
+                value, inline = cell.find("m:v", ns), cell.find("m:is", ns)
+                text = "" if value is None else value.text or ""
+                if cell.attrib.get("t") == "s" and text:
+                    text = shared_strings[int(text)]
+                elif inline is not None:
+                    text = "".join(t.text or "" for t in inline.findall(".//m:t", ns))
+                values[col] = text
+            title = str(values.get("B", "")).strip()
+            if not title or title.casefold() == "question":
+                continue
+            solution = str(values.get("C", "")).strip()
+            key = _infosys_normalize(title) + "|" + _infosys_normalize(solution)
+            item = grouped.setdefault(key, {
+                "question_id": hashlib.sha256(key.encode("utf-8")).hexdigest(),
+                "title": title, "solution": solution, "topic": str(values.get("E", "")).strip(),
+                "youtube_url": hyperlinks.get(row_no, ""), "source_status": str(values.get("F", "")).strip(),
+                "display_order": len(grouped) + 1, "images": [], "_hashes": set(),
+            })
+            if not item["youtube_url"]:
+                item["youtube_url"] = hyperlinks.get(row_no, "")
+            if str(values.get("F", "")).strip().casefold() == "completed":
+                item["source_status"] = "Completed"
+            for image_path, image_name in images_by_row.get(row_no, []):
+                if image_path not in archive.namelist():
+                    continue
+                image_bytes = archive.read(image_path)
+                digest = hashlib.sha256(image_bytes).hexdigest()
+                if digest in item["_hashes"]:
+                    continue
+                item["_hashes"].add(digest)
+                ext = posixpath.splitext(image_name)[1].lower() or ".png"
+                mime = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".gif": "image/gif", ".webp": "image/webp"}.get(ext, "application/octet-stream")
+                item["images"].append({"bytes": image_bytes, "sha256": digest, "extension": ext, "mime": mime, "file_name": image_name})
+        for item in grouped.values():
+            item.pop("_hashes", None)
+        return list(grouped.values())
+
+
+def import_infosys_workbook(workbook_bytes):
+    questions = parse_infosys_workbook(workbook_bytes)
+    rows = [{k: q[k] for k in ("question_id", "title", "solution", "topic", "youtube_url", "source_status", "display_order")} for q in questions]
+    supabase.table("infosys_questions").upsert(rows, on_conflict="question_id").execute()
+    image_count = 0
+    for q in questions:
+        for image in q["images"]:
+            path = f"source/{q['question_id']}/{image['sha256']}{image['extension']}"
+            supabase.storage.from_(INFOSYS_IMAGE_BUCKET).upload(path, image["bytes"], {"content-type": image["mime"], "upsert": "true"})
+            supabase.table("infosys_question_images").upsert({
+                "object_path": path, "question_id": q["question_id"], "user_id": None,
+                "file_name": image["file_name"], "is_source": True,
+            }, on_conflict="object_path").execute()
+            image_count += 1
+    return len(questions), image_count
+
+
+def show_infosys_tab(user_id):
+    st.title("Infosys Coding Questions")
+    st.caption("Questions, topics, solutions, video searches, and workbook images from your Excel file.")
+    try:
+        questions = supabase.table("infosys_questions").select("*").order("display_order").execute().data or []
+    except Exception as exc:
+        st.error(f"Infosys database tables are not ready. Run infosys_schema.sql in Supabase SQL Editor, then reload. Details: {exc}")
+        with st.expander("Show setup SQL"):
+            st.code(INFOSYS_SCHEMA_SQL, language="sql")
+        return
+    if not questions and st.session_state.get("role") == "admin" and os.path.exists(INFOSYS_SOURCE_XLSX):
+        try:
+            with st.spinner("Importing the supplied Infosys workbook and its images into Supabase…"):
+                with open(INFOSYS_SOURCE_XLSX, "rb") as workbook_file:
+                    question_count, image_count = import_infosys_workbook(workbook_file.read())
+            st.success(f"Imported {question_count} unique questions and {image_count} source images.")
+            st.rerun()
+        except Exception as exc:
+            st.error(f"Automatic workbook import failed: {exc}")
+    if not questions and st.session_state.get("role") == "admin":
+        st.info("Import the workbook once. Repeated problems are merged, and all distinct question images are retained.")
+        workbook = st.file_uploader("Upload coding_questions_solutions_youtube.xlsx", type=["xlsx"], key="infosys_initial_workbook", max_upload_size=200)
+        if workbook and st.button("Import questions and images", type="primary", key="infosys_import_workbook"):
+            try:
+                with st.spinner("Importing questions and screenshots into Supabase…"):
+                    question_count, image_count = import_infosys_workbook(workbook.getvalue())
+                st.success(f"Imported {question_count} unique questions and {image_count} source images.")
+                st.rerun()
+            except Exception as exc:
+                st.error(f"Workbook import failed: {exc}")
+        return
+    if not questions:
+        st.info("An administrator needs to import the Excel workbook before questions can be shown.")
+        return
+
+    notes_rows = supabase.table("infosys_question_notes").select("question_id,note_text").eq("user_id", str(user_id)).execute().data or []
+    notes = {row["question_id"]: row.get("note_text", "") for row in notes_rows}
+    image_rows = supabase.table("infosys_question_images").select("question_id,user_id,file_name,object_path,is_source").execute().data or []
+    images_by_question = {}
+    for image in image_rows:
+        images_by_question.setdefault(image["question_id"], []).append(image)
+    categories = sorted({q.get("topic", "") for q in questions if q.get("topic")})
+    topic_filter = st.selectbox("Topic", ["All topics"] + categories, key="infosys_topic_filter")
+    search = st.text_input("Search questions or topics", key="infosys_question_search").strip().casefold()
+    filtered = [q for q in questions if (topic_filter == "All topics" or q.get("topic") == topic_filter)
+                and (not search or search in q.get("title", "").casefold() or search in q.get("topic", "").casefold())]
+    st.caption(f"Showing {len(filtered)} of {len(questions)} unique questions")
+    for q in filtered:
+        qid = q["question_id"]
+        with st.expander(f"{q.get('display_order', '')}. {q.get('title', 'Question')} · {q.get('topic', 'Uncategorized')}"):
+            st.markdown(f"**Topic:** {q.get('topic') or 'Uncategorized'}")
+            if q.get("source_status"):
+                st.caption(f"Workbook status: {q['source_status']}")
+            if q.get("solution"):
+                st.markdown("**Solution / approach from workbook**")
+                st.write(q["solution"])
+            if q.get("youtube_url"):
+                st.link_button("YouTube tutorial search", q["youtube_url"])
+            question_images = images_by_question.get(qid, [])
+            for image in question_images:
+                if image.get("user_id") is not None and str(image.get("user_id")) != str(user_id):
+                    continue
+                try:
+                    signed_url = supabase.storage.from_(INFOSYS_IMAGE_BUCKET).create_signed_url(image["object_path"], 3600).get("signedURL")
+                    if signed_url:
+                        st.image(signed_url, caption=image.get("file_name", "Question image"), use_container_width=True)
+                except Exception as exc:
+                    st.caption(f"Could not load {image.get('file_name', 'image')}: {exc}")
+            with st.form(f"infosys_question_form_{user_id}_{qid}"):
+                note_text = st.text_area("Your notes", value=notes.get(qid, ""), height=120,
+                                         key=f"infosys_note_{user_id}_{qid}", placeholder="Add your notes for this problem…")
+                user_images = st.file_uploader("Upload one or more images for this question",
+                    type=["png", "jpg", "jpeg", "webp", "gif"], accept_multiple_files=True,
+                    key=f"infosys_images_{user_id}_{qid}")
+                save_problem = st.form_submit_button("Save notes and images", type="primary")
+            if save_problem:
+                try:
+                    supabase.table("infosys_question_notes").upsert({
+                        "user_id": str(user_id), "question_id": qid, "note_text": note_text,
+                        "updated_at": datetime.now(timezone.utc).isoformat(),
+                    }, on_conflict="user_id,question_id").execute()
+                    saved_count = 0
+                    for image_file in user_images or []:
+                        digest = hashlib.sha256(image_file.getvalue()).hexdigest()
+                        suffix = os.path.splitext(image_file.name)[1].lower() or ".png"
+                        path = f"users/{user_id}/{qid}/{digest}{suffix}"
+                        supabase.storage.from_(INFOSYS_IMAGE_BUCKET).upload(path, image_file.getvalue(),
+                            {"content-type": image_file.type or "image/png", "upsert": "true"})
+                        supabase.table("infosys_question_images").upsert({
+                            "object_path": path, "question_id": qid, "user_id": str(user_id),
+                            "file_name": image_file.name, "is_source": False,
+                        }, on_conflict="object_path").execute()
+                        saved_count += 1
+                    st.success(f"Notes saved. {saved_count} image(s) saved.")
+                    st.rerun()
+                except Exception as exc:
+                    st.error(f"Could not save notes or images: {exc}")
+
+
 LEETCODE_QUESTION_BANK = [
     (1, "Reverse an Array", "Easy", ""),
     (2, "Check Palindrome String", "Easy", ""),
@@ -7743,7 +7991,7 @@ def user_dashboard(preview_mode=False):
                 st.session_state[key] = defaults[key]
             show_logout_redirect()
         st.sidebar.divider()
-        pages = ["My Classes", "Exams", "Interviews", "AI Mock Interview", "Notes", "Feedback", "Progress", "Code Practice", "LeetCode", "Group Chat", "Attendance"]
+        pages = ["My Classes", "Exams", "Interviews", "AI Mock Interview", "Notes", "Feedback", "Progress", "Code Practice", "LeetCode", "Infosys", "Group Chat", "Attendance"]
         if user_has_suprabhatam_access(st.session_state.user_id):
             pages.append("Suprabhatam")
         for pg in pages:
@@ -7790,6 +8038,8 @@ def user_dashboard(preview_mode=False):
         show_attendance_tab(st.session_state.user_id); return
     if user_page == "LeetCode":
         show_leetcode_db_tab(st.session_state.user_id); return
+    if user_page == "Infosys":
+        show_infosys_tab(st.session_state.user_id); return
     if user_page == "Suprabhatam":
         if user_has_suprabhatam_access(st.session_state.user_id):
             render_suprabhatam_reader(); return
