@@ -4994,8 +4994,12 @@ def show_feedback_page(user_id):
                     st.error(f"Feedback save avvaledu. Admin SQL setup run cheyyali: {e}")
 
 
-def show_notes_page():
+def show_notes_page(user_id=None):
     st.subheader("Notes")
+    notes_view = st.radio("Notes view", ["Infosys Saved Notes", "Study Notes"], horizontal=True, key="notes_view_choice")
+    if notes_view == "Infosys Saved Notes":
+        show_infosys_saved_notes_page(user_id or st.session_state.get("user_id"))
+        return
     try:
         notes = supabase.table("study_notes").select("*").eq("active", True).order("topic").order("id").execute().data or []
     except Exception as e:
@@ -5015,6 +5019,191 @@ def show_notes_page():
                 if note.get("source_url"):
                     st.link_button("Source", note["source_url"], key=f"note_source_{note['id']}")
                 st.divider()
+
+
+def build_infosys_notes_pdf(entries):
+    from PIL import Image, ImageDraw, ImageFont
+
+    width, height = 1240, 1754
+    margin = 88
+    font_paths = [r"C:\Windows\Fonts\Nirmala.ttc", r"C:\Windows\Fonts\arial.ttf",
+                  "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"]
+    font_path = next((path for path in font_paths if os.path.exists(path)), None)
+
+    def get_font(size, bold=False):
+        candidates = ([r"C:\Windows\Fonts\NirmalaB.ttf", r"C:\Windows\Fonts\arialbd.ttf"] if bold else []) + ([font_path] if font_path else [])
+        for candidate in candidates:
+            if candidate and os.path.exists(candidate):
+                try:
+                    return ImageFont.truetype(candidate, size, index=0)
+                except Exception:
+                    pass
+        return ImageFont.load_default()
+
+    title_font, heading_font, body_font, small_font = get_font(38, True), get_font(30, True), get_font(24), get_font(19)
+    pages = []
+    page = None
+    draw = None
+    y = 0
+
+    def new_page():
+        nonlocal page, draw, y
+        if page is not None:
+            pages.append(page)
+        page = Image.new("RGB", (width, height), "white")
+        draw = ImageDraw.Draw(page)
+        draw.text((margin, 45), "Infosys Saved Notes", font=title_font, fill="#18263f")
+        draw.line((margin, 100, width - margin, 100), fill="#d7deeb", width=2)
+        y = 125
+
+    def measure(text, font):
+        box = draw.textbbox((0, 0), text or " ", font=font)
+        return box[2] - box[0]
+
+    def wrapped(text, font):
+        available = width - 2 * margin
+        result = []
+        for paragraph in str(text or "").splitlines() or [""]:
+            words = paragraph.split()
+            if not words:
+                result.append("")
+                continue
+            line = ""
+            for word in words:
+                candidate = f"{line} {word}".strip()
+                if line and measure(candidate, font) > available:
+                    result.append(line)
+                    line = word
+                else:
+                    line = candidate
+            if line:
+                result.append(line)
+        return result
+
+    def add_text(text, font=body_font, color="#28364f", gap=8):
+        nonlocal y
+        for line in wrapped(text, font):
+            if y + 38 > height - margin:
+                new_page()
+            draw.text((margin, y), line, font=font, fill=color)
+            y += 34
+        y += gap
+
+    new_page()
+    missing_images = 0
+    for index, entry in enumerate(entries, 1):
+        if index > 1:
+            new_page()
+        add_text(f"{entry.get('display_order', index)}. {entry.get('title', 'Question')}", title_font, "#18263f", 6)
+        add_text(f"Topic: {entry.get('topic') or 'Uncategorized'}", small_font, "#52627a", 14)
+        if entry.get("solution"):
+            add_text("Workbook answer / solution", heading_font, "#315efb", 4)
+            add_text(entry["solution"])
+        if entry.get("solution_code"):
+            add_text("My Java solution", heading_font, "#315efb", 4)
+            add_text(entry["solution_code"], small_font, "#172033", 12)
+        add_text("My notes", heading_font, "#315efb", 4)
+        add_text(entry.get("note_text") or "No personal note saved.")
+        for image_record in entry.get("images", []):
+            try:
+                image_bytes = supabase.storage.from_(INFOSYS_IMAGE_BUCKET).download(image_record["object_path"])
+                with Image.open(io.BytesIO(image_bytes)) as source:
+                    source.seek(0)
+                    image = source.convert("RGB")
+                    image.thumbnail((width - 2 * margin, 690))
+                if y + image.height + 70 > height - margin:
+                    new_page()
+                add_text(f"Image: {image_record.get('file_name', 'Question image')}", small_font, "#52627a", 5)
+                page.paste(image, (margin, y))
+                y += image.height + 24
+            except Exception:
+                missing_images += 1
+
+    if page is not None:
+        pages.append(page)
+    for page_no, page_image in enumerate(pages, 1):
+        ImageDraw.Draw(page_image).text((width - margin - 100, height - 48), f"Page {page_no}", font=small_font, fill="#60708a")
+    if not pages:
+        return b"", missing_images
+    output = io.BytesIO()
+    pages[0].save(output, format="PDF", save_all=True, append_images=pages[1:], resolution=150)
+    return output.getvalue(), missing_images
+
+
+def show_infosys_saved_notes_page(user_id):
+    st.markdown("### Infosys Saved Notes")
+    try:
+        note_rows = supabase.table("infosys_question_notes").select("question_id,note_text,updated_at").eq("user_id", str(user_id)).order("updated_at", desc=True).execute().data or []
+        question_rows = supabase.table("infosys_questions").select("*").order("display_order").execute().data or []
+        image_rows = supabase.table("infosys_question_images").select("question_id,user_id,file_name,object_path,is_source").execute().data or []
+        java_rows = supabase.table("infosys_java_solutions").select("question_id,solution_code,updated_at").eq("user_id", str(user_id)).execute().data or []
+    except Exception as exc:
+        st.error(f"Infosys notes could not be loaded. Run the latest infosys_schema.sql in Supabase SQL Editor. Details: {exc}")
+        return
+    note_map = {row["question_id"]: row for row in note_rows}
+    java_map = {row["question_id"]: row for row in java_rows}
+    own_images = {}
+    for image in image_rows:
+        if image.get("user_id") is not None and str(image.get("user_id")) != str(user_id):
+            continue
+        own_images.setdefault(image["question_id"], []).append(image)
+    questions_by_id = {row["question_id"]: row for row in question_rows}
+    saved_ids = set()
+    for qid, note in note_map.items():
+        if str(note.get("note_text") or "").strip():
+            saved_ids.add(qid)
+    for qid, images in own_images.items():
+        if any(image.get("user_id") is not None for image in images):
+            saved_ids.add(qid)
+    saved_ids.update(java_map.keys())
+    entries = []
+    for question in question_rows:
+        qid = question["question_id"]
+        if qid not in saved_ids:
+            continue
+        entries.append({**question,
+                        "note_text": note_map.get(qid, {}).get("note_text", ""),
+                        "solution_code": java_map.get(qid, {}).get("solution_code", ""),
+                        "images": own_images.get(qid, [])})
+    if not entries:
+        st.info("No Infosys notes, Java solutions, or personal images have been saved yet.")
+        return
+    st.caption(f"{len(entries)} saved question(s), including their answers, personal notes, Java solutions, and images.")
+    fingerprint_payload = []
+    for entry in entries:
+        item_fingerprint = {k: entry.get(k) for k in ("question_id", "title", "topic", "solution", "note_text", "solution_code")}
+        item_fingerprint["images"] = [img.get("object_path") for img in entry["images"]]
+        fingerprint_payload.append(item_fingerprint)
+    fingerprint = hashlib.sha256(json.dumps(fingerprint_payload, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
+    cache_key = f"infosys_notes_pdf_{user_id}"
+    cached = st.session_state.get(cache_key, {})
+    if cached.get("fingerprint") != fingerprint:
+        try:
+            with st.spinner("Preparing your notes PDF with images…"):
+                pdf_bytes, missing_images = build_infosys_notes_pdf(entries)
+            st.session_state[cache_key] = {"fingerprint": fingerprint, "data": pdf_bytes, "missing_images": missing_images}
+            cached = st.session_state[cache_key]
+        except Exception as exc:
+            st.error(f"PDF could not be prepared: {exc}")
+            cached = {}
+    if cached.get("data"):
+        st.download_button("Download PDF", data=cached["data"], file_name="Infosys_Saved_Notes.pdf", mime="application/pdf", type="primary")
+        if cached.get("missing_images"):
+            st.warning(f"PDF is ready, but {cached['missing_images']} image(s) could not be downloaded from storage.")
+    for entry in entries:
+        with st.expander(f"{entry.get('display_order', '')}. {entry.get('title', 'Question')} · {entry.get('topic', '')}", expanded=False):
+            st.markdown(f"**Answer / solution:** {entry.get('solution') or 'Not provided'}")
+            st.markdown(f"**Your notes:** {entry.get('note_text') or 'No note text saved.'}")
+            if entry.get("solution_code"):
+                st.markdown("**Your Java solution**")
+                st.code(entry["solution_code"], language="java")
+            for image in entry.get("images", []):
+                try:
+                    signed = supabase.storage.from_(INFOSYS_IMAGE_BUCKET).create_signed_url(image["object_path"], 3600).get("signedURL")
+                    if signed:
+                        st.image(signed, caption=image.get("file_name", "Question image"), use_container_width=True)
+                except Exception as exc:
+                    st.caption(f"Image unavailable: {exc}")
 
 
 def speak_interview_question(question, finish_phase=""):
@@ -7829,11 +8018,25 @@ def show_infosys_tab(user_id):
     filtered = [q for q in questions if (topic_filter == "All topics" or q.get("topic") == topic_filter)
                 and (not search or search in q.get("title", "").casefold() or search in q.get("topic", "").casefold())]
     st.caption(f"Showing {len(filtered)} of {len(questions)} unique questions")
+    if filtered:
+        active_question_key = f"infosys_active_question_{user_id}"
+        filtered_by_id = {q["question_id"]: q for q in filtered}
+        if st.session_state.get(active_question_key) not in filtered_by_id:
+            saved_question_id = str(st.query_params.get("infosys_question", ""))
+            st.session_state[active_question_key] = saved_question_id if saved_question_id in filtered_by_id else filtered[0]["question_id"]
+        selected_qid = st.selectbox(
+            "Choose question",
+            list(filtered_by_id),
+            format_func=lambda qid: f"{filtered_by_id[qid].get('display_order', '')}. {filtered_by_id[qid].get('title', '')} · {filtered_by_id[qid].get('topic', '')}",
+            key=active_question_key,
+        )
+        st.query_params["infosys_question"] = selected_qid
+        filtered = [filtered_by_id[selected_qid]]
     for q in filtered:
         qid = q["question_id"]
         is_completed = qid in completed_ids
         status_mark = "✅ " if is_completed else ""
-        with st.expander(f"{status_mark}{q.get('display_order', '')}. {q.get('title', 'Question')} · {q.get('topic', 'Uncategorized')}"):
+        with st.expander(f"{status_mark}{q.get('display_order', '')}. {q.get('title', 'Question')} · {q.get('topic', 'Uncategorized')}", expanded=True):
             st.markdown(f"**Topic:** {q.get('topic') or 'Uncategorized'}")
             if st.button("Mark incomplete" if is_completed else "Mark as complete", key=f"infosys_complete_{user_id}_{qid}",
                          type="primary" if not is_completed else "secondary"):
@@ -7843,6 +8046,8 @@ def show_infosys_tab(user_id):
                     supabase.table("infosys_question_progress").upsert(
                         {"user_id": str(user_id), "question_id": qid}, on_conflict="user_id,question_id"
                     ).execute()
+                st.session_state.user_page = "Infosys"
+                st.query_params["lms_page"] = "Infosys"
                 st.rerun()
             if q.get("source_status"):
                 st.caption(f"Workbook status: {q['source_status']}")
@@ -7887,6 +8092,8 @@ def show_infosys_tab(user_id):
                         }, on_conflict="object_path").execute()
                         saved_count += 1
                     st.success(f"Notes saved. {saved_count} image(s) saved.")
+                    st.session_state.user_page = "Infosys"
+                    st.query_params["lms_page"] = "Infosys"
                     st.rerun()
                 except Exception as exc:
                     st.error(f"Could not save notes or images: {exc}")
@@ -8102,6 +8309,10 @@ def user_dashboard(preview_mode=False):
     # Restore its page explicitly so a new Streamlit session does not land on My Classes.
     if not preview_mode:
         try:
+            saved_lms_page = str(st.query_params.get("lms_page", "")).strip()
+            valid_lms_pages = ["My Classes", "Exams", "Interviews", "AI Mock Interview", "Notes", "Feedback", "Progress", "Code Practice", "LeetCode", "Infosys", "Java Solutions", "Group Chat", "Attendance", "Suprabhatam"]
+            if saved_lms_page in valid_lms_pages:
+                st.session_state.user_page = saved_lms_page
             if str(st.query_params.get("comm_exam", "")) == "1" or st.query_params.get("comm_exam_id", ""):
                 st.session_state.user_page = "AI Mock Interview"
             elif st.query_params.get("assigned_interview", ""):
@@ -8129,6 +8340,7 @@ def user_dashboard(preview_mode=False):
                     type="primary" if st.session_state.user_page == pg else "secondary",
                     key=f"nav_{pg}"):
                 st.session_state.user_page = pg
+                st.query_params["lms_page"] = pg
                 st.rerun()
         user_page = st.session_state.user_page
         # Mark today's attendance on every login
@@ -8149,7 +8361,7 @@ def user_dashboard(preview_mode=False):
     if user_page == "Interviews":
         show_student_interviews_tab(st.session_state.user_id); return
     if user_page == "Notes":
-        show_notes_page(); return
+        show_notes_page(st.session_state.user_id); return
     if user_page == "Feedback":
         show_feedback_page(st.session_state.user_id); return
     if user_page in ["Java Practice", "Code Practice"]:
