@@ -5040,14 +5040,15 @@ def build_infosys_notes_pdf(entries):
                     pass
         return ImageFont.load_default()
 
-    title_font, heading_font, body_font, small_font = get_font(38, True), get_font(30, True), get_font(24), get_font(19)
+    title_font, heading_font, body_font, small_font = get_font(46, True), get_font(36, True), get_font(30), get_font(24)
     pages = []
     page = None
     draw = None
     y = 0
+    page_image_count = 0
 
     def new_page():
-        nonlocal page, draw, y
+        nonlocal page, draw, y, page_image_count
         if page is not None:
             pages.append(page)
         page = Image.new("RGB", (width, height), "white")
@@ -5055,6 +5056,7 @@ def build_infosys_notes_pdf(entries):
         draw.text((margin, 45), "Infosys Saved Notes", font=title_font, fill="#18263f")
         draw.line((margin, 100, width - margin, 100), fill="#d7deeb", width=2)
         y = 125
+        page_image_count = 0
 
     def measure(text, font):
         box = draw.textbbox((0, 0), text or " ", font=font)
@@ -5082,11 +5084,12 @@ def build_infosys_notes_pdf(entries):
 
     def add_text(text, font=body_font, color="#28364f", gap=8):
         nonlocal y
+        line_height = max(38, int(getattr(font, "size", 28) * 1.4))
         for line in wrapped(text, font):
-            if y + 38 > height - margin:
+            if y + line_height > height - margin:
                 new_page()
             draw.text((margin, y), line, font=font, fill=color)
-            y += 34
+            y += line_height
         y += gap
 
     new_page()
@@ -5110,12 +5113,13 @@ def build_infosys_notes_pdf(entries):
                 with Image.open(io.BytesIO(image_bytes)) as source:
                     source.seek(0)
                     image = source.convert("RGB")
-                    image.thumbnail((width - 2 * margin, 690))
-                if y + image.height + 70 > height - margin:
+                    image.thumbnail((width - 2 * margin, 540))
+                if page_image_count >= 2 or y + image.height + 70 > height - margin:
                     new_page()
                 add_text(f"Image: {image_record.get('file_name', 'Question image')}", small_font, "#52627a", 5)
                 page.paste(image, (margin, y))
                 y += image.height + 24
+                page_image_count += 1
             except Exception:
                 missing_images += 1
 
@@ -8018,25 +8022,12 @@ def show_infosys_tab(user_id):
     filtered = [q for q in questions if (topic_filter == "All topics" or q.get("topic") == topic_filter)
                 and (not search or search in q.get("title", "").casefold() or search in q.get("topic", "").casefold())]
     st.caption(f"Showing {len(filtered)} of {len(questions)} unique questions")
-    if filtered:
-        active_question_key = f"infosys_active_question_{user_id}"
-        filtered_by_id = {q["question_id"]: q for q in filtered}
-        if st.session_state.get(active_question_key) not in filtered_by_id:
-            saved_question_id = str(st.query_params.get("infosys_question", ""))
-            st.session_state[active_question_key] = saved_question_id if saved_question_id in filtered_by_id else filtered[0]["question_id"]
-        selected_qid = st.selectbox(
-            "Choose question",
-            list(filtered_by_id),
-            format_func=lambda qid: f"{filtered_by_id[qid].get('display_order', '')}. {filtered_by_id[qid].get('title', '')} · {filtered_by_id[qid].get('topic', '')}",
-            key=active_question_key,
-        )
-        st.query_params["infosys_question"] = selected_qid
-        filtered = [filtered_by_id[selected_qid]]
+    active_question_id = str(st.query_params.get("infosys_question", ""))
     for q in filtered:
         qid = q["question_id"]
         is_completed = qid in completed_ids
         status_mark = "✅ " if is_completed else ""
-        with st.expander(f"{status_mark}{q.get('display_order', '')}. {q.get('title', 'Question')} · {q.get('topic', 'Uncategorized')}", expanded=True):
+        with st.expander(f"{status_mark}{q.get('display_order', '')}. {q.get('title', 'Question')} · {q.get('topic', 'Uncategorized')}", expanded=(qid == active_question_id)):
             st.markdown(f"**Topic:** {q.get('topic') or 'Uncategorized'}")
             if st.button("Mark incomplete" if is_completed else "Mark as complete", key=f"infosys_complete_{user_id}_{qid}",
                          type="primary" if not is_completed else "secondary"):
@@ -8048,6 +8039,7 @@ def show_infosys_tab(user_id):
                     ).execute()
                 st.session_state.user_page = "Infosys"
                 st.query_params["lms_page"] = "Infosys"
+                st.query_params["infosys_question"] = qid
                 st.rerun()
             if q.get("source_status"):
                 st.caption(f"Workbook status: {q['source_status']}")
@@ -8094,6 +8086,7 @@ def show_infosys_tab(user_id):
                     st.success(f"Notes saved. {saved_count} image(s) saved.")
                     st.session_state.user_page = "Infosys"
                     st.query_params["lms_page"] = "Infosys"
+                    st.query_params["infosys_question"] = qid
                     st.rerun()
                 except Exception as exc:
                     st.error(f"Could not save notes or images: {exc}")
