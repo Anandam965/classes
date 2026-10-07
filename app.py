@@ -8424,23 +8424,61 @@ create table if not exists public.leetcode_completions (
 """
 
 
-def show_pdf_leetcode_question_list(page_title, questions, key_prefix):
+LEETCODE_PDF_COMPLETION_SCHEMA_SQL = """
+create table if not exists public.leetcode_pdf_completions (
+    user_id uuid not null references public.users(id) on delete cascade,
+    list_type text not null check (list_type in ('top150', 'sql50')),
+    list_no integer not null check (list_no > 0),
+    completed_at timestamptz not null default now(),
+    primary key (user_id, list_type, list_no)
+);
+"""
+
+
+def show_pdf_leetcode_question_list(page_title, questions, list_type, key_prefix, user_id):
     st.title(page_title)
-    st.caption(f"{len(questions)} questions from the attached PDF. Each row shows the LeetCode problem ID and a search fallback.")
+    st.caption(f"{len(questions)} questions from the attached PDF. Mark each one complete to save your progress.")
+    try:
+        completion_rows = supabase.table("leetcode_pdf_completions").select("list_no").eq(
+            "user_id", str(user_id)
+        ).eq("list_type", list_type).execute().data or []
+        completed = {int(row["list_no"]) for row in completion_rows}
+        db_ready = True
+    except Exception as exc:
+        completed = set()
+        db_ready = False
+        st.error(f"Completion table is not ready. Create it in Supabase SQL Editor, then reload. Details: {exc}")
+        st.code(LEETCODE_PDF_COMPLETION_SCHEMA_SQL, language="sql")
+
+    st.progress(len(completed) / max(len(questions), 1), text=f"{len(completed)} of {len(questions)} completed")
     search = st.text_input("Search by question name, LeetCode number, or topic", key=f"{key_prefix}_search").strip().lower()
     filtered = [q for q in questions if not search or search in q["title"].lower() or search in str(q["leetcode_no"]) or search in str(q["list_no"]) or search in q["category"].lower()]
     st.caption(f"Showing {len(filtered)} of {len(questions)} questions")
     for q in filtered:
         number = int(q["leetcode_no"])
+        list_no = int(q["list_no"])
+        done = list_no in completed
         slug = re.sub(r"[^a-z0-9]+", "-", q["title"].lower()).strip("-")
         direct_url = f"https://leetcode.com/problems/{slug}/"
-        search_text = f"LeetCode problem {number} {q['title']}"
+        search_text = f"site:leetcode.com/problems {number} {q['title']}"
         search_url = "https://www.google.com/search?q=" + requests.utils.quote(search_text)
         with st.container(border=True):
-            left, direct, fallback = st.columns([7, 2, 2])
-            left.markdown(f"**{q['list_no']}. {q['title']}**  \nLeetCode **#{number}** · {q['category']}")
+            left, direct, fallback, status = st.columns([6.5, 1.8, 1.8, 2.4])
+            left.markdown(str(list_no) + ". " + q["title"] + " | LeetCode #" + str(number) + " | " + q["category"])
             direct.link_button("Open #" + str(number), direct_url, use_container_width=True)
             fallback.link_button("Search #" + str(number), search_url, use_container_width=True)
+            if status.button("Done" if done else "Mark complete", key=f"{key_prefix}_complete_{user_id}_{list_no}",
+                             use_container_width=True, type="primary" if done else "secondary", disabled=not db_ready):
+                if done:
+                    supabase.table("leetcode_pdf_completions").delete().eq("user_id", str(user_id)).eq(
+                        "list_type", list_type
+                    ).eq("list_no", list_no).execute()
+                else:
+                    supabase.table("leetcode_pdf_completions").upsert(
+                        {"user_id": str(user_id), "list_type": list_type, "list_no": list_no},
+                        on_conflict="user_id,list_type,list_no",
+                    ).execute()
+                st.rerun()
 
 
 def show_leetcode_db_tab(user_id):
@@ -8594,9 +8632,9 @@ def user_dashboard(preview_mode=False):
     if user_page == "LeetCode":
         show_leetcode_db_tab(st.session_state.user_id); return
     if user_page == "Top 150":
-        show_pdf_leetcode_question_list("Top 150", TOP_150_DSA_QUESTIONS, "top_150"); return
+        show_pdf_leetcode_question_list("Top 150", TOP_150_DSA_QUESTIONS, "top150", "top_150", st.session_state.user_id); return
     if user_page == "SQL 50":
-        show_pdf_leetcode_question_list("SQL 50", SQL_50_QUESTIONS, "sql_50"); return
+        show_pdf_leetcode_question_list("SQL 50", SQL_50_QUESTIONS, "sql50", "sql_50", st.session_state.user_id); return
     if user_page == "Infosys":
         show_infosys_tab(st.session_state.user_id); return
     if user_page == "Java Solutions":
