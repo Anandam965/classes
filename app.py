@@ -8199,6 +8199,212 @@ LEETCODE_TOPICS = {
     50: "Arrays · Dynamic Programming · Two Pointers",
 }
 
+TOP_150_DSA_QUESTIONS = [
+    {'list_no': 1, 'title': 'Two Sum', 'leetcode_no': 1, 'category': 'DSA'},
+    {'list_no': 2, 'title': 'Contains Duplicate', 'leetcode_no': 217, 'category': 'DSA'},
+    {'list_no': 3, 'title': 'Valid Anagram', 'leetcode_no': 242, 'category': 'DSA'},
+    {'list_no': 4, 'title': 'Group Anagrams', 'leetcode_no': 49, 'category': 'DSA'},
+    {'list_no': 5, 'title': 'Top K Frequent Elements', 'leetcode_no': 347, 'category': 'DSA'},
+    {'list_no': 6, 'title': 'Product of Array Except Self', 'leetcode_no': 238, 'category': 'DSA'},
+    {'list_no': 7, 'title': 'Valid Sudoku', 'leetcode_no': 36, 'category': 'DSA'},
+    {'list_no': 8, 'title': 'Longest Consecutive Sequence', 'leetcode_no': 128, 'category': 'DSA'},
+    {'list_no': 9, 'title': 'Majority Element', 'leetcode_no': 169, 'category': 'DSA'},
+    {'list_no': 10, 'title': 'Remove Element', 'leetcode_no': 27, 'category': 'DSA'},
+    {'list_no': 11, 'title': 'Remove Duplicates from Sorted Array', 'leetcode_no': 26, 'category': 'DSA'},
+    {'list_no': 12, 'title': 'Remove Duplicates from Sorted Array II', 'leetcode_no': 80, 'category': 'DSA'},
+    {'list_no': 13, 'title': 'Rotate Array', 'leetcode_no': 189, 'category': 'DSA'},
+    {'list_no': 14, 'title': 'H-Index', 'leetcode_no': 274, 'category': 'DSA'},
+    {'list_no': 15, 'title': 'Problem Name', 'leetcode_no': 380, 'category': 'DSA'},
+    {'list_no': 16, 'title': 'Valid Palindrome', 'leetcode_no': 125, 'category': 'DSA'},
+    {'list_no': 17, 'title': 'Is Subsequence', 'leetcode_no': 392, 'category': 'DSA'},
+    {'list_no': 18, 'title': 'Two Sum II  Input Array Is Sorted', 'leetcode_no': 167, 'category': 'DSA'},
+    {'list_no': 19, 'title': 'Container With Most Water', 'leetcode_no': 11, 'category': 'DSA'},
+    {'list_no': 20, 'title': '3Sum', 'leetcode_no': 15, 'category': 'DSA'},
+    {'list_no': 21, 'title': 'Trapping Rain Water', 'leetcode_no': 42, 'category': 'DSA'},
+    {'list_no': 22, 'title': 'Reverse Words in a String', 'leetcode_no': 151, 'category': 'DSA'},
+    {'list_no': 23, 'title': 'Zigzag Conversion', 'leetcode_no': 6, 'category': 'DSA'},
+    {'list_no': 24, 'title': 'Longest Common Prefix', 'leetcode_no': 14, 'category': 'DSA'},
+    {'list_no': 25, 'title': 'Problem Name', 'leetcode_no': 28, 'category': 'DSA'},
+    {'list_no': 26, 'title': 'Best Time to Buy and Sell Stock', 'leetcode_no': 121, 'category': 'DSA'},
+    {'list_no': 27, 'title': 'Longest Substring Without Repeating Characters', 'leetcode_no': 3, 'category': 'DSA'},
+    {'list_no': 28, 'title': 'Longest Repeating Character Replacement', 'leetcode_no': 424, 'category': 'DSA'},
+    {'list_no': 29, 'title': 'Permutation in String', 'leetcode_no': 567, 'category': 'DSA'},
+    {'list_no': 30, 'title': 'Minimum Window Substring', 'leetcode_no': 76, 'category': 'DSA'},
+    {'list_no': 31, 'title': 'Problem Name', 'leetcode_no': 239, 'category': 'DSA'},
+    {'list_no': 32, 'title': 'Valid Sudoku', 'leetcode_no': 36, 'category': 'DSA'},
+    {'list_no': 33, 'title': 'Spiral Matrix', 'leetcode_no': 54, 'category': 'DSA'},
+    {'list_no': 34, 'title': 'Rotate Image', 'leetcode_no': 48, 'category': 'DSA'},
+    {'list_no': 35, 'title': 'Set Matrix Zeroes', 'leetcode_no': 73, 'category': 'DSA'},
+    {'list_no': 36, 'title': 'Problem Name', 'leetcode_no': 289, 'category': 'DSA'},
+    {'list_no': 37, 'title': 'Valid Parentheses', 'leetcode_no': 20, 'category': 'DSA'},
+    {'list_no': 38, 'title': 'Min Stack', 'leetcode_no': 155, 'category': 'DSA'},
+    {'list_no': 39, 'title': 'Evaluate Reverse Polish Notation', 'leetcode_no': 150, 'category': 'DSA'},
+    {'list_no': 40, 'title': 'Generate Parentheses', 'leetcode_no': 22, 'category': 'DSA'},
+    {'list_no': 41, 'title': 'Daily Temperatures', 'leetcode_no': 739, 'category': 'DSA'},
+    {'list_no': 42, 'title': 'Car Fleet', 'leetcode_no': 853, 'category': 'DSA'},
+    {'list_no': 43, 'title': 'Largest Rectangle in Histogram', 'leetcode_no': 84, 'category': 'DSA'},
+    {'list_no': 44, 'title': 'Problem Name', 'leetcode_no': 224, 'category': 'DSA'},
+    {'list_no': 45, 'title': 'Binary Search', 'leetcode_no': 704, 'category': 'DSA'},
+    {'list_no': 46, 'title': 'Search a 2D Matrix', 'leetcode_no': 74, 'category': 'DSA'},
+    {'list_no': 47, 'title': 'Search in Rotated Sorted Array', 'leetcode_no': 33, 'category': 'DSA'},
+    {'list_no': 48, 'title': 'Find Minimum in Rotated Sorted Array', 'leetcode_no': 153, 'category': 'DSA'},
+    {'list_no': 49, 'title': 'Find Peak Element', 'leetcode_no': 162, 'category': 'DSA'},
+    {'list_no': 50, 'title': 'Koko Eating Bananas', 'leetcode_no': 875, 'category': 'DSA'},
+    {'list_no': 51, 'title': 'Problem Name', 'leetcode_no': 4, 'category': 'DSA'},
+    {'list_no': 52, 'title': 'Reverse Linked List', 'leetcode_no': 206, 'category': 'DSA'},
+    {'list_no': 53, 'title': 'Merge Two Sorted Lists', 'leetcode_no': 21, 'category': 'DSA'},
+    {'list_no': 54, 'title': 'Reorder List', 'leetcode_no': 143, 'category': 'DSA'},
+    {'list_no': 55, 'title': 'Remove Nth Node From End of List', 'leetcode_no': 19, 'category': 'DSA'},
+    {'list_no': 56, 'title': 'Copy List with Random Pointer', 'leetcode_no': 138, 'category': 'DSA'},
+    {'list_no': 57, 'title': 'Add Two Numbers', 'leetcode_no': 2, 'category': 'DSA'},
+    {'list_no': 58, 'title': 'Linked List Cycle', 'leetcode_no': 141, 'category': 'DSA'},
+    {'list_no': 59, 'title': 'Linked List Cycle II', 'leetcode_no': 142, 'category': 'DSA'},
+    {'list_no': 60, 'title': 'Intersection of Two Linked Lists', 'leetcode_no': 160, 'category': 'DSA'},
+    {'list_no': 61, 'title': 'LRU Cache', 'leetcode_no': 146, 'category': 'DSA'},
+    {'list_no': 62, 'title': 'Problem Name', 'leetcode_no': 25, 'category': 'DSA'},
+    {'list_no': 63, 'title': 'Maximum Depth of Binary Tree', 'leetcode_no': 104, 'category': 'DSA'},
+    {'list_no': 64, 'title': 'Same Tree', 'leetcode_no': 100, 'category': 'DSA'},
+    {'list_no': 65, 'title': 'Invert Binary Tree', 'leetcode_no': 226, 'category': 'DSA'},
+    {'list_no': 66, 'title': 'Binary Tree Maximum Path Sum', 'leetcode_no': 124, 'category': 'DSA'},
+    {'list_no': 67, 'title': 'Diameter of Binary Tree', 'leetcode_no': 543, 'category': 'DSA'},
+    {'list_no': 68, 'title': 'Balanced Binary Tree', 'leetcode_no': 110, 'category': 'DSA'},
+    {'list_no': 69, 'title': 'Subtree of Another Tree', 'leetcode_no': 572, 'category': 'DSA'},
+    {'list_no': 70, 'title': 'Construct Binary Tree from Preorder and Inorder Traversal', 'leetcode_no': 105, 'category': 'DSA'},
+    {'list_no': 71, 'title': 'Binary Tree Level Order Traversal', 'leetcode_no': 102, 'category': 'DSA'},
+    {'list_no': 72, 'title': 'Binary Tree Right Side View', 'leetcode_no': 199, 'category': 'DSA'},
+    {'list_no': 73, 'title': 'Count Good Nodes in Binary Tree', 'leetcode_no': 1448, 'category': 'DSA'},
+    {'list_no': 74, 'title': 'Validate Binary Search Tree', 'leetcode_no': 98, 'category': 'DSA'},
+    {'list_no': 75, 'title': 'Kth Smallest Element in a BST', 'leetcode_no': 230, 'category': 'DSA'},
+    {'list_no': 76, 'title': 'Lowest Common Ancestor of a BST', 'leetcode_no': 235, 'category': 'DSA'},
+    {'list_no': 77, 'title': 'Problem Name', 'leetcode_no': 297, 'category': 'DSA'},
+    {'list_no': 78, 'title': 'Implement Trie (Prefix Tree)', 'leetcode_no': 208, 'category': 'DSA'},
+    {'list_no': 79, 'title': 'Design Add and Search Words Data Structure', 'leetcode_no': 211, 'category': 'DSA'},
+    {'list_no': 80, 'title': 'Problem Name', 'leetcode_no': 212, 'category': 'DSA'},
+    {'list_no': 81, 'title': 'Kth Largest Element in an Array', 'leetcode_no': 215, 'category': 'DSA'},
+    {'list_no': 82, 'title': 'K Closest Points to Origin', 'leetcode_no': 973, 'category': 'DSA'},
+    {'list_no': 83, 'title': 'Kth Smallest Element in a Sorted Matrix', 'leetcode_no': 378, 'category': 'DSA'},
+    {'list_no': 84, 'title': 'Problem Name', 'leetcode_no': 295, 'category': 'DSA'},
+    {'list_no': 85, 'title': 'Subsets', 'leetcode_no': 78, 'category': 'DSA'},
+    {'list_no': 86, 'title': 'Combination Sum', 'leetcode_no': 39, 'category': 'DSA'},
+    {'list_no': 87, 'title': 'Permutations', 'leetcode_no': 46, 'category': 'DSA'},
+    {'list_no': 88, 'title': 'Subsets II', 'leetcode_no': 90, 'category': 'DSA'},
+    {'list_no': 89, 'title': 'Combination Sum II', 'leetcode_no': 40, 'category': 'DSA'},
+    {'list_no': 90, 'title': 'Word Search', 'leetcode_no': 79, 'category': 'DSA'},
+    {'list_no': 91, 'title': 'Palindrome Partitioning', 'leetcode_no': 131, 'category': 'DSA'},
+    {'list_no': 92, 'title': 'Letter Combinations of a Phone Number', 'leetcode_no': 17, 'category': 'DSA'},
+    {'list_no': 93, 'title': 'Problem Name', 'leetcode_no': 51, 'category': 'DSA'},
+    {'list_no': 94, 'title': 'Number of Islands', 'leetcode_no': 200, 'category': 'DSA'},
+    {'list_no': 95, 'title': 'Clone Graph', 'leetcode_no': 133, 'category': 'DSA'},
+    {'list_no': 96, 'title': 'Max Area of Island', 'leetcode_no': 695, 'category': 'DSA'},
+    {'list_no': 97, 'title': 'Pacific Atlantic Water Flow', 'leetcode_no': 417, 'category': 'DSA'},
+    {'list_no': 98, 'title': 'Surrounded Regions', 'leetcode_no': 130, 'category': 'DSA'},
+    {'list_no': 99, 'title': 'Rotting Oranges', 'leetcode_no': 994, 'category': 'DSA'},
+    {'list_no': 100, 'title': 'Course Schedule', 'leetcode_no': 207, 'category': 'DSA'},
+    {'list_no': 101, 'title': 'Course Schedule II', 'leetcode_no': 210, 'category': 'DSA'},
+    {'list_no': 102, 'title': 'Graph Valid Tree', 'leetcode_no': 261, 'category': 'DSA'},
+    {'list_no': 103, 'title': 'Number of Connected Components', 'leetcode_no': 323, 'category': 'DSA'},
+    {'list_no': 104, 'title': 'Problem Name', 'leetcode_no': 127, 'category': 'DSA'},
+    {'list_no': 105, 'title': 'Reconstruct Itinerary', 'leetcode_no': 332, 'category': 'DSA'},
+    {'list_no': 106, 'title': 'Min Cost to Connect All Points', 'leetcode_no': 1584, 'category': 'DSA'},
+    {'list_no': 107, 'title': 'Network Delay Time', 'leetcode_no': 743, 'category': 'DSA'},
+    {'list_no': 108, 'title': 'Swim in Rising Water', 'leetcode_no': 778, 'category': 'DSA'},
+    {'list_no': 109, 'title': 'Alien Dictionary', 'leetcode_no': 269, 'category': 'DSA'},
+    {'list_no': 110, 'title': 'Problem Name', 'leetcode_no': 787, 'category': 'DSA'},
+    {'list_no': 111, 'title': 'Climbing Stairs', 'leetcode_no': 70, 'category': 'DSA'},
+    {'list_no': 112, 'title': 'Min Cost Climbing Stairs', 'leetcode_no': 746, 'category': 'DSA'},
+    {'list_no': 113, 'title': 'House Robber', 'leetcode_no': 198, 'category': 'DSA'},
+    {'list_no': 114, 'title': 'House Robber II', 'leetcode_no': 213, 'category': 'DSA'},
+    {'list_no': 115, 'title': 'Longest Palindromic Substring', 'leetcode_no': 5, 'category': 'DSA'},
+    {'list_no': 116, 'title': 'Palindromic Substrings', 'leetcode_no': 647, 'category': 'DSA'},
+    {'list_no': 117, 'title': 'Decode Ways', 'leetcode_no': 91, 'category': 'DSA'},
+    {'list_no': 118, 'title': 'Coin Change', 'leetcode_no': 322, 'category': 'DSA'},
+    {'list_no': 119, 'title': 'Maximum Product Subarray', 'leetcode_no': 152, 'category': 'DSA'},
+    {'list_no': 120, 'title': 'Word Break', 'leetcode_no': 139, 'category': 'DSA'},
+    {'list_no': 121, 'title': 'Longest Increasing Subsequence', 'leetcode_no': 300, 'category': 'DSA'},
+    {'list_no': 122, 'title': 'Partition Equal Subset Sum', 'leetcode_no': 416, 'category': 'DSA'},
+    {'list_no': 123, 'title': 'Unique Paths', 'leetcode_no': 62, 'category': 'DSA'},
+    {'list_no': 124, 'title': 'Longest Common Subsequence', 'leetcode_no': 1143, 'category': 'DSA'},
+    {'list_no': 125, 'title': 'Best Time to Buy and Sell Stock with Cooldown', 'leetcode_no': 309, 'category': 'DSA'},
+    {'list_no': 126, 'title': 'Coin Change II', 'leetcode_no': 518, 'category': 'DSA'},
+    {'list_no': 127, 'title': 'Target Sum', 'leetcode_no': 494, 'category': 'DSA'},
+    {'list_no': 128, 'title': 'Interleaving String', 'leetcode_no': 97, 'category': 'DSA'},
+    {'list_no': 129, 'title': 'Longest Increasing Path in a Matrix', 'leetcode_no': 329, 'category': 'DSA'},
+    {'list_no': 130, 'title': 'Distinct Subsequences', 'leetcode_no': 115, 'category': 'DSA'},
+    {'list_no': 131, 'title': 'Edit Distance', 'leetcode_no': 72, 'category': 'DSA'},
+    {'list_no': 132, 'title': 'Burst Balloons', 'leetcode_no': 312, 'category': 'DSA'},
+    {'list_no': 133, 'title': 'Problem Name', 'leetcode_no': 10, 'category': 'DSA'},
+    {'list_no': 134, 'title': 'Maximum Subarray', 'leetcode_no': 53, 'category': 'DSA'},
+    {'list_no': 135, 'title': 'Jump Game', 'leetcode_no': 55, 'category': 'DSA'},
+    {'list_no': 136, 'title': 'Jump Game II', 'leetcode_no': 45, 'category': 'DSA'},
+    {'list_no': 137, 'title': 'Gas Station', 'leetcode_no': 134, 'category': 'DSA'},
+    {'list_no': 138, 'title': 'Hand of Straights', 'leetcode_no': 846, 'category': 'DSA'},
+    {'list_no': 139, 'title': 'Partition Labels', 'leetcode_no': 763, 'category': 'DSA'},
+    {'list_no': 140, 'title': 'Insert Interval', 'leetcode_no': 57, 'category': 'DSA'},
+    {'list_no': 141, 'title': 'Problem Name', 'leetcode_no': 56, 'category': 'DSA'},
+    {'list_no': 142, 'title': 'Happy Number', 'leetcode_no': 202, 'category': 'DSA'},
+    {'list_no': 143, 'title': 'Plus One', 'leetcode_no': 66, 'category': 'DSA'},
+    {'list_no': 144, 'title': 'Pow(x, n)', 'leetcode_no': 50, 'category': 'DSA'},
+    {'list_no': 145, 'title': 'Multiply Strings', 'leetcode_no': 43, 'category': 'DSA'},
+    {'list_no': 146, 'title': 'Single Number', 'leetcode_no': 136, 'category': 'DSA'},
+    {'list_no': 147, 'title': 'Number of 1 Bits', 'leetcode_no': 191, 'category': 'DSA'},
+    {'list_no': 148, 'title': 'Counting Bits', 'leetcode_no': 338, 'category': 'DSA'},
+    {'list_no': 149, 'title': 'Reverse Bits', 'leetcode_no': 190, 'category': 'DSA'},
+    {'list_no': 150, 'title': 'Missing Number', 'leetcode_no': 268, 'category': 'DSA'},
+]
+
+SQL_50_QUESTIONS = [
+    {'list_no': 1, 'title': 'Recyclable and Low Fat Products', 'leetcode_no': 1757, 'category': 'SELECT / WHERE'},
+    {'list_no': 2, 'title': 'Find Customer Referee', 'leetcode_no': 584, 'category': 'WHERE'},
+    {'list_no': 3, 'title': 'Big Countries', 'leetcode_no': 595, 'category': 'WHERE'},
+    {'list_no': 4, 'title': 'Article Views I', 'leetcode_no': 1148, 'category': 'DISTINCT'},
+    {'list_no': 5, 'title': 'Invalid Tweets', 'leetcode_no': 1683, 'category': 'String Functions'},
+    {'list_no': 6, 'title': 'Replace Employee ID With The Unique Identifier', 'leetcode_no': 1378, 'category': 'JOIN'},
+    {'list_no': 7, 'title': 'Product Sales Analysis I', 'leetcode_no': 1068, 'category': 'JOIN'},
+    {'list_no': 8, 'title': 'Customer Who Visited but Did Not Make Any Transactions', 'leetcode_no': 1581, 'category': 'JOIN'},
+    {'list_no': 9, 'title': 'Rising Temperature', 'leetcode_no': 197, 'category': 'Self Join'},
+    {'list_no': 10, 'title': 'Problem Name', 'leetcode_no': 1661, 'category': 'Category'},
+    {'list_no': 11, 'title': 'Employee Bonus', 'leetcode_no': 577, 'category': 'JOIN'},
+    {'list_no': 12, 'title': 'Students and Examinations', 'leetcode_no': 1280, 'category': 'JOIN / GROUP BY'},
+    {'list_no': 13, 'title': 'Managers with at Least 5 Direct Reports', 'leetcode_no': 570, 'category': 'GROUP BY'},
+    {'list_no': 14, 'title': 'Confirmation Rate', 'leetcode_no': 1934, 'category': 'GROUP BY'},
+    {'list_no': 15, 'title': 'Not Boring Movies', 'leetcode_no': 620, 'category': 'WHERE / MOD'},
+    {'list_no': 16, 'title': 'Average Selling Price', 'leetcode_no': 1251, 'category': 'JOIN / AVG'},
+    {'list_no': 17, 'title': 'Project Employees I', 'leetcode_no': 1075, 'category': 'GROUP BY'},
+    {'list_no': 18, 'title': 'Percentage of Users Attended a Contest', 'leetcode_no': 1633, 'category': 'GROUP BY'},
+    {'list_no': 19, 'title': 'Queries Quality and Percentage', 'leetcode_no': 1211, 'category': 'GROUP BY'},
+    {'list_no': 20, 'title': 'Problem Name', 'leetcode_no': 1193, 'category': 'Category'},
+    {'list_no': 21, 'title': 'Combine Two Tables', 'leetcode_no': 175, 'category': 'LEFT JOIN'},
+    {'list_no': 22, 'title': 'Employees Earning More Than Their Managers', 'leetcode_no': 181, 'category': 'SELF JOIN'},
+    {'list_no': 23, 'title': 'Duplicate Emails', 'leetcode_no': 182, 'category': 'GROUP BY'},
+    {'list_no': 24, 'title': 'Customers Who Never Order', 'leetcode_no': 183, 'category': 'LEFT JOIN'},
+    {'list_no': 25, 'title': 'Department Highest Salary', 'leetcode_no': 184, 'category': 'JOIN / MAX'},
+    {'list_no': 26, 'title': 'Department Top Three Salaries', 'leetcode_no': 185, 'category': 'JOIN / DENSE_RANK'},
+    {'list_no': 27, 'title': 'Delete Duplicate Emails', 'leetcode_no': 196, 'category': 'DELETE'},
+    {'list_no': 28, 'title': 'Second Highest Salary', 'leetcode_no': 176, 'category': 'SUBQUERY'},
+    {'list_no': 29, 'title': 'Nth Highest Salary', 'leetcode_no': 177, 'category': 'FUNCTION / SUBQUERY'},
+    {'list_no': 30, 'title': 'Rank Scores', 'leetcode_no': 178, 'category': 'DENSE_RANK'},
+    {'list_no': 31, 'title': 'Department Top Three Salaries', 'leetcode_no': 185, 'category': 'DENSE_RANK'},
+    {'list_no': 32, 'title': 'Consecutive Numbers', 'leetcode_no': 180, 'category': 'Window / LAG'},
+    {'list_no': 33, 'title': 'Exchange Seats', 'leetcode_no': 626, 'category': 'CASE'},
+    {'list_no': 34, 'title': 'Tree Node', 'leetcode_no': 608, 'category': 'CASE'},
+    {'list_no': 35, 'title': 'Human Traffic of Stadium', 'leetcode_no': 601, 'category': 'Window Functions'},
+    {'list_no': 36, 'title': 'Trips and Users', 'leetcode_no': 262, 'category': 'GROUP BY'},
+    {'list_no': 37, 'title': 'Game Play Analysis IV', 'leetcode_no': 550, 'category': 'Subquery'},
+    {'list_no': 38, 'title': 'Immediate Food Delivery II', 'leetcode_no': 1174, 'category': 'Subquery'},
+    {'list_no': 39, 'title': 'Restaurant Growth', 'leetcode_no': 1321, 'category': 'Window Function'},
+    {'list_no': 40, 'title': 'Problem Name', 'leetcode_no': 1204, 'category': 'Category'},
+    {'list_no': 41, 'title': 'Product Price at a Given Date', 'leetcode_no': 1164, 'category': 'Window / MAX'},
+    {'list_no': 42, 'title': 'First Letter Capitalization', 'leetcode_no': 1667, 'category': 'String'},
+    {'list_no': 43, 'title': 'Customers Who Bought All Products', 'leetcode_no': 1045, 'category': 'GROUP BY / HAVING'},
+    {'list_no': 44, 'title': 'Biggest Single Number', 'leetcode_no': 619, 'category': 'GROUP BY'},
+    {'list_no': 45, 'title': 'Classes More Than 5 Students', 'leetcode_no': 596, 'category': 'GROUP BY / HAVING'},
+    {'list_no': 46, 'title': 'Find Followers Count', 'leetcode_no': 1729, 'category': 'GROUP BY'},
+    {'list_no': 47, 'title': 'The Number of Employees Which Report to Each Employee', 'leetcode_no': 1731, 'category': 'SELF JOIN'},
+    {'list_no': 48, 'title': 'Primary Department for Each Employee', 'leetcode_no': 1789, 'category': 'GROUP BY'},
+    {'list_no': 49, 'title': 'Fix Names in a Table', 'leetcode_no': 1667, 'category': 'String Functions'},
+    {'list_no': 50, 'title': 'Game Play Analysis IV', 'leetcode_no': 550, 'category': 'Subquery'},
+]
+
 LEETCODE_SCHEMA_SQL = """
 create table if not exists public.leetcode_questions (
     question_no integer primary key,
@@ -8216,6 +8422,25 @@ create table if not exists public.leetcode_completions (
     primary key (user_id, question_no)
 );
 """
+
+
+def show_pdf_leetcode_question_list(page_title, questions, key_prefix):
+    st.title(page_title)
+    st.caption(f"{len(questions)} questions from the attached PDF. Each row shows the LeetCode problem ID and a search fallback.")
+    search = st.text_input("Search by question name, LeetCode number, or topic", key=f"{key_prefix}_search").strip().lower()
+    filtered = [q for q in questions if not search or search in q["title"].lower() or search in str(q["leetcode_no"]) or search in str(q["list_no"]) or search in q["category"].lower()]
+    st.caption(f"Showing {len(filtered)} of {len(questions)} questions")
+    for q in filtered:
+        number = int(q["leetcode_no"])
+        slug = re.sub(r"[^a-z0-9]+", "-", q["title"].lower()).strip("-")
+        direct_url = f"https://leetcode.com/problems/{slug}/"
+        search_text = f"LeetCode problem {number} {q['title']}"
+        search_url = "https://www.google.com/search?q=" + requests.utils.quote(search_text)
+        with st.container(border=True):
+            left, direct, fallback = st.columns([7, 2, 2])
+            left.markdown(f"**{q['list_no']}. {q['title']}**  \nLeetCode **#{number}** · {q['category']}")
+            direct.link_button("Open #" + str(number), direct_url, use_container_width=True)
+            fallback.link_button("Search #" + str(number), search_url, use_container_width=True)
 
 
 def show_leetcode_db_tab(user_id):
@@ -8303,7 +8528,7 @@ def user_dashboard(preview_mode=False):
     if not preview_mode:
         try:
             saved_lms_page = str(st.query_params.get("lms_page", "")).strip()
-            valid_lms_pages = ["My Classes", "Exams", "Interviews", "AI Mock Interview", "Notes", "Feedback", "Progress", "Code Practice", "LeetCode", "Infosys", "Java Solutions", "Group Chat", "Attendance", "Suprabhatam"]
+            valid_lms_pages = ["My Classes", "Exams", "Interviews", "AI Mock Interview", "Notes", "Feedback", "Progress", "Code Practice", "LeetCode", "Top 150", "SQL 50", "Infosys", "Java Solutions", "Group Chat", "Attendance", "Suprabhatam"]
             if saved_lms_page in valid_lms_pages:
                 st.session_state.user_page = saved_lms_page
             if str(st.query_params.get("comm_exam", "")) == "1" or st.query_params.get("comm_exam_id", ""):
@@ -8320,7 +8545,7 @@ def user_dashboard(preview_mode=False):
                 st.session_state[key] = defaults[key]
             show_logout_redirect()
         st.sidebar.divider()
-        pages = ["My Classes", "Exams", "Interviews", "AI Mock Interview", "Notes", "Feedback", "Progress", "Code Practice", "LeetCode", "Infosys", "Java Solutions", "Group Chat", "Attendance"]
+        pages = ["My Classes", "Exams", "Interviews", "AI Mock Interview", "Notes", "Feedback", "Progress", "Code Practice", "LeetCode", "Top 150", "SQL 50", "Infosys", "Java Solutions", "Group Chat", "Attendance"]
         if user_has_suprabhatam_access(st.session_state.user_id):
             pages.append("Suprabhatam")
         for pg in pages:
@@ -8368,6 +8593,10 @@ def user_dashboard(preview_mode=False):
         show_attendance_tab(st.session_state.user_id); return
     if user_page == "LeetCode":
         show_leetcode_db_tab(st.session_state.user_id); return
+    if user_page == "Top 150":
+        show_pdf_leetcode_question_list("Top 150", TOP_150_DSA_QUESTIONS, "top_150"); return
+    if user_page == "SQL 50":
+        show_pdf_leetcode_question_list("SQL 50", SQL_50_QUESTIONS, "sql_50"); return
     if user_page == "Infosys":
         show_infosys_tab(st.session_state.user_id); return
     if user_page == "Java Solutions":
