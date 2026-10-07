@@ -74,6 +74,15 @@ html, body, [class*="css"] { font-family:Inter, ui-sans-serif, system-ui, -apple
 [data-testid="stSidebar"] button:hover { background:rgba(255,255,255,.1); color:#fff; transform:none; }
 [data-testid="stSidebar"] button[kind="primary"] { background:rgba(87,126,255,.28); border-color:rgba(151,173,255,.32); color:#fff; }
 
+/* Make sidebar button labels readable on their light button surfaces. */
+[data-testid="stSidebar"] .stButton > button,
+[data-testid="stSidebar"] .stButton > button p,
+[data-testid="stSidebar"] .stButton > button span { color:#26354e!important; }
+[data-testid="stSidebar"] .stButton > button[kind="primary"],
+[data-testid="stSidebar"] .stButton > button[kind="primary"] p,
+[data-testid="stSidebar"] .stButton > button[kind="primary"] span { color:#fff!important; }
+
+
 /* Typography and actions */
 h1,h2,h3 { color:var(--ink); letter-spacing:-.035em; }
 h1 { font-size:clamp(1.75rem,3vw,2.45rem)!important; font-weight:800!important; }
@@ -8560,6 +8569,16 @@ def show_leetcode_tab(user_id):
                 st.rerun()
 
 
+USER_NAVIGATION_PREFERENCES_SCHEMA_SQL = """
+create table if not exists public.user_navigation_preferences (
+    user_id uuid primary key references public.users(id) on delete cascade,
+    favorite_pages text[] not null default array['My Classes', 'LeetCode', 'Top 150', 'SQL 50']::text[],
+    home_page text not null default 'My Classes',
+    updated_at timestamptz not null default now()
+);
+"""
+
+
 def user_dashboard(preview_mode=False):
     # Timed communication exam can return through a browser URL after time-out.
     # Restore its page explicitly so a new Streamlit session does not land on My Classes.
@@ -8586,18 +8605,72 @@ def user_dashboard(preview_mode=False):
         pages = ["My Classes", "Exams", "Interviews", "AI Mock Interview", "Notes", "Feedback", "Progress", "Code Practice", "LeetCode", "Top 150", "SQL 50", "Infosys", "Java Solutions", "Group Chat", "Attendance"]
         if user_has_suprabhatam_access(st.session_state.user_id):
             pages.append("Suprabhatam")
-        for pg in pages:
-            if pg == "Group Chat":
-                unread = get_unread_count(st.session_state.user_id)
-                label = f"Group Chat ({unread})" if unread > 0 else "Group Chat"
-            else:
-                label = pg
+
+        default_favorites = ["My Classes", "LeetCode", "Top 150", "SQL 50"]
+        navigation_preferences = {}
+        nav_preferences_ready = True
+        try:
+            preference_rows = supabase.table("user_navigation_preferences").select(
+                "favorite_pages,home_page"
+            ).eq("user_id", str(st.session_state.user_id)).limit(1).execute().data or []
+            if preference_rows:
+                navigation_preferences = preference_rows[0]
+        except Exception as exc:
+            nav_preferences_ready = False
+            st.sidebar.info("Create the navigation preferences table to save your tab choices between visits.")
+            st.sidebar.code(USER_NAVIGATION_PREFERENCES_SCHEMA_SQL, language="sql")
+
+        saved_favorites = navigation_preferences.get("favorite_pages") or default_favorites
+        saved_favorites = [page for page in saved_favorites if page in pages]
+        if not saved_favorites:
+            saved_favorites = default_favorites
+        saved_home_page = navigation_preferences.get("home_page", "My Classes")
+        if saved_home_page not in pages:
+            saved_home_page = "My Classes"
+
+        with st.sidebar.expander("Customize tabs", expanded=False):
+            selected_favorites = st.multiselect(
+                "Tabs to show first", pages, default=saved_favorites,
+                key=f"nav_favorites_{st.session_state.user_id}"
+            )
+            selected_home_page = st.selectbox(
+                "Open this tab by default", pages,
+                index=pages.index(saved_home_page),
+                key=f"nav_home_{st.session_state.user_id}"
+            )
+            if st.button("Save my tabs", key=f"save_nav_prefs_{st.session_state.user_id}",
+                         use_container_width=True, disabled=not nav_preferences_ready):
+                favorites_to_save = selected_favorites or [selected_home_page]
+                supabase.table("user_navigation_preferences").upsert({
+                    "user_id": str(st.session_state.user_id),
+                    "favorite_pages": favorites_to_save,
+                    "home_page": selected_home_page,
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                }, on_conflict="user_id").execute()
+                st.session_state.user_page = selected_home_page
+                st.query_params["lms_page"] = selected_home_page
+                st.rerun()
+
+        visible_pages = selected_favorites if "selected_favorites" in locals() else saved_favorites
+        for pg in visible_pages:
+            label = f"Group Chat ({get_unread_count(st.session_state.user_id)})" if pg == "Group Chat" and get_unread_count(st.session_state.user_id) > 0 else pg
             if st.sidebar.button(label, use_container_width=True,
                     type="primary" if st.session_state.user_page == pg else "secondary",
                     key=f"nav_{pg}"):
                 st.session_state.user_page = pg
                 st.query_params["lms_page"] = pg
                 st.rerun()
+
+        remaining_pages = [page for page in pages if page not in visible_pages]
+        with st.sidebar.expander("More tabs", expanded=False):
+            for pg in remaining_pages:
+                label = f"Group Chat ({get_unread_count(st.session_state.user_id)})" if pg == "Group Chat" and get_unread_count(st.session_state.user_id) > 0 else pg
+                if st.button(label, use_container_width=True,
+                        type="primary" if st.session_state.user_page == pg else "secondary",
+                        key=f"nav_more_{pg}"):
+                    st.session_state.user_page = pg
+                    st.query_params["lms_page"] = pg
+                    st.rerun()
         user_page = st.session_state.user_page
         # Mark today's attendance on every login
         mark_today_attendance(st.session_state.user_id)
