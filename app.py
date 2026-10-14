@@ -8444,6 +8444,70 @@ create table if not exists public.leetcode_pdf_completions (
 """
 
 
+def get_top150_list_numbers_for_legacy(legacy_question_no):
+    legacy_question = next(
+        (item for item in LEETCODE_QUESTION_BANK if int(item[0]) == int(legacy_question_no)),
+        None,
+    )
+    if not legacy_question:
+        return set()
+
+    _, title, _, problem_url = legacy_question
+    problem_slug = str(problem_url or "").rstrip("/").split("/")[-1]
+    if not problem_slug:
+        problem_slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")
+    return {
+        int(question["list_no"])
+        for question in TOP_150_DSA_QUESTIONS
+        if re.sub(r"[^a-z0-9]+", "-", question["title"].lower()).strip("-") == problem_slug
+    }
+
+
+def sync_pdf_completion_for_legacy(user_id, legacy_question_no, is_complete):
+    try:
+        for list_no in get_top150_list_numbers_for_legacy(legacy_question_no):
+            query = supabase.table("leetcode_pdf_completions").delete().eq(
+                "user_id", str(user_id)
+            ).eq("list_type", "top150").eq("list_no", list_no)
+            if is_complete:
+                supabase.table("leetcode_pdf_completions").upsert(
+                    {"user_id": str(user_id), "list_type": "top150", "list_no": list_no},
+                    on_conflict="user_id,list_type,list_no",
+                ).execute()
+            else:
+                query.execute()
+    except Exception:
+        # The original LeetCode checklist still works if the PDF completion table is not set up yet.
+        pass
+
+
+def sync_legacy_completion_for_top150(user_id, list_no, is_complete):
+    try:
+        for legacy_no, title, difficulty, problem_url in LEETCODE_QUESTION_BANK:
+            if int(list_no) not in get_top150_list_numbers_for_legacy(legacy_no):
+                continue
+            supabase.table("leetcode_questions").upsert({
+                "question_no": int(legacy_no),
+                "title": title,
+                "difficulty": difficulty,
+                "topic": LEETCODE_TOPICS[int(legacy_no)],
+                "leetcode_url": problem_url,
+                "display_order": int(legacy_no),
+            }, on_conflict="question_no").execute()
+            if is_complete:
+                supabase.table("leetcode_completions").upsert(
+                    {"user_id": str(user_id), "question_no": int(legacy_no)},
+                    on_conflict="user_id,question_no",
+                ).execute()
+            else:
+                supabase.table("leetcode_completions").delete().eq(
+                    "user_id", str(user_id)
+                ).eq("question_no", int(legacy_no)).execute()
+    except Exception:
+        # PDF-list progress remains available if the original checklist tables are not set up.
+        pass
+
+
 def show_pdf_leetcode_question_list(page_title, questions, list_type, key_prefix, user_id):
     st.title(page_title)
     st.caption(f"{len(questions)} questions from the attached PDF. Mark each one complete to save your progress.")
@@ -8452,6 +8516,15 @@ def show_pdf_leetcode_question_list(page_title, questions, list_type, key_prefix
             "user_id", str(user_id)
         ).eq("list_type", list_type).execute().data or []
         completed = {int(row["list_no"]) for row in completion_rows}
+        if list_type == "top150":
+            try:
+                legacy_rows = supabase.table("leetcode_completions").select("question_no").eq(
+                    "user_id", str(user_id)
+                ).execute().data or []
+                for row in legacy_rows:
+                    completed.update(get_top150_list_numbers_for_legacy(int(row["question_no"])))
+            except Exception:
+                pass
         db_ready = True
     except Exception as exc:
         completed = set()
@@ -8487,6 +8560,8 @@ def show_pdf_leetcode_question_list(page_title, questions, list_type, key_prefix
                         {"user_id": str(user_id), "list_type": list_type, "list_no": list_no},
                         on_conflict="user_id,list_type,list_no",
                     ).execute()
+                if list_type == "top150":
+                    sync_legacy_completion_for_top150(user_id, list_no, not done)
                 st.rerun()
 
 
@@ -8535,6 +8610,7 @@ def show_leetcode_db_tab(user_id):
                     supabase.table("leetcode_completions").upsert(
                         {"user_id": str(user_id), "question_no": number}, on_conflict="user_id,question_no"
                     ).execute()
+                sync_pdf_completion_for_legacy(user_id, number, not done)
                 st.rerun()
 
 
