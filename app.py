@@ -8065,6 +8065,42 @@ def show_infosys_tab(user_id):
                     signed_url = supabase.storage.from_(INFOSYS_IMAGE_BUCKET).create_signed_url(image["object_path"], 3600).get("signedURL")
                     if signed_url:
                         st.image(signed_url, caption=image.get("file_name", "Question image"), use_container_width=True)
+                        if image.get("user_id") is not None:
+                            rotate_left, rotate_right = st.columns(2)
+                            rotate_key = hashlib.sha1(image["object_path"].encode("utf-8")).hexdigest()[:12]
+                            rotate_degrees = None
+                            if rotate_left.button("↶ Rotate left 90°", key=f"infosys_rotate_left_{qid}_{rotate_key}"):
+                                rotate_degrees = 90
+                            if rotate_right.button("↷ Rotate right 90°", key=f"infosys_rotate_right_{qid}_{rotate_key}"):
+                                rotate_degrees = -90
+                            if rotate_degrees is not None:
+                                try:
+                                    from PIL import Image, ImageOps, ImageSequence
+                                    original_bytes = supabase.storage.from_(INFOSYS_IMAGE_BUCKET).download(image["object_path"])
+                                    with Image.open(io.BytesIO(original_bytes)) as original_image:
+                                        image_format = original_image.format or "PNG"
+                                        frames = [ImageOps.exif_transpose(frame.copy()).rotate(rotate_degrees, expand=True)
+                                                  for frame in ImageSequence.Iterator(original_image)]
+                                        output = io.BytesIO()
+                                        save_options = {}
+                                        if len(frames) > 1:
+                                            save_options.update(save_all=True, append_images=frames[1:],
+                                                duration=original_image.info.get("duration", 100),
+                                                loop=original_image.info.get("loop", 0))
+                                        if image_format.upper() in {"JPEG", "JPG"}:
+                                            frames = [frame.convert("RGB") for frame in frames]
+                                            image_format = "JPEG"
+                                        frames[0].save(output, format=image_format, **save_options)
+                                    content_type = {"JPEG": "image/jpeg", "PNG": "image/png", "WEBP": "image/webp", "GIF": "image/gif"}.get(image_format.upper(), "application/octet-stream")
+                                    supabase.storage.from_(INFOSYS_IMAGE_BUCKET).upload(image["object_path"], output.getvalue(),
+                                        {"content-type": content_type, "upsert": "true"})
+                                    st.success("Image rotated and saved.")
+                                    st.session_state.user_page = "Infosys"
+                                    st.query_params["lms_page"] = "Infosys"
+                                    st.query_params["infosys_question"] = qid
+                                    st.rerun()
+                                except Exception as rotate_exc:
+                                    st.error(f"Could not rotate image: {rotate_exc}")
                 except Exception as exc:
                     st.caption(f"Could not load {image.get('file_name', 'image')}: {exc}")
             with st.form(f"infosys_question_form_{user_id}_{qid}"):
